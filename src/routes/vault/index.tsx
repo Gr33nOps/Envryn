@@ -25,7 +25,7 @@ const filters = [
 ];
 
 function AllSecrets() {
-  const { openAdd, openSearch } = useVaultUI();
+  const { openAdd } = useVaultUI();
   const [filter, setFilter] = React.useState("all");
   const [q, setQ] = React.useState("");
 
@@ -53,7 +53,6 @@ function AllSecrets() {
         <SearchField
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onFocus={openSearch}
           placeholder="Search secrets..."
           shortcut="Ctrl K"
           className="max-w-[320px]"
