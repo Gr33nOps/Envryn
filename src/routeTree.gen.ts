@@ -12,6 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as VaultRouteRouteImport } from './routes/vault/route'
 import { Route as VaultIndexRouteImport } from './routes/vault/index'
+import { Route as VaultBackupRouteImport } from './routes/vault/backup'
+import { Route as VaultDevicesRouteImport } from './routes/vault/devices'
+import { Route as VaultSettingsRouteImport } from './routes/vault/settings'
+import { Route as VaultSyncRouteImport } from './routes/vault/sync'
 import { Route as VaultCategoryCategoryIdRouteImport } from './routes/vault/category/$categoryId'
 import { Route as VaultProjectsIndexRouteImport } from './routes/vault/projects/index'
 import { Route as VaultProjectsProjectIdRouteImport } from './routes/vault/projects/$projectId'
@@ -29,6 +33,26 @@ const VaultRouteRoute = VaultRouteRouteImport.update({
 const VaultIndexRoute = VaultIndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultBackupRoute = VaultBackupRouteImport.update({
+  id: '/backup',
+  path: '/backup',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultDevicesRoute = VaultDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultSettingsRoute = VaultSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => VaultRouteRoute,
+} as any)
+const VaultSyncRoute = VaultSyncRouteImport.update({
+  id: '/sync',
+  path: '/sync',
   getParentRoute: () => VaultRouteRoute,
 } as any)
 const VaultCategoryCategoryIdRoute = VaultCategoryCategoryIdRouteImport.update({
@@ -50,6 +74,10 @@ const VaultProjectsProjectIdRoute = VaultProjectsProjectIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/vault': typeof VaultRouteRouteWithChildren
+  '/vault/backup': typeof VaultBackupRoute
+  '/vault/devices': typeof VaultDevicesRoute
+  '/vault/settings': typeof VaultSettingsRoute
+  '/vault/sync': typeof VaultSyncRoute
   '/vault/': typeof VaultIndexRoute
   '/vault/category/$categoryId': typeof VaultCategoryCategoryIdRoute
   '/vault/projects/$projectId': typeof VaultProjectsProjectIdRoute
@@ -57,6 +85,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/vault/backup': typeof VaultBackupRoute
+  '/vault/devices': typeof VaultDevicesRoute
+  '/vault/settings': typeof VaultSettingsRoute
+  '/vault/sync': typeof VaultSyncRoute
   '/vault': typeof VaultIndexRoute
   '/vault/category/$categoryId': typeof VaultCategoryCategoryIdRoute
   '/vault/projects/$projectId': typeof VaultProjectsProjectIdRoute
@@ -66,6 +98,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/vault': typeof VaultRouteRouteWithChildren
+  '/vault/backup': typeof VaultBackupRoute
+  '/vault/devices': typeof VaultDevicesRoute
+  '/vault/settings': typeof VaultSettingsRoute
+  '/vault/sync': typeof VaultSyncRoute
   '/vault/': typeof VaultIndexRoute
   '/vault/category/$categoryId': typeof VaultCategoryCategoryIdRoute
   '/vault/projects/$projectId': typeof VaultProjectsProjectIdRoute
@@ -76,6 +112,10 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/vault'
+    | '/vault/backup'
+    | '/vault/devices'
+    | '/vault/settings'
+    | '/vault/sync'
     | '/vault/'
     | '/vault/category/$categoryId'
     | '/vault/projects/$projectId'
@@ -83,6 +123,10 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/vault/backup'
+    | '/vault/devices'
+    | '/vault/settings'
+    | '/vault/sync'
     | '/vault'
     | '/vault/category/$categoryId'
     | '/vault/projects/$projectId'
@@ -91,6 +135,10 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/vault'
+    | '/vault/backup'
+    | '/vault/devices'
+    | '/vault/settings'
+    | '/vault/sync'
     | '/vault/'
     | '/vault/category/$categoryId'
     | '/vault/projects/$projectId'
@@ -125,6 +173,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultIndexRouteImport
       parentRoute: typeof VaultRouteRoute
     }
+    '/vault/backup': {
+      id: '/vault/backup'
+      path: '/backup'
+      fullPath: '/vault/backup'
+      preLoaderRoute: typeof VaultBackupRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/devices': {
+      id: '/vault/devices'
+      path: '/devices'
+      fullPath: '/vault/devices'
+      preLoaderRoute: typeof VaultDevicesRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/settings': {
+      id: '/vault/settings'
+      path: '/settings'
+      fullPath: '/vault/settings'
+      preLoaderRoute: typeof VaultSettingsRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
+    '/vault/sync': {
+      id: '/vault/sync'
+      path: '/sync'
+      fullPath: '/vault/sync'
+      preLoaderRoute: typeof VaultSyncRouteImport
+      parentRoute: typeof VaultRouteRoute
+    }
     '/vault/category/$categoryId': {
       id: '/vault/category/$categoryId'
       path: '/category/$categoryId'
@@ -150,6 +226,10 @@ declare module '@tanstack/react-router' {
 }
 
 interface VaultRouteRouteChildren {
+  VaultBackupRoute: typeof VaultBackupRoute
+  VaultDevicesRoute: typeof VaultDevicesRoute
+  VaultSettingsRoute: typeof VaultSettingsRoute
+  VaultSyncRoute: typeof VaultSyncRoute
   VaultIndexRoute: typeof VaultIndexRoute
   VaultCategoryCategoryIdRoute: typeof VaultCategoryCategoryIdRoute
   VaultProjectsProjectIdRoute: typeof VaultProjectsProjectIdRoute
@@ -157,6 +237,10 @@ interface VaultRouteRouteChildren {
 }
 
 const VaultRouteRouteChildren: VaultRouteRouteChildren = {
+  VaultBackupRoute: VaultBackupRoute,
+  VaultDevicesRoute: VaultDevicesRoute,
+  VaultSettingsRoute: VaultSettingsRoute,
+  VaultSyncRoute: VaultSyncRoute,
   VaultIndexRoute: VaultIndexRoute,
   VaultCategoryCategoryIdRoute: VaultCategoryCategoryIdRoute,
   VaultProjectsProjectIdRoute: VaultProjectsProjectIdRoute,
