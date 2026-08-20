@@ -8,6 +8,7 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -77,19 +78,31 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "Envryn — Local-first developer secrets vault" },
+      {
+        name: "description",
+        content:
+          "Envryn is a local-first Windows vault for API keys, tokens, database credentials, SSH keys and developer secrets.",
+      },
+      { property: "og:title", content: "Envryn" },
+      {
+        property: "og:description",
+        content: "Local-first developer secrets vault for Windows.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      {
+        rel: "preconnect",
+        href: "https://fonts.gstatic.com",
+        crossOrigin: "anonymous",
+      },
       {
         rel: "stylesheet",
-        href: appCss,
+        href: "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap",
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],
@@ -121,6 +134,19 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <Toaster
+        position="bottom-right"
+        duration={2600}
+        toastOptions={{
+          unstyled: true,
+          classNames: {
+            toast:
+              "flex w-[260px] flex-col gap-0.5 rounded-md border border-border bg-surface-2 px-3 py-2 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.6)]",
+            title: "text-[12.5px] font-medium text-foreground",
+            description: "text-[11.5px] text-muted-foreground",
+          },
+        }}
+      />
     </QueryClientProvider>
   );
 }
