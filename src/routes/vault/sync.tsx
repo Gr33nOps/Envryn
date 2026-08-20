@@ -11,7 +11,7 @@ import {
 } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/sync")({
-  component: Sync;
+  component: Sync,
 });
 
 type State = "idle" | "syncing" | "done" | "offline" | "failed";
