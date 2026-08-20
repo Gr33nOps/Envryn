@@ -11,8 +11,8 @@ export function SecretFormModal({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  secret?: Secret | null;
-  preset?: Partial<Secret>;
+  secret?: Secret | null | undefined;
+  preset?: Partial<Secret> | undefined;
 }) {
   const editing = Boolean(secret);
   const [type, setType] = React.useState<string>("API Key");

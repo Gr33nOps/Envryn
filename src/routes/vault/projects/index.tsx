@@ -26,6 +26,7 @@ function Projects() {
             <Link
               to="/vault/projects/$projectId"
               params={{ projectId: p.id }}
+              search={{ env: undefined }}
               className="group flex h-[34px] items-center justify-between gap-3 border-b border-border px-3 transition-colors hover:bg-surface-2/60"
             >
               <span className="text-[12.5px] font-medium">{p.name}</span>
