@@ -10,17 +10,12 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as MRouteRouteImport } from './routes/m/route'
 import { Route as VaultRouteRouteImport } from './routes/vault/route'
-import { Route as MIndexRouteImport } from './routes/m/index'
-import { Route as MVaultRouteImport } from './routes/m/vault'
 import { Route as VaultIndexRouteImport } from './routes/vault/index'
 import { Route as VaultBackupRouteImport } from './routes/vault/backup'
 import { Route as VaultDevicesRouteImport } from './routes/vault/devices'
 import { Route as VaultSettingsRouteImport } from './routes/vault/settings'
 import { Route as VaultSyncRouteImport } from './routes/vault/sync'
-import { Route as MProjectsIndexRouteImport } from './routes/m/projects/index'
-import { Route as MProjectsProjectIdRouteImport } from './routes/m/projects/$projectId'
 import { Route as VaultCategoryCategoryIdRouteImport } from './routes/vault/category/$categoryId'
 import { Route as VaultProjectsIndexRouteImport } from './routes/vault/projects/index'
 import { Route as VaultProjectsProjectIdRouteImport } from './routes/vault/projects/$projectId'
@@ -30,25 +25,10 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MRouteRoute = MRouteRouteImport.update({
-  id: '/m',
-  path: '/m',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const VaultRouteRoute = VaultRouteRouteImport.update({
   id: '/vault',
   path: '/vault',
   getParentRoute: () => rootRouteImport,
-} as any)
-const MIndexRoute = MIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => MRouteRoute,
-} as any)
-const MVaultRoute = MVaultRouteImport.update({
-  id: '/vault',
-  path: '/vault',
-  getParentRoute: () => MRouteRoute,
 } as any)
 const VaultIndexRoute = VaultIndexRouteImport.update({
   id: '/',
@@ -75,16 +55,6 @@ const VaultSyncRoute = VaultSyncRouteImport.update({
   path: '/sync',
   getParentRoute: () => VaultRouteRoute,
 } as any)
-const MProjectsIndexRoute = MProjectsIndexRouteImport.update({
-  id: '/projects/',
-  path: '/projects/',
-  getParentRoute: () => MRouteRoute,
-} as any)
-const MProjectsProjectIdRoute = MProjectsProjectIdRouteImport.update({
-  id: '/projects/$projectId',
-  path: '/projects/$projectId',
-  getParentRoute: () => MRouteRoute,
-} as any)
 const VaultCategoryCategoryIdRoute = VaultCategoryCategoryIdRouteImport.update({
   id: '/category/$categoryId',
   path: '/category/$categoryId',
@@ -103,109 +73,80 @@ const VaultProjectsProjectIdRoute = VaultProjectsProjectIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/m': typeof MRouteRouteWithChildren
   '/vault': typeof VaultRouteRouteWithChildren
-  '/m/vault': typeof MVaultRoute
   '/vault/backup': typeof VaultBackupRoute
   '/vault/devices': typeof VaultDevicesRoute
   '/vault/settings': typeof VaultSettingsRoute
   '/vault/sync': typeof VaultSyncRoute
-  '/m/': typeof MIndexRoute
   '/vault/': typeof VaultIndexRoute
-  '/m/projects/$projectId': typeof MProjectsProjectIdRoute
   '/vault/category/$categoryId': typeof VaultCategoryCategoryIdRoute
   '/vault/projects/$projectId': typeof VaultProjectsProjectIdRoute
-  '/m/projects/': typeof MProjectsIndexRoute
   '/vault/projects/': typeof VaultProjectsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/m/vault': typeof MVaultRoute
   '/vault/backup': typeof VaultBackupRoute
   '/vault/devices': typeof VaultDevicesRoute
   '/vault/settings': typeof VaultSettingsRoute
   '/vault/sync': typeof VaultSyncRoute
-  '/m': typeof MIndexRoute
   '/vault': typeof VaultIndexRoute
-  '/m/projects/$projectId': typeof MProjectsProjectIdRoute
   '/vault/category/$categoryId': typeof VaultCategoryCategoryIdRoute
   '/vault/projects/$projectId': typeof VaultProjectsProjectIdRoute
-  '/m/projects': typeof MProjectsIndexRoute
   '/vault/projects': typeof VaultProjectsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/m': typeof MRouteRouteWithChildren
   '/vault': typeof VaultRouteRouteWithChildren
-  '/m/vault': typeof MVaultRoute
   '/vault/backup': typeof VaultBackupRoute
   '/vault/devices': typeof VaultDevicesRoute
   '/vault/settings': typeof VaultSettingsRoute
   '/vault/sync': typeof VaultSyncRoute
-  '/m/': typeof MIndexRoute
   '/vault/': typeof VaultIndexRoute
-  '/m/projects/$projectId': typeof MProjectsProjectIdRoute
   '/vault/category/$categoryId': typeof VaultCategoryCategoryIdRoute
   '/vault/projects/$projectId': typeof VaultProjectsProjectIdRoute
-  '/m/projects/': typeof MProjectsIndexRoute
   '/vault/projects/': typeof VaultProjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/m'
     | '/vault'
-    | '/m/vault'
     | '/vault/backup'
     | '/vault/devices'
     | '/vault/settings'
     | '/vault/sync'
-    | '/m/'
     | '/vault/'
-    | '/m/projects/$projectId'
     | '/vault/category/$categoryId'
     | '/vault/projects/$projectId'
-    | '/m/projects/'
     | '/vault/projects/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/m/vault'
     | '/vault/backup'
     | '/vault/devices'
     | '/vault/settings'
     | '/vault/sync'
-    | '/m'
     | '/vault'
-    | '/m/projects/$projectId'
     | '/vault/category/$categoryId'
     | '/vault/projects/$projectId'
-    | '/m/projects'
     | '/vault/projects'
   id:
     | '__root__'
     | '/'
-    | '/m'
     | '/vault'
-    | '/m/vault'
     | '/vault/backup'
     | '/vault/devices'
     | '/vault/settings'
     | '/vault/sync'
-    | '/m/'
     | '/vault/'
-    | '/m/projects/$projectId'
     | '/vault/category/$categoryId'
     | '/vault/projects/$projectId'
-    | '/m/projects/'
     | '/vault/projects/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  MRouteRoute: typeof MRouteRouteWithChildren
   VaultRouteRoute: typeof VaultRouteRouteWithChildren
 }
 
@@ -218,33 +159,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/m': {
-      id: '/m'
-      path: '/m'
-      fullPath: '/m'
-      preLoaderRoute: typeof MRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/vault': {
       id: '/vault'
       path: '/vault'
       fullPath: '/vault'
       preLoaderRoute: typeof VaultRouteRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/m/': {
-      id: '/m/'
-      path: '/'
-      fullPath: '/m/'
-      preLoaderRoute: typeof MIndexRouteImport
-      parentRoute: typeof MRouteRoute
-    }
-    '/m/vault': {
-      id: '/m/vault'
-      path: '/vault'
-      fullPath: '/m/vault'
-      preLoaderRoute: typeof MVaultRouteImport
-      parentRoute: typeof MRouteRoute
     }
     '/vault/': {
       id: '/vault/'
@@ -281,20 +201,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultSyncRouteImport
       parentRoute: typeof VaultRouteRoute
     }
-    '/m/projects/': {
-      id: '/m/projects/'
-      path: '/projects'
-      fullPath: '/m/projects/'
-      preLoaderRoute: typeof MProjectsIndexRouteImport
-      parentRoute: typeof MRouteRoute
-    }
-    '/m/projects/$projectId': {
-      id: '/m/projects/$projectId'
-      path: '/projects/$projectId'
-      fullPath: '/m/projects/$projectId'
-      preLoaderRoute: typeof MProjectsProjectIdRouteImport
-      parentRoute: typeof MRouteRoute
-    }
     '/vault/category/$categoryId': {
       id: '/vault/category/$categoryId'
       path: '/category/$categoryId'
@@ -318,23 +224,6 @@ declare module '@tanstack/react-router' {
     }
   }
 }
-
-interface MRouteRouteChildren {
-  MVaultRoute: typeof MVaultRoute
-  MIndexRoute: typeof MIndexRoute
-  MProjectsProjectIdRoute: typeof MProjectsProjectIdRoute
-  MProjectsIndexRoute: typeof MProjectsIndexRoute
-}
-
-const MRouteRouteChildren: MRouteRouteChildren = {
-  MVaultRoute: MVaultRoute,
-  MIndexRoute: MIndexRoute,
-  MProjectsProjectIdRoute: MProjectsProjectIdRoute,
-  MProjectsIndexRoute: MProjectsIndexRoute,
-}
-
-const MRouteRouteWithChildren =
-  MRouteRoute._addFileChildren(MRouteRouteChildren)
 
 interface VaultRouteRouteChildren {
   VaultBackupRoute: typeof VaultBackupRoute
@@ -364,7 +253,6 @@ const VaultRouteRouteWithChildren = VaultRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  MRouteRoute: MRouteRouteWithChildren,
   VaultRouteRoute: VaultRouteRouteWithChildren,
 }
 export const routeTree = rootRouteImport
