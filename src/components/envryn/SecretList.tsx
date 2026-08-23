@@ -30,9 +30,9 @@ export function SecretList({
   const gridCols = `minmax(0,1.6fr) ${columns.map(() => "minmax(0,1fr)").join(" ")} 92px`;
 
   return (
-    <div className="rounded-md border border-border bg-surface">
+    <div className="overflow-hidden rounded-lg border border-border bg-surface/60">
       <div
-        className="grid items-center gap-3 border-b border-border px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground"
+        className="grid items-center gap-3 border-b border-border bg-background/60 px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground"
         style={{ gridTemplateColumns: gridCols }}
       >
         <div>Name</div>
@@ -55,15 +55,18 @@ export function SecretList({
                 onClick={() => select(active ? null : s)}
                 onKeyDown={(e) => e.key === "Enter" && select(s)}
                 className={cn(
-                  "group relative grid cursor-default items-center gap-3 border-b border-border/60 px-3 text-[12.5px] transition-colors last:border-0",
+                  "group relative grid cursor-default items-center gap-3 border-b border-border/50 px-3 text-[12.5px] transition-colors last:border-0",
                   "h-[34px]",
-                  active ? "bg-surface-2" : "hover:bg-surface-2/60",
+                  active
+                    ? "bg-primary-muted text-foreground"
+                    : "hover:bg-surface-2/50",
                 )}
                 style={{ gridTemplateColumns: gridCols }}
               >
                 {active && (
                   <span className="absolute left-0 top-0 h-full w-[2px] bg-primary" />
                 )}
+
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span
                     className={cn(
