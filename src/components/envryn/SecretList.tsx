@@ -102,7 +102,7 @@ export function SecretList({
                             s.environment === "Production"
                               ? "bg-warning"
                               : s.environment === "Staging"
-                                ? "bg-primary"
+                                ? "bg-info"
                                 : "bg-subtle-foreground",
                           )}
                         />
