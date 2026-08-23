@@ -42,42 +42,51 @@
   --color-destructive-muted: var(--destructive-muted);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-brand-border: var(--brand-border);
   --color-input: var(--input);
   --color-ring: var(--ring);
 }
 
 :root {
-  --radius: 6px;
+  --radius: 7px;
   --font-ui: "Geist", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-  --font-code: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
+  --font-code: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
 
-  --background: oklch(0.19 0.006 260);
-  --surface: oklch(0.225 0.006 260);
-  --surface-2: oklch(0.255 0.007 260);
-  --surface-3: oklch(0.295 0.008 260);
+  /* OLED foundation */
+  --background: oklch(0 0 0);
+  --surface: oklch(0.155 0.003 155);
+  --surface-2: oklch(0.195 0.004 155);
+  --surface-3: oklch(0.235 0.005 155);
 
-  --foreground: oklch(0.93 0.004 260);
-  --muted-foreground: oklch(0.68 0.008 260);
-  --subtle-foreground: oklch(0.55 0.008 260);
+  --foreground: oklch(0.968 0.003 155);
+  --muted-foreground: oklch(0.705 0.005 155);
+  --subtle-foreground: oklch(0.525 0.005 155);
 
-  --border: oklch(0.32 0.007 260);
-  --border-strong: oklch(0.4 0.008 260);
-  --input: oklch(0.29 0.007 260);
+  --border: oklch(0.255 0.005 155);
+  --border-strong: oklch(0.34 0.006 155);
+  --input: oklch(0.245 0.005 155);
 
-  --primary: oklch(0.63 0.15 249);
-  --primary-foreground: oklch(0.98 0.002 260);
-  --primary-muted: oklch(0.63 0.15 249 / 15%);
+  /* Brand green — sampled from the Envryn mark (#00B24C) */
+  --primary: oklch(0.652 0.176 149.5);
+  --primary-hover: oklch(0.705 0.176 149.5);
+  --primary-active: oklch(0.588 0.166 149.5);
+  --primary-foreground: oklch(0.06 0.01 155);
+  --primary-muted: oklch(0.652 0.176 149.5 / 12%);
+  --brand-border: oklch(0.652 0.176 149.5 / 26%);
 
-  --destructive: oklch(0.62 0.18 25);
+  --destructive: oklch(0.638 0.196 24);
   --destructive-foreground: oklch(0.98 0.002 260);
-  --destructive-muted: oklch(0.62 0.18 25 / 14%);
-  --success: oklch(0.72 0.14 155);
-  --warning: oklch(0.78 0.13 78);
+  --destructive-muted: oklch(0.638 0.196 24 / 14%);
+  --success: oklch(0.7 0.15 152);
+  --warning: oklch(0.79 0.135 78);
+  --info: oklch(0.68 0.11 240);
 
-  --ring: oklch(0.63 0.15 249);
+  --ring: oklch(0.652 0.176 149.5);
 }
+
 
 @layer base {
   * {

@@ -6,6 +6,7 @@ import { SecretPanel } from "@/components/envryn/SecretPanel";
 import { SecretFormModal } from "@/components/envryn/SecretForm";
 import { SearchPalette } from "@/components/envryn/SearchPalette";
 import { VaultUIContext } from "@/components/envryn/vault-context";
+import { LogoMark } from "@/components/envryn/Logo";
 import type { Secret } from "@/lib/envryn-data";
 
 export const Route = createFileRoute("/vault")({
@@ -79,14 +80,18 @@ function VaultLayout() {
   return (
     <VaultUIContext.Provider value={ctx}>
       <div className="flex h-screen flex-col overflow-hidden bg-background">
-        <div className="flex h-7 shrink-0 items-center justify-between border-b border-border bg-surface px-3 text-[11.5px] text-subtle-foreground">
-          <span>Envryn</span>
+        <div className="flex h-7 shrink-0 items-center justify-between border-b border-border bg-background px-3 text-[11.5px] text-subtle-foreground">
+          <span className="flex items-center gap-1.5">
+            <LogoMark size={12} />
+            Envryn
+          </span>
           <div className="flex items-center gap-3 text-[11px]">
             <span>—</span>
             <span>▢</span>
             <span>✕</span>
           </div>
         </div>
+
 
         <div className="flex min-h-0 flex-1">
           <Sidebar

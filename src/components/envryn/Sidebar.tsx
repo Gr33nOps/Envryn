@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Wordmark } from "./Logo";
 import { SectionLabel } from "./ui";
 
 interface Item {
@@ -60,9 +61,9 @@ export function Sidebar({ onLock }: { onLock: () => void }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
 
   return (
-    <aside className="flex w-[224px] shrink-0 flex-col border-r border-border bg-surface lg:w-[232px]">
-      <div className="flex h-9 items-center gap-2 px-3.5">
-        <span className="text-[13px] font-semibold tracking-[-0.01em]">Envryn</span>
+    <aside className="flex w-[224px] shrink-0 flex-col border-r border-border bg-background lg:w-[236px]">
+      <div className="flex h-11 items-center px-3.5">
+        <Wordmark size={17} subtitle="local vault" />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-2">
@@ -81,19 +82,19 @@ export function Sidebar({ onLock }: { onLock: () => void }) {
                     <Link
                       to={item.to}
                       className={cn(
-                        "group relative flex h-[26px] items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors",
+                        "group relative flex h-[28px] items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors",
                         active
-                          ? "bg-surface-2 font-medium text-foreground"
-                          : "text-muted-foreground hover:bg-surface-2/60 hover:text-foreground",
+                          ? "bg-surface font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-surface/70 hover:text-foreground",
                       )}
                     >
                       {active && (
-                        <span className="absolute left-0 top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-full bg-primary" />
+                        <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-primary" />
                       )}
                       <item.icon
                         className={cn(
                           "size-3.5",
-                          active ? "text-primary" : "text-subtle-foreground",
+                          active ? "text-foreground" : "text-subtle-foreground",
                         )}
                       />
                       <span className="truncate">{item.label}</span>
@@ -105,6 +106,7 @@ export function Sidebar({ onLock }: { onLock: () => void }) {
           </div>
         ))}
       </nav>
+
 
       <div className="border-t border-border px-3 py-2.5">
         <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">

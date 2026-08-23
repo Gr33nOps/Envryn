@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Input } from "@/components/envryn/ui";
+import { LogoMark } from "@/components/envryn/Logo";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -38,17 +39,25 @@ function Unlock() {
   }
 
   return (
-    <main className="flex h-screen items-center justify-center bg-background">
-      <form onSubmit={submit} className="w-[248px] text-center">
-        <h1 className="text-[15px] font-semibold tracking-[-0.01em]">Envryn</h1>
-        <p className="mt-1 text-[12.5px] text-muted-foreground">Vault is locked</p>
+    <main className="relative flex h-screen items-center justify-center bg-background">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[var(--brand-border)] to-transparent" />
+      <form onSubmit={submit} className="w-[268px]">
+        <div className="flex flex-col items-center">
+          <LogoMark size={34} />
+          <h1 className="mt-3 text-[14px] font-semibold tracking-[-0.015em]">
+            Envryn
+          </h1>
+          <p className="mt-1 font-mono text-[11px] tracking-tight text-subtle-foreground">
+            vault locked · local-only
+          </p>
+        </div>
 
-        <div className="mt-6 space-y-2 text-left">
+        <div className="mt-7 space-y-2">
           <Input
             autoFocus
             type="password"
             placeholder="Master password"
-            className="h-8 text-center"
+            className="h-8"
             invalid={error}
             value={value}
             onChange={(e) => {
@@ -57,22 +66,24 @@ function Unlock() {
             }}
           />
           {error && (
-            <p className="text-center text-[11.5px] text-destructive">
+            <p className="text-[11.5px] text-destructive">
               Incorrect password. Try again.
             </p>
           )}
           <Button type="submit" variant="primary" size="block" loading={loading}>
             Unlock Vault
           </Button>
-          <Button type="button" variant="ghost" size="block">
+          <Button type="button" variant="secondary" size="block">
             Use Windows Hello
           </Button>
         </div>
 
-        <p className="mt-6 text-[11px] text-subtle-foreground">
-          Your vault stays encrypted until you unlock it.
-        </p>
+        <div className="mt-7 flex items-center justify-between border-t border-border pt-2.5 text-[11px] text-subtle-foreground">
+          <span>Encrypted at rest</span>
+          <span className="font-mono tracking-tight">AES-256-GCM</span>
+        </div>
       </form>
     </main>
+
   );
 }
