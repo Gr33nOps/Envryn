@@ -19,6 +19,7 @@
   --font-mono: var(--font-code);
 
   --color-background: var(--background);
+  --color-sidebar: var(--sidebar);
   --color-foreground: var(--foreground);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -55,19 +56,20 @@
   --font-ui: "Geist", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   --font-code: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
 
-  /* OLED foundation */
-  --background: oklch(0 0 0);
-  --surface: oklch(0.155 0.003 155);
-  --surface-2: oklch(0.195 0.004 155);
-  --surface-3: oklch(0.235 0.005 155);
+  /* Near-black foundation with a real depth scale */
+  --background: #090b0a;
+  --sidebar: #0c0f0d;
+  --surface: #101411;
+  --surface-2: #151a17;
+  --surface-3: #1c221e;
 
-  --foreground: oklch(0.968 0.003 155);
-  --muted-foreground: oklch(0.705 0.005 155);
-  --subtle-foreground: oklch(0.525 0.005 155);
+  --foreground: #f2f6f3;
+  --muted-foreground: #a4afa7;
+  --subtle-foreground: #7f8b82;
 
-  --border: oklch(0.255 0.005 155);
-  --border-strong: oklch(0.34 0.006 155);
-  --input: oklch(0.245 0.005 155);
+  --border: #242a26;
+  --border-strong: #343c37;
+  --input: #2a312c;
 
   /* Brand green — sampled from the Envryn mark (#00B24C) */
   --primary: oklch(0.652 0.176 149.5);
