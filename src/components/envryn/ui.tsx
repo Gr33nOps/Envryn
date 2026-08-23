@@ -246,9 +246,9 @@ export function Tabs({
           key={i.value}
           onClick={() => onChange(i.value)}
           className={cn(
-            "-mb-px border-b-2 py-1.5 text-[12.5px] transition-colors",
+            "-mb-px border-b py-1.5 text-[12.5px] transition-colors",
             value === i.value
-              ? "border-primary font-semibold text-foreground"
+              ? "border-primary font-medium text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >

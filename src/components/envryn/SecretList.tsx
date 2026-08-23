@@ -11,21 +11,12 @@ export function copySecret() {
 
 type Column = "project" | "environment" | "type" | "updated";
 
-/** Environment chips stay neutral — an environment is not a warning state. */
-const envDot: Record<string, string> = {
-  Production: "bg-foreground/70",
-  Staging: "bg-muted-foreground/60",
-  Development: "bg-subtle-foreground/60",
-};
-
 export function SecretList({
   items,
   columns = ["project", "environment", "type"],
-  fill,
 }: {
   items: Secret[];
   columns?: Column[];
-  fill?: boolean;
 }) {
   const { selected, select } = useVaultUI();
 
@@ -36,17 +27,12 @@ export function SecretList({
     updated: "Updated",
   };
 
-  const gridCols = `minmax(0,1.8fr) ${columns.map(() => "minmax(0,1fr)").join(" ")} 96px`;
+  const gridCols = `minmax(0,1.6fr) ${columns.map(() => "minmax(0,1fr)").join(" ")} 92px`;
 
   return (
-    <div
-      className={cn(
-        "flex flex-col overflow-hidden rounded-lg border border-border bg-surface",
-        fill && "min-h-0 flex-1",
-      )}
-    >
+    <div className="overflow-hidden rounded-lg border border-border bg-surface/60">
       <div
-        className="grid shrink-0 items-center gap-3 border-b border-border bg-surface-2/60 px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground"
+        className="grid items-center gap-3 border-b border-border bg-background/60 px-3 py-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground"
         style={{ gridTemplateColumns: gridCols }}
       >
         <div>Name</div>
@@ -58,7 +44,7 @@ export function SecretList({
         <div />
       </div>
 
-      <ul className={cn(fill && "min-h-0 flex-1 overflow-y-auto")}>
+      <ul>
         {items.map((s) => {
           const active = selected?.id === s.id;
           return (
@@ -69,8 +55,11 @@ export function SecretList({
                 onClick={() => select(active ? null : s)}
                 onKeyDown={(e) => e.key === "Enter" && select(s)}
                 className={cn(
-                  "group relative grid h-[34px] cursor-default items-center gap-3 border-b border-border/45 px-3 text-[12.5px] transition-colors last:border-0",
-                  active ? "bg-surface-3" : "hover:bg-surface-2",
+                  "group relative grid cursor-default items-center gap-3 border-b border-border/50 px-3 text-[12.5px] transition-colors last:border-0",
+                  "h-[34px]",
+                  active
+                    ? "bg-primary-muted text-foreground"
+                    : "hover:bg-surface-2/50",
                 )}
                 style={{ gridTemplateColumns: gridCols }}
               >
@@ -81,10 +70,11 @@ export function SecretList({
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span
                     className={cn(
-                      "truncate font-mono text-[12px] tracking-tight",
-                      active
-                        ? "font-medium text-foreground"
-                        : "text-foreground",
+                      "truncate",
+                      s.type === "Environment" ||
+                        s.name === s.name.toUpperCase()
+                        ? "font-mono text-[12px]"
+                        : "",
                     )}
                   >
                     {s.name}
@@ -93,16 +83,15 @@ export function SecretList({
                     <AlertTriangle className="size-3 shrink-0 text-warning" />
                   )}
                 </div>
-
                 {columns.map((c) => (
                   <div
                     key={c}
                     className={cn(
-                      "truncate",
+                      "truncate text-muted-foreground",
                       c === "updated" && "text-right",
-                      c === "project" && "text-muted-foreground",
-                      c === "environment" && "text-muted-foreground",
-                      c === "type" && "text-[11.5px] text-subtle-foreground",
+                      c === "environment" &&
+                        s.environment === "Production" &&
+                        "text-foreground",
                     )}
                   >
                     {c === "environment" && s.environment !== "—" ? (
@@ -110,7 +99,11 @@ export function SecretList({
                         <span
                           className={cn(
                             "size-1.5 rounded-full",
-                            envDot[s.environment] ?? "bg-subtle-foreground/60",
+                            s.environment === "Production"
+                              ? "bg-warning"
+                              : s.environment === "Staging"
+                                ? "bg-info"
+                                : "bg-subtle-foreground",
                           )}
                         />
                         {s.environment}
@@ -120,10 +113,9 @@ export function SecretList({
                     )}
                   </div>
                 ))}
-
                 <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                   <IconButton
-                    label="Copy value"
+                    label="Copy"
                     onClick={(e) => {
                       e.stopPropagation();
                       copySecret();

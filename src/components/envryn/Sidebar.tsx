@@ -48,44 +48,20 @@ const groups: { label: string; items: Item[] }[] = [
       { to: "/vault/sync", label: "Sync", icon: RefreshCw },
     ],
   },
+  {
+    label: "Other",
+    items: [
+      { to: "/vault/backup", label: "Backup", icon: Archive },
+      { to: "/vault/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
-
-const utility: Item[] = [
-  { to: "/vault/backup", label: "Backup", icon: Archive },
-  { to: "/vault/settings", label: "Settings", icon: Settings },
-];
-
-function NavLink({ item, path }: { item: Item; path: string }) {
-  const active = item.exact ? path === item.to : path.startsWith(item.to);
-  return (
-    <Link
-      to={item.to}
-      className={cn(
-        "group relative flex h-[29px] items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors",
-        active
-          ? "bg-surface-2 font-medium text-foreground"
-          : "text-muted-foreground hover:bg-surface hover:text-foreground",
-      )}
-    >
-      {active && (
-        <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-primary" />
-      )}
-      <item.icon
-        className={cn(
-          "size-3.5",
-          active ? "text-primary" : "text-subtle-foreground",
-        )}
-      />
-      <span className="truncate">{item.label}</span>
-    </Link>
-  );
-}
 
 export function Sidebar({ onLock }: { onLock: () => void }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
 
   return (
-    <aside className="flex w-[224px] shrink-0 flex-col border-r border-border bg-sidebar lg:w-[236px]">
+    <aside className="flex w-[224px] shrink-0 flex-col border-r border-border bg-background lg:w-[236px]">
       <div className="flex h-11 items-center px-3.5">
         <Wordmark size={17} subtitle="local vault" />
       </div>
@@ -97,37 +73,52 @@ export function Sidebar({ onLock }: { onLock: () => void }) {
               <SectionLabel>{g.label}</SectionLabel>
             </div>
             <ul className="space-y-px">
-              {g.items.map((item) => (
-                <li key={item.to}>
-                  <NavLink item={item} path={path} />
-                </li>
-              ))}
+              {g.items.map((item) => {
+                const active = item.exact
+                  ? path === item.to
+                  : path.startsWith(item.to);
+                return (
+                  <li key={item.to}>
+                    <Link
+                      to={item.to}
+                      className={cn(
+                        "group relative flex h-[28px] items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors",
+                        active
+                          ? "bg-surface font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-surface/70 hover:text-foreground",
+                      )}
+                    >
+                      {active && (
+                        <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-primary" />
+                      )}
+                      <item.icon
+                        className={cn(
+                          "size-3.5",
+                          active ? "text-foreground" : "text-subtle-foreground",
+                        )}
+                      />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}
       </nav>
 
-      <div className="px-2 pb-2">
-        <ul className="space-y-px">
-          {utility.map((item) => (
-            <li key={item.to}>
-              <NavLink item={item} path={path} />
-            </li>
-          ))}
-        </ul>
-      </div>
 
-      <div className="m-2 mt-0 rounded-lg border border-border bg-surface px-2.5 py-2">
-        <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-foreground">
-          <span className="size-1.5 rounded-full bg-success shadow-[0_0_0_3px_rgba(0,178,76,0.14)]" />
+      <div className="border-t border-border px-3 py-2.5">
+        <div className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          <span className="size-1.5 rounded-full bg-success" />
           Vault unlocked
         </div>
         <button
           onClick={onLock}
-          className="mt-1.5 flex h-6 w-full items-center gap-1.5 rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground"
+          className="mt-2 flex h-6 w-full items-center gap-1.5 rounded-md px-1.5 text-[12px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
         >
           <Lock className="size-3.5 text-subtle-foreground" />
-          Lock vault
+          Lock Vault
           <span className="kbd ml-auto">Ctrl L</span>
         </button>
       </div>
