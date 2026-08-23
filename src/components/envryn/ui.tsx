@@ -9,14 +9,14 @@ import { cn } from "@/lib/utils";
 /* ------------------------------------------------------------------ Button */
 
 const buttonVariants = cva(
-  "inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md border text-[12.5px] font-medium transition-colors duration-100 disabled:pointer-events-none disabled:opacity-45 active:translate-y-px [&_svg]:size-3.5 [&_svg]:shrink-0",
+  "inline-flex select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md border text-[12.5px] font-medium transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-40 active:translate-y-px [&_svg]:size-3.5 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         primary:
-          "border-transparent bg-primary text-primary-foreground hover:bg-primary/90",
+          "border-transparent bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] active:bg-[var(--primary-active)]",
         secondary:
-          "border-border bg-surface-2 text-foreground hover:bg-surface-3 hover:border-border-strong",
+          "border-border bg-surface text-foreground hover:bg-surface-2 hover:border-border-strong",
         ghost:
           "border-transparent bg-transparent text-muted-foreground hover:bg-surface-2 hover:text-foreground",
         danger:
@@ -33,6 +33,7 @@ const buttonVariants = cva(
     defaultVariants: { variant: "secondary", size: "md" },
   },
 );
+
 
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
