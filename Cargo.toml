@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = ["crates/envryn-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+
+[workspace.dependencies]
+# --- Cryptography -----------------------------------------------------------
+# One implementation per primitive. See docs/CRYPTOGRAPHY.md; adding another
+# requires amending docs/DEPENDENCY_POLICY.md.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+hmac = "0.12"
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+getrandom = "0.2"
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# --- Storage ----------------------------------------------------------------
+rusqlite = { version = "0.32", features = ["bundled", "uuid"] }
+uuid = { version = "1.11", features = ["v7", "serde"] }
+
+# --- Serialisation ----------------------------------------------------------
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# --- Errors / misc ----------------------------------------------------------
+thiserror = "2.0"
+time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+
+[profile.release]
+# A vault should not leak its own source structure in a shipped binary.
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+# Argon2id at production parameters is unusably slow in a debug build
+# (minutes, not milliseconds). Optimise dependencies even in dev so that
+# unlock timing during development resembles reality.
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 3
