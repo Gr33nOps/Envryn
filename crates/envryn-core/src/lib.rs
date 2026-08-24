@@ -20,5 +20,9 @@
 
 pub mod crypto;
 pub mod error;
+pub mod model;
+pub mod storage;
+pub mod vault;
 
 pub use error::{Error, Result};
+pub use vault::Vault;
