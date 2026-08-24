@@ -7,8 +7,10 @@ import { SecretPanel } from "@/components/envryn/SecretPanel";
 import { SecretFormModal } from "@/components/envryn/SecretForm";
 import { SearchPalette } from "@/components/envryn/SearchPalette";
 import { VaultUIContext } from "@/components/envryn/vault-context";
-import { secrets, type Secret } from "@/lib/envryn-data";
-import { copySecret } from "@/lib/vault-actions";
+import { type Secret } from "@/lib/envryn-data";
+import { useClearVaultCache, useRevealSecret, useSecretList } from "@/lib/use-vault";
+import { copyValue, forgetClipboardTimer } from "@/lib/vault-actions";
+import { vaultLock } from "@/lib/ipc";
 
 export const Route = createFileRoute("/vault")({
   component: VaultLayout,
@@ -34,16 +36,28 @@ function TopBar({ onSearch }: { onSearch: () => void }) {
 
 function VaultLayout() {
   const navigate = useNavigate();
+  const secrets = useSecretList();
   const [selected, setSelected] = React.useState<Secret | null>(null);
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<Secret | null>(null);
   const [preset, setPreset] = React.useState<Partial<Secret> | undefined>();
   const [searchOpen, setSearchOpen] = React.useState(false);
 
+  const clearVaultCache = useClearVaultCache();
+  const revealSecret = useRevealSecret();
+
   const lockVault = React.useCallback(() => {
-    toast("Vault locked", { description: "Your local workspace is ready to secure." });
+    // Order matters: the Rust core zeroizes its keys first, then we drop the
+    // cached records so nothing decrypted survives in the query cache, then we
+    // leave the screen. Navigating first would briefly render a vault view
+    // over data the core has already discarded.
+    void vaultLock();
+    clearVaultCache();
+    forgetClipboardTimer();
+    setSelected(null);
+    toast("Vault locked");
     navigate({ to: "/" });
-  }, [navigate]);
+  }, [clearVaultCache, navigate]);
 
   const ctx = React.useMemo(
     () => ({
@@ -76,7 +90,10 @@ function VaultLayout() {
         ctx.openAdd();
       } else if (event.ctrlKey && key === "c" && selected) {
         event.preventDefault();
-        void copySecret(selected);
+        void revealSecret
+          .mutateAsync(selected.id)
+          .then(copyValue)
+          .catch(() => toast("That secret could not be copied."));
       } else if (selected && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
         event.preventDefault();
         const index = secrets.findIndex((secret) => secret.id === selected.id);
@@ -94,7 +111,7 @@ function VaultLayout() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [ctx, lockVault, selected]);
+  }, [ctx, lockVault, revealSecret, secrets, selected]);
 
   return (
     <VaultUIContext.Provider value={ctx}>

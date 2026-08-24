@@ -1,34 +1,74 @@
 import * as React from "react";
-import { X, Copy, Eye, EyeOff, Pencil, ShieldCheck, AlertTriangle } from "lucide-react";
+import { X, Copy, Eye, EyeOff, Pencil, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import type { Secret } from "@/lib/envryn-data";
-import { Button, ConfirmDialog, DetailRow, Modal, IconButton } from "./ui";
-import { copySecret } from "@/lib/vault-actions";
+import { Button, ConfirmDialog, DetailRow, IconButton } from "./ui";
+import { copyValue } from "@/lib/vault-actions";
+import { IpcError } from "@/lib/ipc";
+import { useDeleteSecret, useRevealSecret } from "@/lib/use-vault";
 import { useVaultUI } from "./vault-context";
 
 const REVEAL_SECONDS = 20;
 
 export function SecretPanel({ secret }: { secret: Secret }) {
   const { select, openEdit } = useVaultUI();
-  const [revealed, setRevealed] = React.useState(false);
-  const [confirming, setConfirming] = React.useState(false);
+  const revealSecret = useRevealSecret();
+  const deleteSecret = useDeleteSecret();
+
+  /**
+   * The plaintext, held only while it is on screen.
+   *
+   * Fetched on demand rather than arriving with the list, because a list
+   * carries no secret material by design. Cleared whenever the panel hides the
+   * value, changes record, or unmounts.
+   */
+  const [value, setValue] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
   const [left, setLeft] = React.useState(REVEAL_SECONDS);
 
+  const revealed = value !== null;
+
+  const hide = React.useCallback(() => setValue(null), []);
+
   React.useEffect(() => {
-    setRevealed(false);
-    setConfirming(false);
+    setValue(null);
   }, [secret.id]);
+
+  // Drop the plaintext when the panel goes away.
+  React.useEffect(() => () => setValue(null), []);
 
   React.useEffect(() => {
     if (!revealed) return;
     setLeft(REVEAL_SECONDS);
-    const t = setInterval(
-      () => setLeft((n) => (n <= 1 ? (setRevealed(false), REVEAL_SECONDS) : n - 1)),
-      1000,
-    );
+    const t = setInterval(() => {
+      setLeft((n) => {
+        if (n <= 1) {
+          hide();
+          return REVEAL_SECONDS;
+        }
+        return n - 1;
+      });
+    }, 1000);
     return () => clearInterval(t);
-  }, [revealed]);
+  }, [hide, revealed]);
+
+  async function reveal() {
+    try {
+      setValue(await revealSecret.mutateAsync(secret.id));
+    } catch (err) {
+      toast(err instanceof IpcError ? err.message : "That secret could not be opened.");
+    }
+  }
+
+  async function copy() {
+    try {
+      // Fetch fresh rather than requiring a reveal first: copying without
+      // displaying is the more private path, so it should not be the harder one.
+      await copyValue(await revealSecret.mutateAsync(secret.id));
+    } catch (err) {
+      toast(err instanceof IpcError ? err.message : "That secret could not be copied.");
+    }
+  }
 
   return (
     <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-surface xl:w-[344px]">
@@ -72,20 +112,20 @@ export function SecretPanel({ secret }: { secret: Secret }) {
           ) : (
             <>
               <div className="mt-1 min-h-[30px] break-all rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-[12px] leading-relaxed">
-                {revealed ? secret.value : "••••••••••••••••••••••••••••"}
+                {value ?? "••••••••••••••••••••••••••••"}
               </div>
               <div className="mt-2 flex items-center gap-2">
-                <Button onClick={() => void copySecret(secret)}>
+                <Button onClick={() => void copy()}>
                   <Copy />
                   Copy
                 </Button>
                 {revealed ? (
-                  <Button onClick={() => setRevealed(false)}>
+                  <Button onClick={hide}>
                     <EyeOff />
                     Hide
                   </Button>
                 ) : (
-                  <Button onClick={() => setConfirming(true)}>
+                  <Button onClick={() => void reveal()}>
                     <Eye />
                     Reveal
                   </Button>
@@ -138,27 +178,11 @@ export function SecretPanel({ secret }: { secret: Secret }) {
         </Button>
       </div>
 
-      <Modal
-        open={confirming}
-        onOpenChange={setConfirming}
-        title="Confirm your identity"
-        description="Authentication is required before a secret value is shown."
-        footer={
-          <>
-            <Button onClick={() => setConfirming(false)}>Cancel</Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                setConfirming(false);
-                setRevealed(true);
-              }}
-            >
-              <ShieldCheck />
-              Use Windows Hello
-            </Button>
-          </>
-        }
-      />
+      {/* The re-authentication prompt that used to sit here claimed Windows
+          Hello was verifying the user; it was not wired to anything. Reveal
+          gating is M4 and will use the real platform authenticator -- until
+          then, showing a security step that does nothing is worse than
+          showing none. */}
 
       <ConfirmDialog
         open={deleting}
@@ -167,8 +191,15 @@ export function SecretPanel({ secret }: { secret: Secret }) {
         body="This secret will be permanently removed from this vault. This can't be undone."
         confirmLabel="Delete secret"
         onConfirm={() => {
-          select(null);
-          toast("Secret deleted");
+          void (async () => {
+            try {
+              await deleteSecret.mutateAsync(secret.id);
+              select(null);
+              toast("Secret deleted");
+            } catch (err) {
+              toast(err instanceof IpcError ? err.message : "That secret could not be deleted.");
+            }
+          })();
         }}
       />
     </aside>

@@ -1,27 +1,76 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, KeyRound, ShieldCheck } from "lucide-react";
-import { toast } from "sonner";
 import { Button, IconButton, Input } from "@/components/envryn/ui";
 import { LogoMark } from "@/components/envryn/Logo";
+import { IpcError, vaultCreate, vaultStatus, vaultUnlock } from "@/lib/ipc";
 
 export const Route = createFileRoute("/")({
   component: Unlock,
 });
 
+/** Which form to show: unlocking an existing vault, or creating the first one. */
+type Mode = "loading" | "unlock" | "create";
+
 function Unlock() {
   const navigate = useNavigate();
+  const [mode, setMode] = React.useState<Mode>("loading");
   const [value, setValue] = React.useState("");
-  const [error, setError] = React.useState(false);
+  const [confirm, setConfirm] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(false);
 
-  function submit(event: React.FormEvent) {
+  React.useEffect(() => {
+    let cancelled = false;
+    vaultStatus()
+      .then((status) => {
+        if (!cancelled) setMode(status.exists ? "unlock" : "create");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMode("unlock");
+        setError(err instanceof IpcError ? err.message : "Envryn could not start.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (value.trim().toLowerCase() === "wrong") return setError(true);
+    setError(null);
+
+    if (mode === "create" && value !== confirm) {
+      setError("Those passwords do not match.");
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => navigate({ to: "/vault" }), 400);
+    try {
+      if (mode === "create") {
+        await vaultCreate(value);
+      } else {
+        await vaultUnlock(value);
+      }
+      // Clear the password from React state the moment it is no longer needed.
+      setValue("");
+      setConfirm("");
+      await navigate({ to: "/vault" });
+    } catch (err) {
+      setError(
+        err instanceof IpcError
+          ? err.code === "auth_failed"
+            ? "That password did not work. Please try again."
+            : err.message
+          : "Something went wrong. Your vault is unaffected.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
+
+  const creating = mode === "create";
 
   return (
     <main className="unlock-page flex min-h-screen items-center justify-center bg-background px-5 py-10">
@@ -29,7 +78,9 @@ function Unlock() {
         <div className="flex items-center gap-3 px-1">
           <LogoMark size={34} />
           <div>
-            <h1 className="text-[17px] font-semibold tracking-[-0.025em]">Unlock Envryn</h1>
+            <h1 className="text-[17px] font-semibold tracking-[-0.025em]">
+              {creating ? "Set up Envryn" : "Unlock Envryn"}
+            </h1>
             <p className="mt-0.5 text-[12px] text-muted-foreground">
               Your private vault on this PC
             </p>
@@ -42,13 +93,17 @@ function Unlock() {
               <KeyRound className="size-4" />
             </span>
             <div>
-              <p className="text-[13px] font-medium">Enter your master password</p>
+              <p className="text-[13px] font-medium">
+                {creating ? "Choose a master password" : "Enter your master password"}
+              </p>
               <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-                This opens the secrets stored in your vault. The password is only used on this
-                computer.
+                {creating
+                  ? "This is the only way into your vault. Envryn cannot reset it for you, because it never leaves this computer."
+                  : "This opens the secrets stored in your vault. The password is only used on this computer."}
               </p>
             </div>
           </div>
+
           <div className="mt-5 space-y-2.5">
             <div className="relative">
               <Input
@@ -57,11 +112,12 @@ function Unlock() {
                 aria-label="Master password"
                 placeholder="Master password"
                 className="h-9 pr-9"
-                invalid={error}
+                invalid={Boolean(error)}
+                disabled={mode === "loading"}
                 value={value}
                 onChange={(event) => {
                   setValue(event.target.value);
-                  setError(false);
+                  setError(null);
                 }}
               />
               <IconButton
@@ -72,21 +128,32 @@ function Unlock() {
                 {showPassword ? <EyeOff /> : <Eye />}
               </IconButton>
             </div>
-            {error && (
-              <p className="text-[12px] text-destructive">
-                That password did not work. Please try again.
-              </p>
+
+            {creating && (
+              <Input
+                type={showPassword ? "text" : "password"}
+                aria-label="Confirm master password"
+                placeholder="Confirm master password"
+                className="h-9"
+                invalid={Boolean(error)}
+                value={confirm}
+                onChange={(event) => {
+                  setConfirm(event.target.value);
+                  setError(null);
+                }}
+              />
             )}
-            <Button type="submit" variant="primary" size="block" loading={loading}>
-              Unlock vault
-            </Button>
+
+            {error && <p className="text-[12px] text-destructive">{error}</p>}
+
             <Button
-              type="button"
-              variant="secondary"
+              type="submit"
+              variant="primary"
               size="block"
-              onClick={() => toast("Windows Hello is ready to connect")}
+              loading={loading}
+              disabled={mode === "loading" || value.length === 0}
             >
-              Use Windows Hello
+              {creating ? "Create vault" : "Unlock vault"}
             </Button>
           </div>
         </div>

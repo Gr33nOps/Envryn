@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronRight, FolderClosed, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { projects } from "@/lib/envryn-data";
+import { useProjects } from "@/lib/use-vault";
 import { Button } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/projects/")({
@@ -9,6 +9,7 @@ export const Route = createFileRoute("/vault/projects/")({
 });
 
 function Projects() {
+  const projects = useProjects();
   return (
     <div className="min-h-full bg-background">
       <div className="content-wrap content-wrap--narrow">

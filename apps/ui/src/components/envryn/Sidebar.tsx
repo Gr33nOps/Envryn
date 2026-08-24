@@ -13,7 +13,8 @@ import {
   Terminal,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { categories, projects, secrets } from "@/lib/envryn-data";
+import { categories, type Secret } from "@/lib/envryn-data";
+import { useProjects, useSecretList } from "@/lib/use-vault";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "./Logo";
 import { SectionLabel } from "./ui";
@@ -26,16 +27,19 @@ interface Item {
   count?: number;
 }
 
-const countForTypes = (types: string[]) =>
-  secrets.filter((secret) => types.includes(secret.type)).length;
+function navigationGroups(
+  secrets: Secret[],
+  projectCount: number,
+): { label: string; items: Item[] }[] {
+  const countForTypes = (types: string[]) =>
+    secrets.filter((secret) => types.includes(secret.type)).length;
 
-function navigationGroups(): { label: string; items: Item[] }[] {
   return [
     {
       label: "Vault",
       items: [
         { to: "/vault", label: "All secrets", icon: Layers, exact: true, count: secrets.length },
-        { to: "/vault/projects", label: "Projects", icon: FolderClosed, count: projects.length },
+        { to: "/vault/projects", label: "Projects", icon: FolderClosed, count: projectCount },
         {
           to: "/vault/category/api-tokens",
           label: "API & tokens",
@@ -74,6 +78,9 @@ function navigationGroups(): { label: string; items: Item[] }[] {
 
 export function Sidebar({ onLock }: { onLock: () => void }) {
   const path = useRouterState({ select: (state) => state.location.pathname });
+  const secrets = useSecretList();
+  const projects = useProjects();
+  const groups = navigationGroups(secrets, projects.length);
 
   return (
     <aside className="app-sidebar flex w-[220px] shrink-0 flex-col border-r border-border bg-background">
@@ -90,7 +97,7 @@ export function Sidebar({ onLock }: { onLock: () => void }) {
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto px-3 pb-3 pt-5">
-        {navigationGroups().map((group) => (
+        {groups.map((group) => (
           <div key={group.label} className="mb-5">
             <div className="px-2 pb-1.5">
               <SectionLabel>{group.label}</SectionLabel>

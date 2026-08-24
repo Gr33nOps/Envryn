@@ -2,7 +2,8 @@ import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Laptop, Pencil, Plus, Smartphone, X } from "lucide-react";
 import { toast } from "sonner";
-import { devices, type Device } from "@/lib/envryn-data";
+import { type Device } from "@/lib/envryn-data";
+import { useDevices } from "@/lib/use-vault";
 import {
   Button,
   ConfirmDialog,
@@ -31,6 +32,7 @@ function statusTone(status: Device["status"]) {
 }
 
 function TrustedDevices() {
+  const devices = useDevices().data ?? [];
   const [detail, setDetail] = React.useState<Device | null>(null);
   const [pairing, setPairing] = React.useState(false);
   const [stage, setStage] = React.useState<"waiting" | "found" | "expired">("waiting");

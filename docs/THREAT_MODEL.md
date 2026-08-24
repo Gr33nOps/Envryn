@@ -78,7 +78,9 @@ Stated plainly, because a threat model that claims to cover everything is not cr
 | **V-09** | Secret captured by screenshot or screen share | `WDA_EXCLUDEFROMCAPTURE` (Windows); `FLAG_SECURE` (Android) | An external camera |
 | **V-10** | Secret written to a log or crash report | No plaintext logging; no automatic crash upload; sentinel grep test in CI | None known |
 | **V-11** | Duplicate-detection hash used as a guessing oracle | Fingerprints are **keyed** HMAC under a VMK subkey | None — unusable without the VMK |
-| **V-12** | Malicious webview content exfiltrates data | CSP restricts to `'self'` and `ipc:`; no remote origins loadable | A WebView RCE would bypass this |
+| **V-12** | Malicious webview content exfiltrates data | CSP restricts to `'self'` and `ipc:`; no remote origins loadable. ESLint fails the build on `fetch`/`WebSocket` in UI code | A WebView RCE would bypass this |
+| **V-13** | Metadata leak from a stolen database file | The whole record is sealed, so names, projects, environments and tags are ciphertext, not columns (`CRYPTOGRAPHY.md` 3.1) | **Accepted:** record count and modification timestamps remain visible. SQLCipher would conceal these too; it is defence in depth, not yet implemented. |
+| **V-14** | Runtime asset fetch leaks usage to a third party | Fonts are self-hosted; no remote origin is referenced by the bundle | None known; asserted by a build-output scan |
 
 ## 7. Sync threats
 

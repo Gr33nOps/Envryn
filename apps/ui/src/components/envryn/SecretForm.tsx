@@ -1,7 +1,11 @@
 import * as React from "react";
 import { toast } from "sonner";
-import { projects, secretTypes, typeFields, type Secret } from "@/lib/envryn-data";
-import { Button, Field, Input, Modal, Select } from "./ui";
+import { Button, Field, Input, Modal, Select } from "@/components/envryn/ui";
+import { secretTypes, typeFields, type Environment, type Secret } from "@/lib/envryn-data";
+import { useCreateSecret, useProjects, useUpdateSecret } from "@/lib/use-vault";
+import { IpcError } from "@/lib/ipc";
+
+const ENVIRONMENTS: Environment[] = ["Development", "Staging", "Production", "—"];
 
 export function SecretFormModal({
   open,
@@ -14,21 +18,95 @@ export function SecretFormModal({
   secret?: Secret | null | undefined;
   preset?: Partial<Secret> | undefined;
 }) {
+  const projects = useProjects();
+  const createSecret = useCreateSecret();
+  const updateSecret = useUpdateSecret();
   const editing = Boolean(secret);
+
   const [type, setType] = React.useState<string>("API Key");
   const [name, setName] = React.useState("");
+  const [project, setProject] = React.useState("");
+  const [environment, setEnvironment] = React.useState<Environment>("Development");
+  const [value, setValue] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+  const [tags, setTags] = React.useState("");
   const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
     setType(secret?.type ?? preset?.type ?? "API Key");
     setName(secret?.name ?? "");
+    setProject(secret?.project ?? preset?.project ?? "");
+    setEnvironment(secret?.environment ?? preset?.environment ?? "Development");
+    // Never prefill the value when editing. A summary carries no secret
+    // material, and fetching the plaintext just to populate a field the user
+    // may not touch would put it on screen for no reason.
+    setValue("");
+    setNotes(secret?.notes ?? "");
+    setTags((secret?.tags ?? []).join(", "));
     setSaving(false);
-    setError(false);
+    setError(null);
   }, [open, secret, preset]);
 
   const extra = typeFields[type] ?? [];
+
+  async function save() {
+    if (!name.trim()) {
+      setError("Add a name so you can find this later.");
+      return;
+    }
+    if (!editing && !value) {
+      setError("Paste the value you want to store.");
+      return;
+    }
+
+    const parsedTags = tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    setSaving(true);
+    try {
+      if (editing && secret) {
+        await updateSecret.mutateAsync({
+          id: secret.id,
+          input: {
+            name: name.trim(),
+            project: project.trim(),
+            environment,
+            type: type as Secret["type"],
+            notes,
+            tags: parsedTags,
+            // Only send a value when the user actually typed one, so leaving
+            // the field blank means "keep the existing secret" rather than
+            // silently overwriting it with an empty string.
+            ...(value ? { value } : {}),
+          },
+        });
+      } else {
+        await createSecret.mutateAsync({
+          name: name.trim(),
+          project: project.trim(),
+          environment,
+          type: type as Secret["type"],
+          value,
+          notes,
+          tags: parsedTags,
+        });
+      }
+      // Drop the plaintext from component state as soon as it is stored.
+      setValue("");
+      onOpenChange(false);
+      toast(editing ? "Secret updated" : "Secret saved");
+    } catch (err) {
+      setError(
+        err instanceof IpcError ? err.message : "That could not be saved. Nothing was changed.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <Modal
@@ -44,19 +122,7 @@ export function SecretFormModal({
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button
-            variant="primary"
-            loading={saving}
-            onClick={() => {
-              if (!name.trim()) return setError(true);
-              setSaving(true);
-              setTimeout(() => {
-                setSaving(false);
-                onOpenChange(false);
-                toast(editing ? "Secret updated" : "Secret saved");
-              }, 550);
-            }}
-          >
+          <Button variant="primary" loading={saving} onClick={() => void save()}>
             {editing ? "Save changes" : "Save secret"}
           </Button>
         </>
@@ -66,16 +132,16 @@ export function SecretFormModal({
         <Field
           label="Name"
           hint="Use the name you will recognize in your project."
-          error={error ? "Add a name so you can find this later." : undefined}
+          error={error ?? undefined}
         >
           <Input
             mono
             autoFocus
             value={name}
-            invalid={error}
+            invalid={Boolean(error)}
             onChange={(event) => {
               setName(event.target.value);
-              setError(false);
+              setError(null);
             }}
             placeholder="e.g. OPENAI_API_KEY"
           />
@@ -89,20 +155,27 @@ export function SecretFormModal({
               ))}
             </Select>
           </Field>
-          <Field label="Project">
-            <Select defaultValue={secret?.project ?? preset?.project}>
-              {projects.map((project) => (
-                <option key={project.id}>{project.name}</option>
+          <Field label="Project" hint="Type a new name to start a project.">
+            <Input
+              value={project}
+              list="envryn-projects"
+              onChange={(event) => setProject(event.target.value)}
+              placeholder="e.g. Rescripto"
+            />
+            <datalist id="envryn-projects">
+              {projects.map((p) => (
+                <option key={p.id} value={p.name} />
               ))}
-              <option>Personal</option>
-            </Select>
+            </datalist>
           </Field>
           <Field label="Environment" hint="Where will it be used?">
-            <Select defaultValue={secret?.environment ?? preset?.environment}>
-              <option>Development</option>
-              <option>Staging</option>
-              <option>Production</option>
-              <option>—</option>
+            <Select
+              value={environment}
+              onChange={(event) => setEnvironment(event.target.value as Environment)}
+            >
+              {ENVIRONMENTS.map((env) => (
+                <option key={env}>{env}</option>
+              ))}
             </Select>
           </Field>
         </div>
@@ -110,45 +183,56 @@ export function SecretFormModal({
         <Field
           label={type === "Note" ? "Note" : "Value"}
           hint={
-            type === "Note"
-              ? "Write anything you want to keep private."
-              : "Paste the key, password, or token here."
+            editing
+              ? "Leave blank to keep the value you already stored."
+              : type === "Note"
+                ? "Write anything you want to keep private."
+                : "Paste the key, password, or token here."
           }
         >
           {type === "Note" ? (
             <textarea
               rows={4}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
               className="w-full rounded-md border border-input bg-surface px-2 py-1.5 font-mono text-[12px] placeholder:text-subtle-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
               placeholder="Write a private note..."
             />
           ) : (
-            <Input mono type="password" placeholder="Paste secret value" />
+            <Input
+              mono
+              type="password"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={editing ? "Unchanged" : "Paste secret value"}
+            />
           )}
         </Field>
 
         {extra.length > 0 && (
           <div className="rounded-md border border-border bg-surface-2/45 p-3">
             <p className="mb-2 text-[11px] font-medium text-muted-foreground">Optional details</p>
-            <div className="grid grid-cols-2 gap-3">
-              {extra.map((field) => (
-                <Field key={field} label={field}>
-                  <Input
-                    mono={field !== "Provider"}
-                    className="bg-surface"
-                    placeholder="Optional"
-                  />
-                </Field>
-              ))}
-            </div>
+            <p className="mb-2 text-[10.5px] text-subtle-foreground">
+              Separate fields for {extra.join(", ").toLowerCase()} arrive with the structured form.
+              For now the whole value is stored as one entry.
+            </p>
           </div>
         )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Notes" hint="Anything helpful for you later.">
-            <Input placeholder="Optional" />
+            <Input
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Optional"
+            />
           </Field>
-          <Field label="Tags" hint="For example: work, backend.">
-            <Input placeholder="Optional" />
+          <Field label="Tags" hint="Comma separated. For example: work, backend.">
+            <Input
+              value={tags}
+              onChange={(event) => setTags(event.target.value)}
+              placeholder="Optional"
+            />
           </Field>
         </div>
       </div>

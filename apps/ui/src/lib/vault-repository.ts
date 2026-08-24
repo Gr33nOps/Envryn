@@ -1,4 +1,5 @@
-import { devices, projects, secrets, type Device, type Project, type Secret } from "./envryn-data";
+import type { Device, Environment, Secret, SecretType } from "./envryn-data";
+import * as ipc from "./ipc";
 
 export type CreateSecretInput = Omit<Secret, "id" | "created" | "updated">;
 export type UpdateSecretInput = Partial<CreateSecretInput>;
@@ -6,46 +7,223 @@ export type UpdateSecretInput = Partial<CreateSecretInput>;
 /**
  * Persistence contract for the vault UI.
  *
- * The first implementation is intentionally local mock data. A desktop
- * adapter can later implement the same contract with an encrypted SQLite
- * store or the Tauri/Electron bridge without changing page components.
+ * Implemented against the Rust core over Tauri IPC. There is deliberately no
+ * mock implementation any more: a vault UI that appears to work without a
+ * vault behind it is a way for someone to enter real credentials into nothing.
+ * Outside Tauri, every call fails loudly.
  */
 export interface VaultRepository {
   listSecrets(): Promise<Secret[]>;
-  listProjects(): Promise<Project[]>;
+  searchSecrets(query: string): Promise<Secret[]>;
+  revealSecret(id: string): Promise<string>;
   listDevices(): Promise<Device[]>;
   createSecret(input: CreateSecretInput): Promise<Secret>;
   updateSecret(id: string, input: UpdateSecretInput): Promise<Secret>;
   deleteSecret(id: string): Promise<void>;
+  duplicatesOf(id: string): Promise<string[]>;
 }
 
-const copy = <T>(value: T): T => structuredClone(value);
+// --- Mapping between the Rust model and the UI's display shape --------------
+// The UI uses human-readable labels ("API Key"); Rust uses variant names
+// ("ApiKey"). Both mappings live here so the boundary is one file.
 
-export const mockVaultRepository: VaultRepository = {
+const KIND_TO_TYPE: Record<ipc.SecretKind, SecretType> = {
+  ApiKey: "API Key",
+  Token: "Token",
+  EnvVar: "Environment",
+  Database: "Database",
+  Ssh: "SSH",
+  OAuth: "OAuth",
+  Webhook: "Webhook",
+  Note: "Note",
+  Custom: "Custom",
+};
+
+const TYPE_TO_KIND: Record<SecretType, ipc.SecretKind> = {
+  "API Key": "ApiKey",
+  Token: "Token",
+  Environment: "EnvVar",
+  Database: "Database",
+  SSH: "Ssh",
+  OAuth: "OAuth",
+  Webhook: "Webhook",
+  Note: "Note",
+  Custom: "Custom",
+};
+
+const toUiEnvironment = (env: ipc.RustEnvironment): Environment =>
+  env === "Unassigned" ? "—" : env;
+
+const toRustEnvironment = (env: Environment): ipc.RustEnvironment =>
+  env === "—" ? "Unassigned" : env;
+
+/**
+ * Build a payload from the UI's single `value` string.
+ *
+ * Multi-field kinds (Database, SSH, OAuth) genuinely need separate inputs, and
+ * the form does not collect them yet. Rather than guess at parsing a URL into
+ * host/port/user/password -- which would silently mis-file credentials -- those
+ * kinds are stored as a Note payload until the form is extended, so nothing is
+ * lost and nothing is fabricated.
+ */
+function toPayload(type: SecretType, value: string): ipc.SecretPayload {
+  const kind = TYPE_TO_KIND[type];
+  switch (kind) {
+    case "ApiKey":
+      return { kind: "ApiKey", value };
+    case "Token":
+      return { kind: "Token", value };
+    case "EnvVar":
+      return { kind: "EnvVar", key: "", value };
+    case "Note":
+      return { kind: "Note", body: value };
+    default:
+      return { kind: "Note", body: value };
+  }
+}
+
+/**
+ * Present a payload as one display string.
+ *
+ * Used only after an explicit reveal, never in a list.
+ */
+export function payloadToDisplay(payload: ipc.SecretPayload): string {
+  switch (payload.kind) {
+    case "ApiKey":
+    case "Token":
+    case "EnvVar":
+      return payload.value;
+    case "Note":
+      return payload.body;
+    case "Database":
+      return `${payload.username}@${payload.host}:${payload.port}/${payload.database}`;
+    case "Ssh":
+      return payload.private_key;
+    case "OAuth":
+      return payload.client_secret;
+    case "Webhook":
+      return payload.secret;
+    case "Custom":
+      return payload.fields.map((f) => `${f.label}: ${f.value}`).join("\n");
+  }
+}
+
+const RELATIVE = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+
+function relative(ms: number): string {
+  const diff = ms - Date.now();
+  const days = Math.round(diff / 86_400_000);
+  if (Math.abs(days) >= 1) return RELATIVE.format(days, "day");
+  const hours = Math.round(diff / 3_600_000);
+  if (Math.abs(hours) >= 1) return RELATIVE.format(hours, "hour");
+  const minutes = Math.round(diff / 60_000);
+  if (Math.abs(minutes) >= 1) return RELATIVE.format(minutes, "minute");
+  return "Just now";
+}
+
+const ABSOLUTE = new Intl.DateTimeFormat("en", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
+
+/**
+ * Map a summary into the UI's Secret shape.
+ *
+ * `value` is deliberately the empty string. A summary carries no secret
+ * material -- that is the point of the type on the Rust side, and dropping a
+ * placeholder in here would quietly undo it. Call `revealSecret` for a value.
+ */
+function toSecret(summary: ipc.SecretSummary): Secret {
+  return {
+    id: summary.id,
+    name: summary.name,
+    type: KIND_TO_TYPE[summary.kind],
+    project: summary.project || "Unassigned",
+    environment: toUiEnvironment(summary.environment),
+    updated: relative(summary.updated_ms),
+    created: ABSOLUTE.format(new Date(summary.created_ms)),
+    tags: summary.tags,
+    ...(summary.provider ? { provider: summary.provider } : {}),
+    value: "",
+  };
+}
+
+function requireTauri(): void {
+  if (!ipc.isTauri()) {
+    throw new ipc.IpcError(
+      "internal",
+      "Envryn's vault is unavailable. Run the desktop application rather than a browser.",
+    );
+  }
+}
+
+export const tauriVaultRepository: VaultRepository = {
   async listSecrets() {
-    return copy(secrets);
+    requireTauri();
+    return (await ipc.secretList()).map(toSecret);
   },
-  async listProjects() {
-    return copy(projects);
+
+  async searchSecrets(query) {
+    requireTauri();
+    return (await ipc.secretSearch(query)).map(toSecret);
   },
+
+  async revealSecret(id) {
+    requireTauri();
+    const record = await ipc.secretReveal(id);
+    return payloadToDisplay(record.payload);
+  },
+
   async listDevices() {
-    return copy(devices);
+    requireTauri();
+    // Device identity and pairing arrive in Phase 2 (M13-M18). Returning an
+    // empty list is honest; fabricating entries would make the Trusted Devices
+    // screen claim a security property that does not exist yet.
+    return [];
   },
+
   async createSecret(input) {
-    const created: Secret = {
-      ...input,
-      id: `local-${Date.now()}`,
-      created: "Just now",
-      updated: "Just now",
-    };
-    return copy(created);
+    requireTauri();
+    const summary = await ipc.secretCreate({
+      name: input.name,
+      project: input.project,
+      environment: toRustEnvironment(input.environment),
+      payload: toPayload(input.type, input.value),
+      notes: input.notes ?? null,
+      tags: input.tags ?? [],
+      provider: input.provider ?? null,
+    });
+    return toSecret(summary);
   },
+
   async updateSecret(id, input) {
-    const current = secrets.find((secret) => secret.id === id);
-    if (!current) throw new Error(`Secret ${id} was not found`);
-    return copy({ ...current, ...input, updated: "Just now" });
+    requireTauri();
+    const update: ipc.SecretUpdate = {};
+    if (input.name !== undefined) update.name = input.name;
+    if (input.project !== undefined) update.project = input.project;
+    if (input.environment !== undefined) {
+      update.environment = toRustEnvironment(input.environment);
+    }
+    if (input.value !== undefined && input.type !== undefined) {
+      update.payload = toPayload(input.type, input.value);
+    }
+    if (input.notes !== undefined) update.notes = input.notes;
+    if (input.tags !== undefined) update.tags = input.tags;
+    if (input.provider !== undefined) update.provider = input.provider;
+
+    return toSecret(await ipc.secretUpdate(id, update));
   },
+
   async deleteSecret(id) {
-    if (!secrets.some((secret) => secret.id === id)) throw new Error(`Secret ${id} was not found`);
+    requireTauri();
+    await ipc.secretDelete(id);
+  },
+
+  async duplicatesOf(id) {
+    requireTauri();
+    return ipc.secretDuplicates(id);
   },
 };
+
+export const vaultRepository = tauriVaultRepository;

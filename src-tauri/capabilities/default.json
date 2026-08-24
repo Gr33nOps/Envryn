@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Envryn's main window. Deliberately minimal: the UI needs no filesystem, shell, HTTP, or clipboard plugin permissions, because every such operation is performed by the Rust core behind a named IPC command.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -2,7 +2,7 @@ import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { ArrowDownUp, ChevronDown, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { secrets } from "@/lib/envryn-data";
+import { useSecretList } from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
 import { Button, EmptyState, Panel, SearchField, Tabs } from "@/components/envryn/ui";
@@ -21,6 +21,7 @@ const filters = [
 
 function AllSecrets() {
   const { openAdd } = useVaultUI();
+  const secrets = useSecretList();
   const [filter, setFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
   const [environment, setEnvironment] = React.useState("all");
@@ -38,7 +39,7 @@ function AllSecrets() {
           .includes(normalized),
       )
       .sort((a, b) => (sortNewest ? b.id.localeCompare(a.id) : a.id.localeCompare(b.id)));
-  }, [environment, filter, query, sortNewest]);
+  }, [environment, filter, query, secrets, sortNewest]);
 
   return (
     <div className="min-h-full bg-background">

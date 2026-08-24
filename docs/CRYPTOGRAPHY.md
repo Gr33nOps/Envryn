@@ -107,11 +107,13 @@ lose your vault.
 
 ## 3. Record encryption
 
-Every secret payload is sealed independently:
+**The whole record is sealed, not just the value.** Name, project, environment,
+tags, notes and payload all live inside one AEAD blob. The database row holds only an opaque
+UUID, the keyed fingerprint, and sync bookkeeping (see section 3.1).
 
 ```
 nonce      = 24 random bytes (OS CSPRNG, fresh per write)
-aad        = record_id || record_version || record_type
+aad        = "envryn/v1/record/" || record_id || "/" || record_version
 ciphertext = XChaCha20Poly1305(Record Key).encrypt(nonce, plaintext, aad)
 ```
 
@@ -122,6 +124,37 @@ id bound in, that attack produces an authentication failure instead.
 
 `record_version` in the AAD additionally prevents rollback of a single record to an earlier
 ciphertext without detection.
+
+### 3.1 Why metadata is not a plaintext column
+
+The common design for an encrypted store is plaintext metadata columns inside a whole-file
+encrypted database, so that SQL can filter on them. Envryn does not do this.
+
+Metadata is not incidental — project and environment names map out someone's infrastructure,
+and the *set* of provider names in a vault is itself sensitive. Relying on whole-file
+encryption to protect it means the protection ends the moment the file is copied off a running
+system, which is precisely the threat (V-01) the design exists to address.
+
+The usual justification for plaintext columns is query performance, and it does not apply here:
+search runs against an in-memory index while unlocked (section 4), so no query ever needed
+those columns. Sealing everything costs nothing we were using.
+
+What remains in SQL, and why each is unavoidable:
+
+| Column | Why it cannot be sealed |
+|---|---|
+| `id` | Opaque UUIDv7. Needed to address a row. |
+| `fingerprint` | Keyed HMAC; reveals nothing without the VMK (section 5). Needed to find duplicates without decrypting every row. |
+| `created_ms` / `updated_ms` | Needed to order and reconcile during sync without unlocking. |
+| `hlc_counter` / `hlc_device` | Conflict resolution. |
+| `deleted` | Tombstone flag. |
+
+The accepted residual leak is therefore **timing and volume**: an attacker holding the file
+learns how many records exist and when they changed. That is recorded in `THREAT_MODEL.md`
+rather than claimed as solved.
+
+SQLCipher remains planned as defence in depth — it would conceal the record count and the
+schema itself — but it is no longer load-bearing for confidentiality.
 
 ---
 

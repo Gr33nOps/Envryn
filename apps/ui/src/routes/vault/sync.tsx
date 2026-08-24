@@ -2,7 +2,7 @@ import * as React from "react";
 import { Check, CircleAlert, RefreshCw } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { devices } from "@/lib/envryn-data";
+import { useDevices } from "@/lib/use-vault";
 import { Button, DetailRow, Panel, StatusLabel, Tabs } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/sync")({ component: Sync });
@@ -10,6 +10,7 @@ export const Route = createFileRoute("/vault/sync")({ component: Sync });
 type State = "connected" | "offline" | "failed";
 
 function Sync() {
+  const devices = useDevices().data ?? [];
   const [state, setState] = React.useState<State>("connected");
   const [syncing, setSyncing] = React.useState(false);
   const [done, setDone] = React.useState(false);

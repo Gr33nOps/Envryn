@@ -15,7 +15,10 @@ import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Secret } from "@/lib/envryn-data";
-import { copySecret } from "@/lib/vault-actions";
+import { copyValue } from "@/lib/vault-actions";
+import { useRevealSecret } from "@/lib/use-vault";
+import { IpcError } from "@/lib/ipc";
+import { toast as notify } from "sonner";
 import { IconButton, StatusDot } from "./ui";
 import { useVaultUI } from "./vault-context";
 
@@ -48,6 +51,20 @@ export function SecretList({
   columns?: Column[];
 }) {
   const { selected, select, openEdit } = useVaultUI();
+  const revealSecret = useRevealSecret();
+
+  // A list row carries no secret material, so copying fetches the value on
+  // demand rather than reading it from the row.
+  const copySecret = React.useCallback(
+    async (secret: Secret) => {
+      try {
+        await copyValue(await revealSecret.mutateAsync(secret.id));
+      } catch (err) {
+        notify(err instanceof IpcError ? err.message : "That secret could not be copied.");
+      }
+    },
+    [revealSecret],
+  );
   const [context, setContext] = React.useState<{ secret: Secret; x: number; y: number } | null>(
     null,
   );

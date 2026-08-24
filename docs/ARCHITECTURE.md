@@ -90,10 +90,13 @@ vault_meta      crypto_version, kdf_params, wrapped_vmk_password,
                 wrapped_vmk_platform, device_id
 ```
 
-Only `secrets.ciphertext` holds a secret value. Names, projects, and environments are plaintext
-*columns* inside a SQLCipher-encrypted database — searchable without unwrapping every record,
-and still protected at rest. `THREAT_MODEL.md` records that metadata leaks infrastructure shape
-if SQLCipher is defeated; that is an accepted trade for a usable search.
+Rows are opaque. `secrets.sealed` holds the entire record — name, project, environment, tags,
+notes and payload — as one AEAD blob. The remaining columns exist only so sync can order and
+reconcile records without decrypting them, and so duplicates can be found by keyed fingerprint.
+
+There is deliberately **no plaintext `name` or `project` column**; `CRYPTOGRAPHY.md` section 3.1
+explains why, and a schema test fails if one is added. The accepted residual leak is record
+count and modification timing, recorded in `THREAT_MODEL.md` as V-13.
 
 **The payload is a typed union, not a string.** The current UI models `value` as a flat string
 ([envryn-data.ts](../src/lib/envryn-data.ts)), but SSH and database credentials are inherently

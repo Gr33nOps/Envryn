@@ -1,0 +1,30 @@
+[package]
+name = "envryn"
+description = "Envryn - local-first developer secrets vault"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "envryn_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+envryn-core = { path = "../crates/envryn-core" }
+
+tauri = { version = "2", features = [] }
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+thiserror.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

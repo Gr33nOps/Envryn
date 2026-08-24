@@ -1,7 +1,8 @@
 import * as React from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
-import { categories, secrets } from "@/lib/envryn-data";
+import { categories } from "@/lib/envryn-data";
+import { useSecretList } from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
 import { Button, EmptyState, SearchField } from "@/components/envryn/ui";
@@ -16,6 +17,7 @@ export const Route = createFileRoute("/vault/category/$categoryId")({
 });
 
 function CategoryView() {
+  const secrets = useSecretList();
   const category = Route.useLoaderData();
   const { openAdd } = useVaultUI();
   const [query, setQuery] = React.useState("");

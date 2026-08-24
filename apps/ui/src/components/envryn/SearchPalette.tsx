@@ -1,7 +1,8 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Search } from "lucide-react";
-import { secrets, type Secret } from "@/lib/envryn-data";
+import { type Secret } from "@/lib/envryn-data";
+import { useSecretList } from "@/lib/use-vault";
 import { cn } from "@/lib/utils";
 
 export function SearchPalette({
@@ -13,6 +14,7 @@ export function SearchPalette({
   onOpenChange: (v: boolean) => void;
   onSelect: (s: Secret) => void;
 }) {
+  const secrets = useSecretList();
   const [q, setQ] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
 
@@ -32,7 +34,7 @@ export function SearchPalette({
         .toLowerCase()
         .includes(t),
     );
-  }, [q]);
+  }, [q, secrets]);
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
