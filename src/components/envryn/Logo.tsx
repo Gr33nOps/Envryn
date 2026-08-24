@@ -41,9 +41,7 @@ export function Wordmark({
     <div className={cn("flex items-center gap-2", className)}>
       <LogoMark size={size} />
       <div className="leading-none">
-        <div className="text-[13px] font-semibold tracking-[-0.015em] text-foreground">
-          Envryn
-        </div>
+        <div className="text-[13px] font-semibold tracking-[-0.015em] text-foreground">Envryn</div>
         {subtitle && (
           <div className="mt-0.5 font-mono text-[10px] tracking-tight text-subtle-foreground">
             {subtitle}

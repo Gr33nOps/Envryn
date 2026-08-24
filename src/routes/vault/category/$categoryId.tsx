@@ -1,9 +1,10 @@
+import * as React from "react";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { categories, secrets } from "@/lib/envryn-data";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
-import { Button, EmptyState, PageHeader } from "@/components/envryn/ui";
+import { Button, EmptyState, SearchField } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/category/$categoryId")({
   loader: ({ params }) => {
@@ -17,30 +18,75 @@ export const Route = createFileRoute("/vault/category/$categoryId")({
 function CategoryView() {
   const category = Route.useLoaderData();
   const { openAdd } = useVaultUI();
-  const items = secrets.filter((s) => category.types.includes(s.type));
+  const [query, setQuery] = React.useState("");
+  const allItems = secrets.filter((secret) => category.types.includes(secret.type));
+  const normalizedQuery = query.trim().toLowerCase();
+  const items = allItems.filter((secret) =>
+    [secret.name, secret.project, secret.type, secret.provider ?? ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery),
+  );
 
   return (
-    <>
-      <PageHeader
-        title={category.label}
-        subtitle={`${items.length} secrets`}
-        actions={
-          <Button variant="primary" onClick={() => openAdd()}>
+    <div className="min-h-full bg-background">
+      <div className="content-wrap content-wrap--narrow">
+        <header className="page-hero">
+          <div>
+            <p className="breadcrumb">
+              Vault <span>/</span> {category.label}
+            </p>
+            <h1 className="mt-3 text-[22px] font-semibold tracking-[-0.035em]">{category.label}</h1>
+            <p className="mt-1.5 max-w-[62ch] text-[12.5px] text-muted-foreground">
+              {category.description}{" "}
+              <span className="text-subtle-foreground">
+                {allItems.length} {allItems.length === 1 ? "secret" : "secrets"} saved here.
+              </span>
+            </p>
+          </div>
+          <Button variant="primary" size="lg" onClick={() => openAdd()}>
             <Plus />
-            Add Secret
+            Add secret
           </Button>
-        }
-      />
-      <div className="px-5 pb-5">
+        </header>
+        {allItems.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <SearchField
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={`Search ${category.label.toLowerCase()}...`}
+              className="max-w-[360px]"
+            />
+            <span className="text-[11.5px] text-subtle-foreground">{items.length} shown</span>
+          </div>
+        )}
         {items.length === 0 ? (
           <EmptyState
-            title={`Nothing in ${category.label}`}
-            body="Secrets of this type will appear here."
+            title={query ? `No results for “${query}”` : `Nothing in ${category.label}`}
+            body={
+              query
+                ? "Try a different name, project, or provider."
+                : "Add your first secret in this category to see it here."
+            }
+            action={
+              query ? (
+                <Button variant="secondary" onClick={() => setQuery("")}>
+                  Clear search
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={() => openAdd()}>
+                  <Plus />
+                  Add secret
+                </Button>
+              )
+            }
           />
         ) : (
-          <SecretList items={items} columns={["project", "environment", "updated"]} />
+          <div className="overflow-hidden rounded-lg border border-border bg-surface">
+            <SecretList items={items} />
+          </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

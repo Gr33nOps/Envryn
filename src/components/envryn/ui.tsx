@@ -34,10 +34,8 @@ const buttonVariants = cva(
   },
 );
 
-
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
   loading?: boolean;
 }
 
@@ -99,8 +97,7 @@ export const Input = React.forwardRef<
       className={cn(
         "h-7 w-full rounded-md border border-input bg-surface px-2 text-[12.5px] text-foreground transition-colors placeholder:text-subtle-foreground hover:border-border-strong focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25 disabled:opacity-45",
         mono && "font-mono text-[12px] tracking-tight",
-        invalid &&
-          "border-destructive focus:border-destructive focus:ring-destructive/25",
+        invalid && "border-destructive focus:border-destructive focus:ring-destructive/25",
         className,
       )}
       {...props}
@@ -123,9 +120,7 @@ export function Field({
 }) {
   return (
     <div className={cn("space-y-1", className)}>
-      <label className="block text-[11px] font-medium text-muted-foreground">
-        {label}
-      </label>
+      <label className="block text-[11px] font-medium text-muted-foreground">{label}</label>
       {children}
       {error ? (
         <p className="text-[11px] text-destructive">{error}</p>
@@ -223,17 +218,16 @@ export function Tabs({
           <button
             key={i.value}
             onClick={() => onChange(i.value)}
+            aria-pressed={value === i.value}
             className={cn(
               "h-6 rounded-[4px] px-2.5 text-[12px] font-medium transition-colors",
               value === i.value
-                ? "bg-primary text-primary-foreground"
+                ? "border border-border-strong bg-surface-3 text-foreground"
                 : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
             )}
           >
             {i.label}
-            {i.count !== undefined && (
-              <span className="ml-1.5 opacity-60">{i.count}</span>
-            )}
+            {i.count !== undefined && <span className="ml-1.5 opacity-60">{i.count}</span>}
           </button>
         ))}
       </div>
@@ -311,9 +305,7 @@ export function StatusLabel({
 }
 
 export function TypeTag({ type }: { type: string }) {
-  return (
-    <span className="text-[11.5px] text-muted-foreground">{type}</span>
-  );
+  return <span className="text-[11.5px] text-muted-foreground">{type}</span>;
 }
 
 /* ------------------------------------------------------------------- Modal */
@@ -464,12 +456,8 @@ export function PageHeader({
     <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-4">
       <div className="min-w-0">
         {back}
-        <h1 className="truncate text-[15px] font-semibold tracking-[-0.01em]">
-          {title}
-        </h1>
-        {subtitle && (
-          <p className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</p>
-        )}
+        <h1 className="truncate text-[15px] font-semibold tracking-[-0.01em]">{title}</h1>
+        {subtitle && <p className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</p>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
@@ -528,20 +516,9 @@ export function SettingsRow({
   );
 }
 
-export function Panel({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
+export function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-md border border-border bg-surface",
-        className,
-      )}
-    >
+    <div className={cn("overflow-hidden rounded-md border border-border bg-surface", className)}>
       {children}
     </div>
   );
@@ -561,9 +538,7 @@ export function DetailRow({
       <div className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground">
         {label}
       </div>
-      <div className={cn("mt-0.5 text-[12.5px]", mono && "font-mono text-[12px]")}>
-        {value}
-      </div>
+      <div className={cn("mt-0.5 text-[12.5px]", mono && "font-mono text-[12px]")}>{value}</div>
     </div>
   );
 }

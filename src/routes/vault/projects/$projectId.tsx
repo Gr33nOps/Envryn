@@ -4,14 +4,7 @@ import { Plus, ChevronLeft } from "lucide-react";
 import { projects, secrets, type Environment } from "@/lib/envryn-data";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
-import {
-  Button,
-  EmptyState,
-  PageHeader,
-  SearchField,
-  Select,
-  Tabs,
-} from "@/components/envryn/ui";
+import { Button, EmptyState, PageHeader, SearchField, Select, Tabs } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/projects/$projectId")({
   validateSearch: (s: Record<string, unknown>) => ({
@@ -29,9 +22,7 @@ function ProjectDetails() {
   const project = Route.useLoaderData();
   const { env } = Route.useSearch();
   const { openAdd } = useVaultUI();
-  const [active, setActive] = React.useState<string>(
-    env ?? project.environments[0]!.name,
-  );
+  const [active, setActive] = React.useState<string>(env ?? project.environments[0]!.name);
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState("name");
 
@@ -62,12 +53,10 @@ function ProjectDetails() {
         actions={
           <Button
             variant="primary"
-            onClick={() =>
-              openAdd({ project: project.name, environment: active as Environment })
-            }
+            onClick={() => openAdd({ project: project.name, environment: active as Environment })}
           >
             <Plus />
-            Add Secret
+            Add secret
           </Button>
         }
       />
@@ -88,14 +77,10 @@ function ProjectDetails() {
           <SearchField
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder={`Search in ${active}...`}
+            placeholder={`Search ${active.toLowerCase()} secrets...`}
             className="max-w-[260px]"
           />
-          <Select
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            className="w-[130px]"
-          >
+          <Select value={sort} onChange={(e) => setSort(e.target.value)} className="w-[130px]">
             <option value="name">Sort by name</option>
             <option value="type">Sort by type</option>
           </Select>
@@ -104,22 +89,18 @@ function ProjectDetails() {
         {items.length === 0 ? (
           <EmptyState
             title={q ? `No results for "${q}"` : `No secrets in ${active}`}
-            body={
-              q
-                ? "Try another name, project, or tag."
-                : "Add a secret to this environment."
-            }
+            body={q ? "Try another name, project, or tag." : "Add a secret to this environment."}
             action={
               q ? undefined : (
                 <Button variant="primary" onClick={() => openAdd()}>
                   <Plus />
-                  Add Secret
+                  Add secret
                 </Button>
               )
             }
           />
         ) : (
-          <SecretList items={items} columns={["type", "updated"]} />
+          <SecretList items={items} columns={["project", "environment", "type", "updated"]} />
         )}
       </div>
     </>

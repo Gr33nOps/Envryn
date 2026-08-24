@@ -191,34 +191,36 @@ export const projects: Project[] = [
     id: "rescripto",
     name: "Rescripto",
     environments: [
-      { name: "Development", count: 8 },
-      { name: "Staging", count: 2 },
-      { name: "Production", count: 5 },
+      { name: "Development", count: 3 },
+      { name: "Staging", count: 1 },
+      { name: "Production", count: 1 },
     ],
   },
   {
     id: "namevetta",
     name: "NameVetta",
-    environments: [
-      { name: "Development", count: 6 },
-      { name: "Production", count: 4 },
-    ],
+    environments: [{ name: "Production", count: 2 }],
   },
   {
     id: "mygamelist",
     name: "MyGameList",
     environments: [
-      { name: "Development", count: 9 },
-      { name: "Production", count: 3 },
+      { name: "Development", count: 1 },
+      { name: "Production", count: 1 },
     ],
   },
   {
     id: "infrastructure",
     name: "Infrastructure",
     environments: [
-      { name: "Production", count: 3 },
-      { name: "Staging", count: 1 },
+      { name: "Production", count: 1 },
+      { name: "—", count: 1 },
     ],
+  },
+  {
+    id: "personal",
+    name: "Personal",
+    environments: [{ name: "—", count: 2 }],
   },
 ];
 
@@ -278,10 +280,23 @@ export const typeFields: Record<string, string[]> = {
 
 export const categories = {
   "api-tokens": {
-    label: "API & Tokens",
+    label: "API & tokens",
+    description: "Keys, tokens, OAuth credentials, and webhooks used by your apps.",
     types: ["API Key", "Token", "OAuth", "Webhook"] as SecretType[],
   },
-  databases: { label: "Databases", types: ["Database"] as SecretType[] },
-  ssh: { label: "SSH", types: ["SSH"] as SecretType[] },
-  notes: { label: "Secure Notes", types: ["Note"] as SecretType[] },
+  databases: {
+    label: "Databases",
+    description: "Connection details for databases and hosted data services.",
+    types: ["Database"] as SecretType[],
+  },
+  ssh: {
+    label: "SSH",
+    description: "Keys and host credentials used to connect to servers.",
+    types: ["SSH"] as SecretType[],
+  },
+  notes: {
+    label: "Secure notes",
+    description: "Private text such as recovery codes, instructions, or other sensitive notes.",
+    types: ["Note"] as SecretType[],
+  },
 };

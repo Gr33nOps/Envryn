@@ -50,15 +50,14 @@ export function SearchPalette({
                 setCursor(0);
               }}
               onKeyDown={(e) => {
-                if (e.key === "ArrowDown")
-                  setCursor((c) => Math.min(c + 1, results.length - 1));
+                if (e.key === "ArrowDown") setCursor((c) => Math.min(c + 1, results.length - 1));
                 if (e.key === "ArrowUp") setCursor((c) => Math.max(c - 1, 0));
                 if (e.key === "Enter" && results[cursor]) {
                   onSelect(results[cursor]);
                   onOpenChange(false);
                 }
               }}
-              placeholder="Search secrets, projects, tags..."
+              placeholder="Search everywhere in your vault..."
               className="h-9 w-full bg-transparent text-[13px] placeholder:text-subtle-foreground focus:outline-none"
             />
             <span className="kbd">Esc</span>
@@ -92,9 +91,7 @@ export function SearchPalette({
                         {s.project} · {s.environment}
                       </div>
                     </div>
-                    <span className="text-[11.5px] text-muted-foreground">
-                      {s.type}
-                    </span>
+                    <span className="text-[11.5px] text-muted-foreground">{s.type}</span>
                   </button>
                 </li>
               ))}

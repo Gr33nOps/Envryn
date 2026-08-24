@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Plus, ChevronRight } from "lucide-react";
+import { ChevronRight, FolderClosed, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { projects } from "@/lib/envryn-data";
-import { Button, PageHeader, Panel } from "@/components/envryn/ui";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/projects/")({
   component: Projects,
@@ -10,59 +10,84 @@ export const Route = createFileRoute("/vault/projects/")({
 
 function Projects() {
   return (
-    <>
-      <PageHeader
-        title="Projects"
-        actions={
-          <Button variant="primary">
+    <div className="min-h-full bg-background">
+      <div className="content-wrap content-wrap--narrow">
+        <header className="page-hero">
+          <div>
+            <p className="breadcrumb">
+              Vault <span>/</span> Projects
+            </p>
+            <h1 className="mt-3 text-[22px] font-semibold tracking-[-0.035em]">Projects</h1>
+            <p className="mt-1.5 text-[12.5px] text-muted-foreground">
+              Keep credentials together by app and environment.
+            </p>
+          </div>
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={() => toast("New project setup is ready to connect")}
+          >
             <Plus />
-            New Project
+            New project
           </Button>
-        }
-      />
-      <div className="space-y-2.5 px-5 pb-5">
-        {projects.map((p) => (
-          <Panel key={p.id}>
-            <Link
-              to="/vault/projects/$projectId"
-              params={{ projectId: p.id }}
-              search={{ env: undefined }}
-              className="group flex h-[34px] items-center justify-between gap-3 border-b border-border px-3 transition-colors hover:bg-surface-2/60"
-            >
-              <span className="text-[12.5px] font-medium">{p.name}</span>
-              <span className="flex items-center gap-2 text-[11.5px] text-subtle-foreground">
-                {p.environments.reduce((n, e) => n + e.count, 0)} secrets
-                <ChevronRight className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
-              </span>
-            </Link>
-            <ul>
-              {p.environments.map((e) => (
-                <li key={e.name}>
-                  <Link
-                    to="/vault/projects/$projectId"
-                    params={{ projectId: p.id }}
-                    search={{ env: e.name }}
-                    className="flex h-[30px] items-center gap-2 border-b border-border/50 px-3 text-[12px] text-muted-foreground transition-colors last:border-0 hover:bg-surface-2/50 hover:text-foreground"
-                  >
-                    <span
-                      className={cn(
-                        "size-1.5 rounded-full",
-                        e.name === "Production"
-                          ? "bg-warning"
-                          : e.name === "Staging"
-                            ? "bg-primary"
-                            : "bg-subtle-foreground",
-                      )}
-                    />
-                    {e.name}
-                    <span className="text-subtle-foreground">· {e.count} secrets</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        ))}
+        </header>
+
+        <div className="mb-3 flex items-center justify-between border-y border-border/70 py-2.5 text-[11.5px] text-muted-foreground">
+          <span>{projects.length} projects</span>
+          <span>Choose a project to see its secrets</span>
+        </div>
+
+        <div className="project-list divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+          {projects.map((project) => {
+            const total = project.environments.reduce(
+              (sum, environment) => sum + environment.count,
+              0,
+            );
+            return (
+              <Link
+                key={project.id}
+                to="/vault/projects/$projectId"
+                params={{ projectId: project.id }}
+                search={{ env: undefined }}
+                className="project-row group flex items-center gap-4 px-4 py-4 transition-colors hover:bg-surface-2"
+              >
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
+                  <FolderClosed className="size-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-medium text-foreground">
+                    {project.name}
+                  </span>
+                  <span className="mt-2 flex flex-wrap gap-1.5">
+                    {project.environments.map((environment) => (
+                      <span key={environment.name} className="environment-chip">
+                        <span
+                          className={
+                            environment.name === "Production"
+                              ? "environment-dot environment-dot--production"
+                              : environment.name === "Staging"
+                                ? "environment-dot environment-dot--staging"
+                                : "environment-dot"
+                          }
+                        />
+                        {environment.name}{" "}
+                        <span className="text-subtle-foreground">{environment.count}</span>
+                      </span>
+                    ))}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 text-right">
+                  <span>
+                    <span className="block font-mono text-[13px] text-foreground">{total}</span>
+                    <span className="block text-[10.5px] text-subtle-foreground">secrets</span>
+                  </span>
+                  <ChevronRight className="size-4 text-subtle-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+                </span>
+              </Link>
+            );
+          })}
+        </div>
       </div>
-    </>
+    </div>
   );
 }

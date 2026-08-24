@@ -3,7 +3,7 @@ import { X, Copy, Eye, EyeOff, Pencil, ShieldCheck, AlertTriangle } from "lucide
 import { toast } from "sonner";
 import type { Secret } from "@/lib/envryn-data";
 import { Button, ConfirmDialog, DetailRow, Modal, IconButton } from "./ui";
-import { copySecret } from "./SecretList";
+import { copySecret } from "@/lib/vault-actions";
 import { useVaultUI } from "./vault-context";
 
 const REVEAL_SECONDS = 20;
@@ -33,9 +33,7 @@ export function SecretPanel({ secret }: { secret: Secret }) {
   return (
     <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-surface xl:w-[344px]">
       <div className="flex h-9 items-center justify-between gap-2 border-b border-border px-3">
-        <span className="truncate font-mono text-[12.5px] font-medium">
-          {secret.name}
-        </span>
+        <span className="truncate font-mono text-[12.5px] font-medium">{secret.name}</span>
         <IconButton label="Close (Esc)" onClick={() => select(null)}>
           <X />
         </IconButton>
@@ -45,13 +43,21 @@ export function SecretPanel({ secret }: { secret: Secret }) {
         <DetailRow label="Type" value={secret.type} />
         <div className="grid grid-cols-2 gap-3">
           <DetailRow label="Project" value={secret.project} />
-          <DetailRow label="Environment" value={secret.environment} />
+          <DetailRow
+            label="Environment"
+            value={secret.environment === "—" ? "No environment" : secret.environment}
+          />
         </div>
         {secret.provider && <DetailRow label="Provider" value={secret.provider} />}
 
         <div>
-          <div className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground">
-            Value
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground">
+              Value
+            </div>
+            {!secret.damaged && (
+              <span className="text-[10.5px] text-subtle-foreground">Hidden until revealed</span>
+            )}
           </div>
           {secret.damaged ? (
             <div className="mt-1 rounded-md border border-warning/35 bg-warning/8 px-2.5 py-2">
@@ -60,7 +66,7 @@ export function SecretPanel({ secret }: { secret: Secret }) {
                 This secret couldn't be opened.
               </p>
               <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-                The stored data may be damaged.
+                The stored data may be damaged. Restore from a backup or replace this secret.
               </p>
             </div>
           ) : (
@@ -69,7 +75,7 @@ export function SecretPanel({ secret }: { secret: Secret }) {
                 {revealed ? secret.value : "••••••••••••••••••••••••••••"}
               </div>
               <div className="mt-2 flex items-center gap-2">
-                <Button onClick={copySecret}>
+                <Button onClick={() => void copySecret(secret)}>
                   <Copy />
                   Copy
                 </Button>
@@ -128,7 +134,7 @@ export function SecretPanel({ secret }: { secret: Secret }) {
 
       <div className="border-t border-border px-3.5 py-2.5">
         <Button variant="danger" size="block" onClick={() => setDeleting(true)}>
-          Delete Secret
+          Delete secret
         </Button>
       </div>
 
@@ -159,7 +165,7 @@ export function SecretPanel({ secret }: { secret: Secret }) {
         onOpenChange={setDeleting}
         title={`Delete ${secret.name}?`}
         body="This secret will be permanently removed from this vault. This can't be undone."
-        confirmLabel="Delete Secret"
+        confirmLabel="Delete secret"
         onConfirm={() => {
           select(null);
           toast("Secret deleted");
