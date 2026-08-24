@@ -11,23 +11,6 @@ import { secrets, type Secret } from "@/lib/envryn-data";
 import { copySecret } from "@/lib/vault-actions";
 
 export const Route = createFileRoute("/vault")({
-  head: () => ({
-    meta: [
-      { title: "Vault — Envryn" },
-      {
-        name: "description",
-        content:
-          "Browse and manage API keys, tokens, database credentials and SSH secrets across your projects and environments.",
-      },
-      { property: "og:title", content: "Vault — Envryn" },
-      {
-        property: "og:description",
-        content: "Manage developer secrets across projects and environments.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
   component: VaultLayout,
 });
 

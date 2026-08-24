@@ -3,24 +3,32 @@ logs
 *.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
+# JS
 node_modules
 dist
-dist-ssr
-.output
-.vinxi
-.tanstack/**
-.nitro
 *.local
 
-# Wrangler / Cloudflare
-.wrangler/
-.dev.vars
+# Rust
+target/
+**/target/
 
-# Editor directories and files
+# Tauri
+src-tauri/gen/
+src-tauri/binaries/
+apps/ui/src/routeTree.gen.ts
+
+# Local AI models -- never committed (large, and not ours to redistribute)
+models/
+*.gguf
+
+# Vault data must never enter the repository
+*.envryn
+*.envrynbk
+vault-data/
+
+# Editor
 .vscode/*
 !.vscode/extensions.json
 .idea

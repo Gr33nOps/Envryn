@@ -6,23 +6,6 @@ import { Button, IconButton, Input } from "@/components/envryn/ui";
 import { LogoMark } from "@/components/envryn/Logo";
 
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Envryn — Unlock your developer secrets vault" },
-      {
-        name: "description",
-        content:
-          "Envryn is a local-first developer secrets vault for API keys, tokens, database and SSH credentials. Unlock to access your vault.",
-      },
-      { property: "og:title", content: "Envryn — Developer secrets vault" },
-      {
-        property: "og:description",
-        content: "Local-first vault for API keys, tokens, database and SSH credentials.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
   component: Unlock,
 });
 

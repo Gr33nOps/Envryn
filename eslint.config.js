@@ -6,12 +6,12 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  { ignores: ["**/dist", "**/target", "**/routeTree.gen.ts", "**/node_modules"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2022,
       globals: globals.browser,
     },
     plugins: {
@@ -20,20 +20,46 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "@typescript-eslint/no-unused-vars": "off",
+
+      // INV-010: Envryn makes no outbound network connection. The UI talks to
+      // the Rust core over Tauri IPC and to nothing else. A `fetch` in the UI
+      // is either a bug or an exfiltration path, and there is no legitimate
+      // third case -- so it fails the build rather than a review.
+      "no-restricted-globals": [
+        "error",
+        {
+          name: "fetch",
+          message:
+            "The UI must not make network requests (INV-010). Use a Tauri IPC command in src-tauri instead.",
+        },
+        {
+          name: "XMLHttpRequest",
+          message: "The UI must not make network requests (INV-010). Use a Tauri IPC command.",
+        },
+        {
+          name: "WebSocket",
+          message: "The UI must not open sockets (INV-010). Sync lives in the Rust core.",
+        },
+        {
+          name: "EventSource",
+          message: "The UI must not open network streams (INV-010).",
+        },
+      ],
+
       "no-restricted-imports": [
         "error",
         {
-          paths: [
+          patterns: [
             {
-              name: "server-only",
+              group: ["@tanstack/react-start", "@tanstack/react-start/*"],
               message:
-                "TanStack Start does not use the Next.js `server-only` package. Rename the module to `*.server.ts` or mark it with `@tanstack/react-start/server-only`.",
+                "Envryn is a Tauri SPA, not a TanStack Start app. There is no server to run this on.",
             },
           ],
         },
       ],
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-      "@typescript-eslint/no-unused-vars": "off",
     },
   },
   eslintPluginPrettier,
