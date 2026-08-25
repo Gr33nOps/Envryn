@@ -4,12 +4,20 @@
 //! surface; every security decision lives in `envryn-core`, which has no
 //! dependency on Tauri and can therefore be tested without a windowing system.
 
-mod ai;
+// `ai`/`ipc`/`settings`/`sync` are `pub` (rather than the private `mod` an
+// application-only crate would otherwise use) solely so `tests/ipc_mock.rs`
+// -- a real Cargo integration test target -- can reach their `#[tauri::command]`
+// functions and state types to dispatch them through `tauri::test`'s real IPC
+// path. This crate is `publish = false` and has no external consumers, so the
+// wider surface carries no real cost; nothing about the command boundary
+// itself changes; see `tests/ipc_mock.rs`'s module doc for why the tests live
+// there instead of an internal `#[cfg(test)] mod tests`.
+pub mod ai;
 mod autolock;
 mod capture_protection;
-mod ipc;
-mod settings;
-mod sync;
+pub mod ipc;
+pub mod settings;
+pub mod sync;
 
 use ai::AiState;
 use ipc::VaultState;

@@ -13,6 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Only to embed a Common-Controls-v6 manifest into `cargo test`'s own harness
+# binary -- see build.rs for why `tauri_build::build()` alone doesn't cover it.
+embed-resource = "3"
 
 [features]
 # Without this, even a `--release` build serves the webview from `devUrl`
@@ -50,6 +53,15 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # the only things here that need it. Left unpinned to the patch so Cargo
 # unifies with Tauri's own `tokio = "1"` requirement into one runtime instance.
 tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+# Real Tauri IPC dispatch against a `MockRuntime`, not a mock of our own --
+# `assert_ipc_response`/`get_ipc_response` invoke a command by its real
+# string name through the same dispatch path `generate_handler!` wires up
+# for the real app, proving the actual `#[tauri::command]` functions in
+# ipc.rs/sync.rs/settings.rs/ai.rs behave correctly, not just the plain Rust
+# functions behind them called directly.
+tauri = { version = "2", features = ["test"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1194,6 +1194,7 @@ dependencies = [
 name = "envryn"
 version = "0.1.0"
 dependencies = [
+ "embed-resource",
  "envryn-core",
  "rand 0.8.7",
  "rustls",
