@@ -37,13 +37,17 @@ fn env_path(var: &str) -> PathBuf {
 }
 
 fn spawn_real_engine() -> WorkerClient {
+    spawn_real_engine_with_env(Vec::new())
+}
+
+fn spawn_real_engine_with_env(extra_env: Vec<(String, String)>) -> WorkerClient {
     let config = WorkerSpawnConfig {
         worker_binary: env_path("ENVRYN_TEST_WORKER_BINARY"),
         model_path: env_path("ENVRYN_TEST_MODEL"),
         tokenizer_path: env_path("ENVRYN_TEST_TOKENIZER"),
         arch: "qwen2".to_string(),
         eos_token: "<|im_end|>".to_string(),
-        extra_env: Vec::new(),
+        extra_env,
     };
     WorkerClient::spawn(&config).expect("the real worker should start and load the real model")
 }
@@ -107,4 +111,38 @@ fn a_five_field_search_query_either_parses_or_is_cleanly_refused_never_silently_
         }
         Err(other) => panic!("expected either a valid parse or a clean refusal, got {other:?}"),
     }
+}
+
+/// `docs/AI_SECURITY.md`'s "disconnect the internet and confirm every AI
+/// feature still works" scenario, exercised safely rather than skipped:
+/// this poisons the *worker child process's own* `HTTP_PROXY`/`HTTPS_PROXY`/
+/// `ALL_PROXY` environment variables (via `WorkerSpawnConfig::extra_env`,
+/// which only affects that one spawned process, not this test process or
+/// the real system) to point at an address nothing is listening on, so any
+/// HTTP client the worker *did* try to use would fail fast rather than
+/// silently succeed via the real network. Real inference completing
+/// normally under that condition is real evidence -- not merely the
+/// dependency-graph argument (`envryn-ai-worker` has no HTTP client crate
+/// at all, confirmed separately via `cargo tree`) -- that this feature
+/// needs no network. Deliberately does *not* touch the OS firewall or any
+/// system-wide setting, which would be a far more disruptive way to test
+/// the same property on a real development machine.
+#[test]
+#[ignore = "requires a real downloaded model -- see module doc"]
+fn classification_still_works_with_the_workers_proxy_env_poisoned() {
+    let poison = "http://127.0.0.1:1".to_string(); // nothing listens on port 1
+    let engine = spawn_real_engine_with_env(vec![
+        ("HTTP_PROXY".to_string(), poison.clone()),
+        ("HTTPS_PROXY".to_string(), poison.clone()),
+        ("ALL_PROXY".to_string(), poison),
+        ("NO_PROXY".to_string(), String::new()),
+    ]);
+    let gateway = AiGateway::new(engine);
+
+    let result = gateway
+        .classify_pasted_value("sk-live-abcdefghijklmnopqrstuvwxyz1234567890")
+        .expect("inference must succeed unaffected by proxy env poisoning -- the worker never makes an HTTP call in the first place");
+
+    println!("real model classification result under poisoned proxy env: {result:?}");
+    assert_eq!(result.kind, SecretKind::ApiKey);
 }

@@ -36,3 +36,21 @@ pub fn clear_clipboard() -> Result<()> {
 pub fn exclude_window_from_capture(_hwnd: isize) -> Result<()> {
     Err(Error::PlatformUnavailable)
 }
+
+/// Non-Windows placeholder for `windows_impl::KillOnCloseJob` -- there is
+/// no equivalent primitive implemented for this platform yet. Callers
+/// (`crate::ai::worker_client::WorkerClient`) already treat this as a
+/// best-effort hardening layer, not the only thing keeping a spawned
+/// worker process supervised, so failing here does not change behaviour
+/// beyond not having the extra safety net.
+pub struct KillOnCloseJob;
+
+impl KillOnCloseJob {
+    pub fn new() -> Result<Self> {
+        Err(Error::PlatformUnavailable)
+    }
+
+    pub fn assign(&self, _process_handle: isize) -> Result<()> {
+        Err(Error::PlatformUnavailable)
+    }
+}

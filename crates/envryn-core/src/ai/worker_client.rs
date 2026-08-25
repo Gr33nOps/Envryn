@@ -41,8 +41,18 @@ struct WireRequest {
 #[derive(Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum WireResponse {
-    Ok { text: String },
-    Error { message: String },
+    Ok {
+        text: String,
+    },
+    // The field must stay named `message` to deserialise the worker's wire
+    // shape (`{"status":"error","message":"..."}`) at all -- but `complete`
+    // deliberately never reads it (bound to `_` at its one match site) and
+    // never will, so `#[allow(dead_code)]` here is exact, not a blanket
+    // suppression: see that match arm's comment for why.
+    #[allow(dead_code)]
+    Error {
+        message: String,
+    },
 }
 
 /// Where to find the worker binary and the already-verified model it should
@@ -64,10 +74,19 @@ pub struct WorkerSpawnConfig {
 /// on drop is the safety net; callers that need the kill to happen
 /// *synchronously* (e.g. right before vault lock returns) should call
 /// [`WorkerClient::shutdown`] explicitly rather than relying on drop order.
+///
+/// `_job` is a second, independent safety net for the case the first one
+/// (this struct's own `Drop`) cannot cover: if the whole Envryn process
+/// exits abnormally (crash, a forceful kill) without running any `Drop` at
+/// all, `crate::platform::KillOnCloseJob`'s own `Drop` -- which the OS runs
+/// as part of closing every handle this process still held, even on an
+/// abnormal exit -- terminates the worker anyway. Never read after
+/// construction; it exists to be dropped at the right time, not used.
 pub struct WorkerClient {
     child: Mutex<Child>,
     stream: Mutex<TcpStream>,
     token: String,
+    _job: Option<crate::platform::KillOnCloseJob>,
 }
 
 impl WorkerClient {
@@ -94,6 +113,25 @@ impl WorkerClient {
         }
         let mut child = command.spawn().map_err(|_| EngineError::Unavailable)?;
 
+        // Best-effort: a platform without `KillOnCloseJob` (anything but
+        // Windows today, see `platform::stub`) or a process that could not
+        // be assigned (already in a non-nesting job -- rare, but Windows
+        // permits it) still has the ordinary `Drop`-based kill; this is
+        // additive hardening, not the only thing keeping the worker
+        // supervised, so a failure here is not fatal to spawning at all.
+        let job = crate::platform::KillOnCloseJob::new().ok();
+        if let Some(job) = &job {
+            #[cfg(windows)]
+            {
+                use std::os::windows::io::AsRawHandle;
+                let _ = job.assign(child.as_raw_handle() as isize);
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = job;
+            }
+        }
+
         let stdout = child.stdout.take().ok_or(EngineError::Unavailable)?;
         let (port, token) = match read_ready_line_with_timeout(stdout, READY_TIMEOUT) {
             Ok(ready) => ready,
@@ -115,6 +153,7 @@ impl WorkerClient {
             child: Mutex::new(child),
             stream: Mutex::new(stream),
             token,
+            _job: job,
         })
     }
 
@@ -149,16 +188,20 @@ impl LocalAiEngine for WorkerClient {
         let response: WireResponse = read_json(&mut *stream).map_err(|_| EngineError::Timeout)?;
         match response {
             WireResponse::Ok { text } => Ok(text),
-            // The message is the worker's own diagnostic about its own
-            // operational failure (e.g. "tokenizer encode failed") -- never
-            // prompt or response content, so surfacing it to stderr here is
-            // not the leak docs/AI_SECURITY.md section 6 is about. Nothing
-            // downstream of `AiError::EngineUnavailable`-family variants
-            // gets more detail than that, by design.
-            WireResponse::Error { message } => {
-                eprintln!("envryn: local AI worker reported an error: {message}");
-                Err(EngineError::Malformed)
-            }
+            // `message` is meant to be the worker's own diagnostic about its
+            // own operational failure (e.g. "tokenizer encode failed"), but
+            // that is a convention the worker's error paths follow, not
+            // something this client can verify -- a future bug in a
+            // library error's Display impl, or in how the worker builds
+            // this string, could put a fragment of the prompt or model
+            // output into it. Rather than trust that and print it
+            // (docs/AI_SECURITY.md section 6: never the prompt, the model
+            // input, the model output, or any fragment of a value), the
+            // message is discarded entirely and only the fact of failure is
+            // observable, matching the "operation name, status, and timing
+            // only" rule exactly rather than relying on convention to keep
+            // it that way.
+            WireResponse::Error { message: _ } => Err(EngineError::Malformed),
         }
     }
 }
@@ -299,5 +342,89 @@ mod tests {
         let mut child = client.child.lock().unwrap();
         std::thread::sleep(Duration::from_millis(200));
         assert!(child.try_wait().unwrap().is_some());
+    }
+
+    /// The adversarial scenario `docs/AI_SECURITY.md` names explicitly:
+    /// "kill the worker mid-inference and confirm the vault is unaffected."
+    /// The fixture is told to sleep before answering (standing in for real
+    /// generation time); a second thread kills the process while that sleep
+    /// is in progress, i.e. genuinely mid-request, not merely mid-idle like
+    /// `shutdown_actually_terminates_the_child_process` above. `complete`
+    /// must return an error, not hang forever waiting on a response that
+    /// will now never arrive, and not panic. "The vault is unaffected" is
+    /// not a separate assertion here -- it is structural: nothing in this
+    /// crate's `vault`/`storage`/`crypto` modules holds a reference to, or
+    /// blocks on, an `AiGateway` or `WorkerClient` at all, so there is no
+    /// vault-side state this scenario could even reach into.
+    #[test]
+    fn killing_the_worker_mid_inference_fails_the_request_cleanly() {
+        let mut config = fixture_config();
+        config
+            .extra_env
+            .push(("FAKE_WORKER_DELAY_MS".to_string(), "5000".to_string()));
+        let client = WorkerClient::spawn(&config).unwrap();
+        let client = std::sync::Arc::new(client);
+
+        let request_client = client.clone();
+        let handle = std::thread::spawn(move || {
+            let prompt = SanitizedPrompt::for_test("this will be interrupted");
+            request_client.complete(&prompt, 16)
+        });
+
+        // Give the request time to actually reach the fixture and start its
+        // 5-second sleep before killing -- otherwise this could race and
+        // kill before the connection is even established.
+        std::thread::sleep(Duration::from_millis(300));
+        client.shutdown();
+
+        let result = handle
+            .join()
+            .expect("the request thread itself must not panic");
+        assert!(
+            matches!(
+                result,
+                Err(EngineError::Timeout) | Err(EngineError::Unavailable)
+            ),
+            "expected a clean engine error, got {result:?}"
+        );
+    }
+
+    /// `docs/AI_SECURITY.md` section 6's sentinel scenario: even if a
+    /// worker's error message happened to contain something prompt-shaped
+    /// (simulated here via the fixture -- the real worker's own error paths
+    /// do not do this today, but nothing *type-level* stopped a future
+    /// change from introducing it), that message must never be observable
+    /// outside this function. `complete`'s only handling of
+    /// `WireResponse::Error` is `Err(EngineError::Malformed)` -- the
+    /// `message` field is bound to `_` and never read (see its call site) --
+    /// so this asserts the *outcome* carries no trace of the sentinel: not
+    /// in the returned error (`EngineError` has no message-carrying variant
+    /// at all to put it in) and not anywhere reachable from this test.
+    /// A real "capture this process's OS-level stdout/stderr" check would
+    /// need unsafe FFI this crate's `unsafe_code = "deny"` lint reserves for
+    /// `platform::windows_impl` alone -- not worth adding for a risk this
+    /// change already removed structurally; the static guarantee is instead
+    /// `.semgrep/ai-no-content-logging.yml`'s job, verified separately.
+    #[test]
+    fn a_sentinel_in_a_worker_error_message_produces_no_message_carrying_result() {
+        const SENTINEL: &str = "sk-test-SENTINEL-VALUE-MUST-NEVER-BE-OBSERVABLE-abc123";
+
+        let mut config = fixture_config();
+        config.extra_env.push((
+            "FAKE_WORKER_ERROR_MESSAGE".to_string(),
+            SENTINEL.to_string(),
+        ));
+        let client = WorkerClient::spawn(&config).unwrap();
+
+        let prompt = SanitizedPrompt::for_test("irrelevant, the response is forced to error");
+        let result = client.complete(&prompt, 8);
+
+        // `EngineError::Malformed` is a unit variant -- there is no `Debug`
+        // or `Display` rendering of this `Result` that could contain the
+        // sentinel, because there is no field to put it in.
+        assert!(matches!(result, Err(EngineError::Malformed)));
+        assert!(!format!("{result:?}").contains(SENTINEL));
+
+        client.shutdown();
     }
 }

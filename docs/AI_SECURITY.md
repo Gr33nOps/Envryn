@@ -330,3 +330,32 @@ Secret in prompt logs; whole vault accidentally requested; prompt injection from
 malformed structured output; oversized prompt; worker crash mid-inference; worker restart;
 vault locks during inference; tampered model file; corrupted model; user denies AI access;
 user cancels secret analysis part-way.
+
+**Status as of Phase 4 (M22).** Each item below is either a real, automated test or an honestly
+flagged gap -- nothing here is claimed done without a test to point at.
+
+| Item | Covered by | Notes |
+|---|---|---|
+| Secret in prompt logs | `worker_client::tests::a_sentinel_in_a_worker_error_message_produces_no_message_carrying_result`; `.semgrep/ai-no-content-logging.yml` (static, run against the whole `ai/` tree) | The test proves a worker-reported error message cannot reach this process's own logs even if a future library bug tried to echo content into it (see the `message: _` discard fix in `worker_client.rs`). Semgrep proves no logging call site anywhere in `ai/` interpolates a prompt/response/value-shaped variable. |
+| Whole vault accidentally requested | Structural, not a runtime test: no `AiOperation` variant accepts a bulk/`Vec<Record>`-shaped payload -- see `gateway.rs`'s operation enum and section 2 above. `gateway::tests::a_value_over_budget_never_reaches_the_engine` and `env_names_over_the_count_budget_are_refused` cover the one operation (`ParseSearchIntent`) that does take a caller-controlled count. |
+| Prompt injection from a stored note | `gateway::tests::a_fully_persuaded_model_still_cannot_express_an_action` (injected instruction plus a malicious extra field in the model's response, still refused by the schema) and `embedded_delimiter_text_does_not_escape_the_untrusted_block` (attacker text containing the untrusted-block delimiters themselves cannot forge a second, unlabeled trusted section) |  |
+| Malformed structured output | `gateway::tests::rejects_output_with_an_unexpected_field`, `rejects_malformed_json`, `tolerates_a_model_wrapping_json_in_prose` |  |
+| Oversized prompt | `gateway::tests::a_value_over_budget_never_reaches_the_engine`, `env_names_over_the_count_budget_are_refused` |  |
+| Worker crash mid-inference / vault locks during inference | `worker_client::tests::killing_the_worker_mid_inference_fails_the_request_cleanly` -- kills the worker process while a real request is in flight (via the fake-worker fixture's `FAKE_WORKER_DELAY_MS`) and asserts the caller gets a clean `Timeout`/`Unavailable` error, never a hang or a panic. Vault-lock-triggers-worker-kill itself is `ipc::vault_lock` calling `WorkerClient::shutdown()` synchronously, exercised by `worker_client::tests::shutdown_actually_terminates_the_child_process`. |
+| Worker restart | `worker_client::tests::spawn_reports_unavailable_when_the_worker_fails_to_load_its_model`, `spawn_reports_unavailable_when_the_worker_binary_does_not_exist` -- a fresh `WorkerClient::spawn()` after a prior failure is just another call, no special-cased "restart" state to get wrong |  |
+| Tampered model file / corrupted model | `model_download::tests::verify_file_rejects_a_checksum_mismatch`, `already_verified_is_none_for_a_tampered_file` |  |
+| Disconnect the internet, AI still works | `tests/ai_real_model.rs::classification_still_works_with_the_workers_proxy_env_poisoned` -- real inference against the real downloaded model, with the worker child process's own `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` pointed at a closed port. Deliberately does not touch the real OS firewall (too disruptive to run against a real development machine); see the test's own doc comment. |
+| Disable AI entirely, vault still works | `crates/envryn-core/tests/vault_lifecycle.rs` and the Phase 0-2 vault test suites run and pass with no model file present at all and no worker ever spawned -- `ai_real_model.rs` is `#[ignore]`d by default for exactly this reason (its own module doc calls this out as AI-INV-009 applied to the test suite itself). |
+| Worker dependency graph excludes the vault crate | `cargo tree -p envryn-ai-worker -i envryn-core` returns no match (checked in Phase 3; re-verified in this pass) |  |
+| User denies AI access / user cancels secret analysis part-way | **Not covered by an automated test in this pass.** Both are UI-level interaction states (a confirmation dialog result, a cancelled in-flight IPC call) rather than a `crates/envryn-core` invariant; the backend already treats "no request was made" and "a request was cancelled/dropped" as ordinary non-events (no partial state, no orphaned worker call), but there is no UI-driving test in this repo (no end-to-end harness exists yet -- see `ARCHITECTURE.md` section 9) to exercise the click-through itself. Flagged honestly rather than claimed done. |
+
+**Deliberately not attempted in this pass, and why:** a CI pipeline running the full AI operation
+set behind a real deny-all-egress firewall (the plan's stronger version of the network-privacy
+proof). This repo has no CI system at all yet (`ARCHITECTURE.md` section 9), and configuring a
+real firewall rule against this development machine to prove a point already proven two other
+ways (the dependency-graph check above, and the proxy-poisoning test above) was judged not worth
+the risk of misconfiguring a rule on a machine actually used for other things. The Semgrep rule
+at `.semgrep/network-egress.yml` and the `cargo-deny` bans in `deny.toml` are the durable,
+CI-independent version of the same guarantee: no HTTP client crate can even be compiled into
+`envryn-ai-worker` in the first place, which is a stronger claim than "was observed not to phone
+home in one test run."

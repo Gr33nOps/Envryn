@@ -41,7 +41,24 @@ fn main() {
             let request: serde_json::Value =
                 serde_json::from_slice(&buf).expect("valid request JSON");
 
-            let response = if request.get("token").and_then(|t| t.as_str()) == Some(TOKEN) {
+            // Simulates "the worker is in the middle of inference" for
+            // worker_client's kill-mid-inference test -- a real model taking
+            // real wall-clock time to generate is exactly the window a kill
+            // needs to land inside to prove anything.
+            if let Ok(ms) = std::env::var("FAKE_WORKER_DELAY_MS") {
+                if let Ok(ms) = ms.parse::<u64>() {
+                    std::thread::sleep(std::time::Duration::from_millis(ms));
+                }
+            }
+
+            // Lets worker_client's log-sentinel test simulate a worker whose
+            // error message happens to contain prompt-shaped content --
+            // this fixture only ever puts it on the wire (below), never on
+            // its own stdout/stderr, which is exactly the property that
+            // test checks for the real code path too.
+            let response = if let Ok(msg) = std::env::var("FAKE_WORKER_ERROR_MESSAGE") {
+                serde_json::json!({"status": "error", "message": msg})
+            } else if request.get("token").and_then(|t| t.as_str()) == Some(TOKEN) {
                 let prompt = request.get("prompt").and_then(|p| p.as_str()).unwrap_or("");
                 serde_json::json!({"status": "ok", "text": format!("echo:{prompt}")})
             } else {

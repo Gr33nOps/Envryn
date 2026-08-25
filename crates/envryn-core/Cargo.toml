@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+publish = false
 
 [[bin]]
 # Test-only fixture for src/ai/worker_client.rs -- see the fixture's own doc
@@ -68,11 +69,14 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 # so that the HWND we receive from Tauri and the HWND type here are identical.
 windows = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security",
     "Win32_Security_Cryptography",
     "Win32_System_DataExchange",
+    "Win32_System_JobObjects",
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_SystemInformation",
+    "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }

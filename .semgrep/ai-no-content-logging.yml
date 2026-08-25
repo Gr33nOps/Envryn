@@ -1,0 +1,56 @@
+rules:
+  - id: ai-no-prompt-or-response-logging
+    languages: [rust]
+    severity: ERROR
+    message: >
+      A logging/print macro was found reaching a variable whose name suggests it holds a
+      prompt, a model response, or a raw value the AI subsystem is handling. docs/AI_SECURITY.md
+      section 6: permitted log content is the operation name, status, and timing only -- never
+      the prompt, the model input, the model output, or any fragment of a value. If this really
+      is safe (e.g. a stable, constant string with no interpolated content), rename the
+      variable so it does not read as a content leak, or restructure the log line to interpolate
+      only a status/duration field.
+    paths:
+      include:
+        - "**/crates/envryn-core/src/ai/**"
+        - "**/crates/envryn-ai-worker/src/**"
+        - "**/src-tauri/src/ai.rs"
+      exclude:
+        - "**/*/tests/*"
+    patterns:
+      - pattern-either:
+          - pattern: println!(..., $VAR, ...)
+          - pattern: print!(..., $VAR, ...)
+          - pattern: eprintln!(..., $VAR, ...)
+          - pattern: eprint!(..., $VAR, ...)
+          - pattern: log::info!(..., $VAR, ...)
+          - pattern: log::warn!(..., $VAR, ...)
+          - pattern: log::error!(..., $VAR, ...)
+          - pattern: log::debug!(..., $VAR, ...)
+          - pattern: log::trace!(..., $VAR, ...)
+      - metavariable-regex:
+          metavariable: $VAR
+          regex: (?i)(prompt|completion|response_text|raw_text|value|secret|plaintext|generated)
+
+  - id: sanitized-prompt-no-display-debug
+    languages: [generic]
+    severity: ERROR
+    message: >
+      SanitizedPrompt must never gain a Display or Debug impl -- docs/AI_SECURITY.md section 6
+      relies on this to make "{:?}"/"{}" of a prompt a compile error rather than a leak someone
+      has to remember not to write.
+    paths:
+      include:
+        - "**/crates/envryn-core/src/ai/**"
+    pattern-regex: impl\s+(\S*::)?(Debug|Display)\s+for\s+SanitizedPrompt
+
+  - id: sanitized-prompt-no-derived-debug
+    languages: [generic]
+    severity: ERROR
+    message: >
+      A #[derive(...)] on or immediately above SanitizedPrompt's declaration includes Debug.
+      This must stay hand-omitted -- see sanitized-prompt-no-display-debug's message.
+    paths:
+      include:
+        - "**/crates/envryn-core/src/ai/gateway.rs"
+    pattern-regex: (?s)#\[derive\([^)]*Debug[^)]*\)\]\s*(pub\s+)?struct\s+SanitizedPrompt

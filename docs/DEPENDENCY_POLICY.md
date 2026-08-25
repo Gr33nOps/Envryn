@@ -85,6 +85,23 @@ The `cargo metadata` assertion deserves emphasis: it is what makes AI-INV-001, 0
 structural. The AI worker cannot receive a key because the types that represent keys are not in
 its dependency graph at all — and CI fails the moment someone changes that, before review.
 
+**Status as of Phase 4 (M22): every row above is a real, working, manually-run check — none of
+them run in CI, because no CI pipeline exists in this repo yet** (`ARCHITECTURE.md` section 9).
+Concretely: `deny.toml` exists at the repo root and `cargo deny check` exits 0 (advisories, bans,
+licenses, and sources all pass; the "known vulnerabilities" row is covered by `cargo deny check`'s
+own advisories sub-check rather than a separate `cargo audit` invocation, since both read the
+same RUSTSEC database — `cargo audit` was also run standalone and confirms the same 18
+already-reviewed findings). The Semgrep rule is real and lives at
+`.semgrep/network-egress.yml`, verified to have zero findings against the current codebase and to
+correctly catch synthetic violations of both `ureq`- and `reqwest`-shaped network calls. The
+"AI worker does not depend on the vault crate" row is `cargo tree -p envryn-ai-worker -i
+envryn-core` returning no match, checked by hand, not a scripted assertion with its own exit
+code — a small gap from what this table implies, worth closing if a CI pipeline is ever added.
+"No telemetry endpoints in the bundle" has no dedicated check beyond `deny.toml`'s ban on
+`sentry`/`sentry-core` and the `npm`-side dependency review in section 4 — no separate egress
+test or string scan exists. `npm audit` was not run in this pass (no npm dependency changed in
+Phase 4).
+
 ---
 
 ## 7. Current core dependencies

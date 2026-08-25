@@ -233,7 +233,7 @@ is ordinary code, which is faster, more private, and works with no model install
 | Screen capture | **Implemented:** `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, applied unconditionally at startup | Not yet. `FLAG_SECURE` via a custom Kotlin plugin, planned |
 | Clipboard | **Implemented:** native write + `ExcludeClipboardContentFromMonitorProcessing` tag + Rust-side timed clear, configurable in Settings | Not yet. `ClipDescription.EXTRA_IS_SENSITIVE`, planned |
 | Lock trigger | **Implemented:** system-wide idle poll (`GetLastInputInfo`, every 5s). **Not implemented:** `WTS_SESSION_LOCK` -- see below | Not yet. Lifecycle background trigger, planned |
-| Local AI | **Implemented:** bundled `candle`-based sidecar (`envryn-ai-worker`), spawned via `std::process::Command`. **Not implemented:** packaging the sidecar via Tauri's `bundle.externalBin` so a released installer includes it -- development builds resolve the binary as a sibling of the running executable | **Not in v1** (spec section 52) |
+| Local AI | **Implemented:** bundled `candle`-based sidecar (`envryn-ai-worker`), spawned via `std::process::Command`. As of M22, additionally assigned to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job object (`platform::windows_impl::KillOnCloseJob`) so the OS guarantees the worker dies even if this process itself crashes or is force-killed, not only on a normal `Drop`. **Not implemented:** packaging the sidecar via Tauri's `bundle.externalBin` so a released installer includes it -- development builds resolve the binary as a sibling of the running executable | **Not in v1** (spec section 52) |
 | Min version | Windows 10 1809+ | API 26+ (StrongBox 28+) |
 
 **Why idle-poll rather than `WTS_SESSION_LOCK` for now.** A native session-lock hook needs a
@@ -241,7 +241,11 @@ window-message subscription (`WTSRegisterSessionNotification` plus handling `WM_
 in the window procedure) -- a real native hook, not a library call. The idle poll
 (`src-tauri/src/autolock.rs`) covers the common case -- the user walked away -- at a fraction of
 the implementation cost, and works identically regardless of whether the OS session itself locks.
-Reacting to the session-lock event directly remains open for M22 hardening.
+Reacting to the session-lock event directly remains open work -- not addressed in the Phase 4
+(M22-M28) hardening pass, which focused on the AI attack surface, the network-privacy proof, and
+supply-chain policy enforcement (see `AI_SECURITY.md` section 10 and `DEPENDENCY_POLICY.md`
+section 6) rather than platform-trigger coverage. It stays a real, open gap, just not one this
+pass closed.
 
 **What "Unlock with this Windows account" actually is.** It is DPAPI (`CryptProtectData`), tied to
 the current Windows user account -- not `KeyCredentialManager`, and not a biometric gesture. The
@@ -296,12 +300,18 @@ unsafe-free.
 list below is the target M1 was meant to set up; today, every item on it is run manually,
 locally, before each phase is considered complete -- `cargo fmt --check`, `cargo clippy -D
 warnings`, and `cargo test --workspace` genuinely do run this way every session (see this
-repo's commit history for the verification paragraph on each phase's commit), but `cargo test
---no-default-features`, `cargo deny check`, `cargo audit`, Semgrep, and the egress test named
-below have never been run at all -- `cargo-deny`/`cargo-audit`/Semgrep are not installed in
-this development environment, and no feature flag currently separates "AI compiled in" from
-"AI compiled out" (see the paragraph above). Wiring an actual CI pipeline that runs all of this
-automatically is real, unstarted work.
+repo's commit history for the verification paragraph on each phase's commit). As of Phase 4
+(M22), `cargo-deny` and `cargo-audit` are installed in this development environment and
+genuinely run (`deny.toml` at the repo root, `cargo deny check` exits 0), and two real Semgrep
+rule sets exist and run clean against the codebase (`.semgrep/network-egress.yml`,
+`.semgrep/ai-no-content-logging.yml`). `cargo test --no-default-features` and the live
+deny-all-egress firewall test remain not run -- no feature flag currently separates "AI compiled
+in" from "AI compiled out" (see the paragraph above), and a real firewall rule was judged too
+disruptive to configure against this development machine (see `AI_SECURITY.md` section 10 for
+what stands in for it instead: a structural dependency-graph check plus a real-model test run
+under a poisoned proxy environment). Wiring an actual CI pipeline that runs all of this
+automatically on every push is still real, unstarted work -- every check above is a pre-release
+manual step, not a merge gate.
 
 Once it exists: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`,
 `cargo test --no-default-features` (the AI-disabled run), `cargo deny check`, `cargo audit`,

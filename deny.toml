@@ -1,0 +1,160 @@
+# Supply-chain policy for Envryn. Companion to docs/DEPENDENCY_POLICY.md --
+# read that first; this file is where its rules become an enforceable check
+# rather than a document someone has to remember to consult.
+#
+# Run with: cargo deny check
+# (cargo-deny and cargo-audit are not installed by default in a fresh clone
+# of this repo -- `cargo install cargo-deny cargo-audit` first. Neither is
+# wired into an automated CI pipeline yet; see docs/ARCHITECTURE.md section 9.)
+
+[graph]
+# Restricting to the one target this project actually builds and ships
+# (docs/ARCHITECTURE.md section 7: Windows only, Android planned but not
+# started) matters concretely here: Tauri declares `reqwest` as a
+# target-conditional dependency for Android/iOS only (its Cargo.toml:
+# `[target.'cfg(any(target_os = "android", ...))'.dependencies.reqwest]`),
+# used for its mobile plugin bridge. Without this restriction, cargo-deny
+# resolves the graph for every platform Cargo.lock could satisfy and reports
+# that dependency as present, even though it is never compiled or linked
+# into the Windows binary this project actually produces -- a false
+# positive against the very ban this file exists to enforce (see
+# `[bans.deny]` below). Revisit this list when Android support actually
+# starts.
+targets = [{ triple = "x86_64-pc-windows-msvc" }]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+# Every ID below was reviewed individually rather than blanket-suppressed --
+# see the reason on each. All 18 are "unmaintained" or "unsound" warnings,
+# not exploitable vulnerabilities in Envryn's own code paths, and every one
+# of them arrives through Tauri's own dependency tree, not through anything
+# this project chose directly.
+#
+# Note on "advisory-not-detected" warnings from `cargo deny check`: these 18
+# crates are still present in Cargo.lock (Cargo resolves and locks
+# dependencies for every target cfg a `[target.'cfg(...)']` section could
+# match, not only the host platform -- confirmed with `cargo tree
+# --target=all`, which does show glib/gtk/webkit2gtk under tauri's Linux
+# backend, unlike a plain `cargo tree`, which silently filters to the host
+# target and made these look absent on a first, incorrect check). Because
+# `[graph].targets` below restricts cargo-deny's own resolved graph to
+# `x86_64-pc-windows-msvc` only, cargo-deny correctly reports these
+# GTK3/Linux-only advisories as "not detected" *in the graph it checks* --
+# that is the target-filtering working as intended, not evidence the crates
+# were removed. The ignore entries stay, so a future change that removes the
+# target filter (or a Linux build target) does not silently start failing.
+ignore = [
+    # gtk-rs GTK3 bindings, unmaintained upstream (10 advisories, one crate
+    # family). Pulled in transitively by `tauri`/`wry`/`tao` for Linux
+    # desktop support -- Envryn ships Windows only (docs/ARCHITECTURE.md
+    # section 7), so this GTK3 code path is never exercised or shipped, and
+    # replacing it is entirely upstream Tauri's decision, not ours to make
+    # by pinning a fork.
+    { id = "RUSTSEC-2024-0411", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0412", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0413", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0414", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0415", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0416", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0417", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0418", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0419", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    { id = "RUSTSEC-2024-0420", reason = "gtk-rs GTK3 bindings, unmaintained upstream; transitive via tauri/wry for Linux support, which this project does not target or ship" },
+    # glib unsoundness in an Iterator impl -- same GTK3/Linux-only path.
+    { id = "RUSTSEC-2024-0429", reason = "unsound Iterator impl in glib, transitive via tauri/wry's GTK3 (Linux-only) backend; not reachable on the Windows build this project ships" },
+    # Small unmaintained utility crates, both transitive and both with no
+    # known vulnerability, only "no longer updated."
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained (archived by its author) but has no known vulnerability; transitive via candle-core's gemm dependency, not a direct choice of this project" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained but has no known vulnerability; transitive via glib-macros (GTK3/Linux-only path, see above)" },
+    # The `unic-*` family (Unicode data crates from the now-archived
+    # rust-unic project), transitive via `urlpattern` (a Tauri dependency
+    # for its URL-pattern matching, unrelated to anything Envryn calls).
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range is unmaintained (rust-unic project archived); transitive via tauri-utils' urlpattern dependency, not called by this project's own code" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common is unmaintained (rust-unic project archived); transitive via tauri-utils' urlpattern dependency, not called by this project's own code" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property is unmaintained (rust-unic project archived); transitive via tauri-utils' urlpattern dependency, not called by this project's own code" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version is unmaintained (rust-unic project archived); transitive via tauri-utils' urlpattern dependency, not called by this project's own code" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident is unmaintained (rust-unic project archived); transitive via tauri-utils' urlpattern dependency, not called by this project's own code" },
+]
+
+[licenses]
+# docs/DEPENDENCY_POLICY.md section 1, question 7: "Permissive only (MIT /
+# Apache-2.0 / BSD / ISC)" for anything added directly. This allow list is
+# necessarily broader than that -- it reflects the full transitive tree,
+# almost entirely pulled in by Tauri -- but every entry here is still a
+# permissive license (or, for MPL-2.0, the one weak/file-level copyleft
+# license section 2's ban list does not name -- it bans GPL/AGPL/SSPL
+# specifically, not MPL). Nothing here is a whole-project copyleft licence.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    # Not encountered in the Windows-target-filtered graph today (see
+    # [graph].targets above) -- target-lexicon has this as its sole licence
+    # elsewhere in the unfiltered tree, kept here in case a future change
+    # brings it into the filtered graph rather than risk a silent gap.
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "MIT-0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# envryn-core/envryn-ai-worker are path dependencies within this workspace,
+# never published to crates.io -- they have no meaningful "version" to pin,
+# unlike an actual `foo = "*"` pointing at the registry, which is what this
+# check exists to catch.
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow-workspace = true
+deny = [
+    # docs/DEPENDENCY_POLICY.md section 2: "Any HTTP client outside the
+    # model-download module." cargo-deny bans a crate for the whole
+    # workspace, not per-module -- it cannot express "ureq is fine in
+    # ai/model_download.rs but nowhere else" (that finer-grained,
+    # per-source-location check is .semgrep/network-egress.yml's job). What
+    # this list *can* enforce is that no *second, undiscussed* HTTP client
+    # ever enters the tree -- ureq is the one exception, already reviewed
+    # and present.
+    { crate = "reqwest", reason = "not the reviewed HTTP client -- ureq is; see docs/DEPENDENCY_POLICY.md section 2 and .semgrep/network-egress.yml" },
+    { crate = "hyper", reason = "not the reviewed HTTP client -- ureq is; see docs/DEPENDENCY_POLICY.md section 2 and .semgrep/network-egress.yml" },
+    { crate = "curl", reason = "not the reviewed HTTP client -- ureq is; see docs/DEPENDENCY_POLICY.md section 2 and .semgrep/network-egress.yml" },
+    # docs/DEPENDENCY_POLICY.md section 2: "Alternative cryptographic
+    # implementations. One implementation per primitive, listed in
+    # CRYPTOGRAPHY.md." rustls (backed by ring) is the one TLS stack; these
+    # are the common alternatives someone might add without checking first.
+    { crate = "openssl", reason = "alternative TLS/crypto implementation -- rustls is the one reviewed stack, see docs/CRYPTOGRAPHY.md" },
+    { crate = "openssl-sys", reason = "alternative TLS/crypto implementation -- rustls is the one reviewed stack, see docs/CRYPTOGRAPHY.md" },
+    { crate = "native-tls", reason = "alternative TLS implementation -- rustls is the one reviewed stack, see docs/CRYPTOGRAPHY.md" },
+    { crate = "md-5", reason = "MD5 is not a primitive this project uses for anything; if a real need arises it belongs in docs/CRYPTOGRAPHY.md's table first" },
+    { crate = "sha1", reason = "SHA-1 is not a primitive this project uses for anything; if a real need arises it belongs in docs/CRYPTOGRAPHY.md's table first" },
+    # docs/DEPENDENCY_POLICY.md section 2: "Telemetry, analytics, and
+    # crash-reporting SDKs. Any of them."
+    { crate = "sentry", reason = "telemetry/crash-reporting SDK -- prohibited outright, docs/DEPENDENCY_POLICY.md section 2" },
+    { crate = "sentry-core", reason = "telemetry/crash-reporting SDK -- prohibited outright, docs/DEPENDENCY_POLICY.md section 2" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
