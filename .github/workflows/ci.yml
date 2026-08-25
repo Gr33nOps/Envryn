@@ -53,6 +53,26 @@ jobs:
       # never sees. Needed even for clippy, not only a real build.
       - run: npm run build --workspace @envryn/ui
 
+      # tauri_build::build() (src-tauri/build.rs) also resolves every
+      # `bundle.externalBin` resource path at compile time -- not only when
+      # actually bundling -- and fails the build outright ("resource path
+      # ... doesn't exist") if it is missing. `src-tauri/binaries/` is
+      # deliberately .gitignore'd (a real compiled sidecar binary has no
+      # business in version control), and building a real one here would
+      # mean compiling envryn-ai-worker's full candle/tokenizers dependency
+      # tree a second time in this job alone, in release mode, on top of
+      # `cargo test` already doing it in dev mode -- discovered costing real
+      # CI time the first time `bundle.externalBin` was added, when this
+      # step didn't exist and clippy failed here instead. A placeholder
+      # satisfies the existence check without paying that cost: none of
+      # fmt/clippy/test/deny/audit ever execute the sidecar, only compile
+      # against its declared path.
+      - name: Placeholder AI worker sidecar (never executed by this job)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
+          Set-Content -Path src-tauri/binaries/envryn-ai-worker-x86_64-pc-windows-msvc.exe -Value "placeholder"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
