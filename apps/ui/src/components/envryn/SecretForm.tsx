@@ -36,6 +36,7 @@ export function SecretFormModal({
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [suggesting, setSuggesting] = React.useState(false);
+  const [suggestingName, setSuggestingName] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -93,6 +94,34 @@ export function SecretFormModal({
       toast(err instanceof IpcError ? err.message : "Could not suggest a type for this value.");
     } finally {
       setSuggesting(false);
+    }
+  }
+
+  /**
+   * L2, same data-access level as `suggestType`: the pasted value plus
+   * whatever provider deterministic classification already found (never a
+   * second round of AI-only detection just for this). Unlike type
+   * detection, there is no non-AI fallback for naming -- gated entirely on
+   * local AI being enabled and running, same as `docs/AI_DATA_ACCESS.md`'s
+   * Tier 1 "naming" row describes.
+   */
+  async function suggestName() {
+    if (!value.trim()) return;
+    setSuggestingName(true);
+    try {
+      const status = await ipc.aiStatus().catch(() => null);
+      if (!status?.enabled_in_settings || !status.engine_running) {
+        toast("Enable local AI in Settings to get name suggestions.");
+        return;
+      }
+      const deterministic = await ipc.classifyDeterministic(value).catch(() => null);
+      const result = await ipc.aiSuggestName(value, deterministic?.provider ?? null);
+      setName(result.name);
+      toast("Suggested a name based on this value.");
+    } catch (err) {
+      toast(err instanceof IpcError ? err.message : "Could not suggest a name for this value.");
+    } finally {
+      setSuggestingName(false);
     }
   }
 
@@ -175,7 +204,24 @@ export function SecretFormModal({
     >
       <div className="space-y-4">
         <Field
-          label="Name"
+          label={
+            !editing && type !== "Note" && value.trim() ? (
+              <span className="flex items-center justify-between">
+                <span>Name</span>
+                <button
+                  type="button"
+                  onClick={() => void suggestName()}
+                  disabled={suggestingName}
+                  className="inline-flex items-center gap-1 text-[10.5px] font-normal text-primary hover:text-foreground disabled:opacity-50"
+                >
+                  <Sparkles className="size-3" />
+                  {suggestingName ? "Thinking..." : "Suggest name"}
+                </button>
+              </span>
+            ) : (
+              "Name"
+            )
+          }
           hint="Use the name you will recognize in your project."
           error={error ?? undefined}
         >
