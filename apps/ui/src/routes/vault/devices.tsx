@@ -34,10 +34,10 @@ function statusTone(status: Device["status"]) {
 
 /**
  * Manual-code pairing, driven by real IPC. This device always plays the
- * "host" role here (it listens; the other device dials in) -- there is no
- * "join" screen yet for a brand-new install to pair *into* an existing
- * vault, since that belongs on a first-run screen this session did not
- * build. See docs/ARCHITECTURE.md's open items.
+ * "host" role here (it listens; the other device dials in) -- the
+ * complementary "join" role (a brand-new install pairing *into* an existing
+ * vault) lives on the first-run screen instead (`apps/ui/src/routes/index.tsx`),
+ * since a device with no vault yet cannot reach this page at all.
  */
 type PairingStage = "waiting" | "found" | "confirming" | "error";
 
