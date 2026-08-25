@@ -28,6 +28,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # tauri::generate_context!() reads tauri.conf.json at compile time and
+      # requires the frontendDist path to physically exist -- discovered by
+      # this exact workflow failing with "proc macro panicked... this path
+      # doesn't exist" the first time it ran, since the frontend was only
+      # built in the separate `frontend` job below, whose output this job
+      # never sees. Needed even for clippy, not only a real build.
+      - run: npm run build --workspace @envryn/ui
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy

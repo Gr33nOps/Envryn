@@ -185,20 +185,34 @@ hold even against a model that is fully persuaded by the injection.
 
 ## 5. Structured output
 
-**Deviation from the original design, stated plainly.** This section originally specified
-llama.cpp's GBNF grammar-constrained decoding as the first of two layers: the runtime physically
-unable to emit non-schema-valid tokens, backstopped by strict deserialisation. What got built
-(`crates/envryn-ai-worker`, on `candle`/`candle-transformers` rather than llama.cpp -- see
-`docs/ARCHITECTURE.md` section 2 for why) has **only the second layer**. There is no
-token-level grammar constraint here; the model is instructed by its prompt to emit only JSON
-matching a described shape, and whatever it actually emits is deserialised into a Rust type
-with `#[serde(deny_unknown_fields)]` and enum-valued fields
-(`crates/envryn-core/src/ai/schemas.rs`). Building an equivalent constrained sampler was judged
-out of scope for this pass; it is recorded here as a real, open gap rather than implemented as
-less than this document claims.
+**The two-layer design, now real for the one schema that needed it first.** This section
+originally specified llama.cpp's GBNF grammar-constrained decoding as the first of two layers:
+the runtime physically unable to emit non-schema-valid tokens, backstopped by strict
+deserialisation. What got built (`crates/envryn-ai-worker`, on `candle`/`candle-transformers`
+rather than llama.cpp -- see `docs/ARCHITECTURE.md` section 2 for why) had, until this pass,
+only the second layer. `crates/envryn-ai-worker/src/constrained.rs` now implements a real
+token-level grammar constraint, purpose-built for `ClassificationOutput`
+(`crates/envryn-core/src/ai/schemas.rs`) -- the one Tier-1 schema actually wired to the UI
+(`ai_classify_pasted_value`/"Suggest type"). It is not a general context-free-grammar engine
+(no recursion, no arbitrary nesting, and the model is constrained to emit the three known
+fields in a fixed order); extending it to the other schemas in `ai::schemas` means adding
+another grammar value there, not a rewrite.
 
-**What this means in practice, with real evidence.** Deserialisation alone is still a genuine
-security layer, not merely "the model is trusted to behave": a small model does occasionally
+**The mechanism.** At every generation step, every token in the tokenizer's vocabulary is
+checked against the grammar's current state (decoded once at load time and cached, so this is
+an O(vocab) cost paid once, not per generated token); any token whose text would not extend a
+valid prefix of schema-conforming JSON has its logit set to `-inf` before sampling runs. The
+model is structurally unable to choose it -- the same guarantee GBNF gives. Proven against the
+real downloaded Qwen2-0.5B-Instruct model, not just unit-tested state-machine logic:
+`crates/envryn-ai-worker/src/model.rs`'s `generate_constrained_always_produces_valid_json` runs
+four real prompts (including credential shapes the model classifies imperfectly) and asserts
+every single output is valid JSON with exactly the three schema fields, a real `SecretKind`
+enum value, and a confidence within `[0, 1]` -- content quality is a separate, unguaranteed
+concern from this pass forward, but structural validity for this schema no longer depends on
+the model choosing to cooperate.
+
+**Every other schema still relies on deserialisation alone**, which remains a genuine security
+layer on its own, not merely "the model is trusted to behave": a small model does occasionally
 add a field the schema does not have (observed against Qwen2-0.5B-Instruct: a spurious `notes`
 array added to an otherwise-correct five-field search filter, and separately, a raw echo of
 this file's own untrusted-data delimiter text on an early, weaker prompt), and
@@ -207,8 +221,8 @@ and silently dropping or guessing at the rest --
 `crates/envryn-core/tests/ai_real_model.rs`'s `a_five_field_search_query_either_parses_or_is_cleanly_refused_never_silently_wrong`
 exercises exactly this against the real model and asserts a clean `AiError::InvalidResponse`
 is an acceptable outcome. "Malformed output is a clean failure that surfaces as 'unable to
-complete this locally,' never a partially-parsed suggestion" -- this sentence is proven true
-by that test, even without the grammar layer.
+complete this locally,' never a partially-parsed suggestion" -- true for every schema; genuinely
+*impossible to violate in the first place* for `ClassificationOutput` specifically.
 
 Model output is never rendered as HTML and never executed.
 

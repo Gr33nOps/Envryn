@@ -17,6 +17,7 @@
 //! only way to be genuinely confident no plaintext survives... is killing
 //! the process"), not a message this binary listens for.
 
+mod constrained;
 mod model;
 mod protocol;
 
@@ -24,7 +25,18 @@ use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 
+use constrained::JsonGrammar;
 use model::Engine;
+
+/// `SecretKind`'s exact serialised variant names, matched by
+/// `crates/envryn-core/src/model.rs::SecretKind`'s plain (no
+/// `#[serde(rename_all)]`) derive -- checked against the real enum by
+/// `crates/envryn-core/tests/ai_real_model.rs`'s use of this same worker,
+/// not just assumed here. Duplicated rather than shared because this crate
+/// must not depend on `envryn-core` at all (AI-INV-001/002/004/005).
+const SECRET_KIND_VARIANTS: &[&str] = &[
+    "ApiKey", "Token", "EnvVar", "Database", "Ssh", "OAuth", "Webhook", "Note", "Custom",
+];
 
 struct Args {
     model: PathBuf,
@@ -79,7 +91,19 @@ fn handle_connection(stream: &mut TcpStream, engine: &Engine, token: &str) {
                 message: "unauthorized".to_string(),
             }
         } else {
-            match engine.generate(&request.prompt, request.max_tokens) {
+            let result = match request.schema.as_deref() {
+                Some("classification_output") => {
+                    let grammar = JsonGrammar::classification_output(SECRET_KIND_VARIANTS);
+                    engine.generate_constrained(&request.prompt, request.max_tokens, &grammar)
+                }
+                // An unrecognised schema name degrades to ordinary
+                // generation rather than failing the request outright -- a
+                // client built against a schema this worker build does not
+                // know about should not lose the feature entirely, only the
+                // structural guarantee.
+                _ => engine.generate(&request.prompt, request.max_tokens),
+            };
+            match result {
                 Ok(text) => protocol::Response::Ok { text },
                 Err(message) => protocol::Response::Error { message },
             }

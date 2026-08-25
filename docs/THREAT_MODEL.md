@@ -121,8 +121,9 @@ peers finding each other for an ongoing sync session, never for establishing ini
 
 These are specification section 60. Enforcement below reflects what is actually built
 (`crates/envryn-core/src/ai/`, `crates/envryn-ai-worker/`, `src-tauri/src/ai.rs`), not the
-original aspiration — see `AI_SECURITY.md` for the two recorded deviations (candle instead of
-llama.cpp; no grammar-constrained decode) this table's citations already account for.
+original aspiration — see `AI_SECURITY.md` for the recorded deviation (candle instead of
+llama.cpp) and where grammar-constrained decode now stands (real for `ClassificationOutput`,
+not yet the other schemas) that this table's citations already account for.
 
 | ID | Threat | Mitigation | Enforced by |
 |---|---|---|---|

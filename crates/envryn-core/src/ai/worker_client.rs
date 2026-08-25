@@ -24,18 +24,34 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ai::engine::{EngineError, LocalAiEngine};
+use crate::ai::engine::{EngineError, LocalAiEngine, SchemaKind};
 use crate::ai::gateway::SanitizedPrompt;
 use crate::sync::protocol::{read_json, write_json};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// The wire spelling for each constrainable [`SchemaKind`]. A plain string,
+/// not a shared enum type: this crate and `envryn-ai-worker` deliberately
+/// do not share a protocol crate (`envryn-ai-worker` must not depend on
+/// `envryn-core` at all, AI-INV-001/002/004/005), so the wire format itself
+/// is the only contract between them. `None` (the field omitted) means
+/// `SchemaKind::Unconstrained` -- ordinary prompting only, matching every
+/// worker build before this field existed.
+fn schema_wire_name(schema: SchemaKind) -> Option<&'static str> {
+    match schema {
+        SchemaKind::Unconstrained => None,
+        SchemaKind::ClassificationOutput => Some("classification_output"),
+    }
+}
+
 #[derive(Serialize)]
 struct WireRequest {
     token: String,
     prompt: String,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    schema: Option<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -178,11 +194,21 @@ impl Drop for WorkerClient {
 
 impl LocalAiEngine for WorkerClient {
     fn complete(&self, prompt: &SanitizedPrompt, max_tokens: u32) -> Result<String, EngineError> {
+        self.complete_for_schema(prompt, max_tokens, SchemaKind::Unconstrained)
+    }
+
+    fn complete_for_schema(
+        &self,
+        prompt: &SanitizedPrompt,
+        max_tokens: u32,
+        schema: SchemaKind,
+    ) -> Result<String, EngineError> {
         let mut stream = self.stream.lock().map_err(|_| EngineError::Unavailable)?;
         let request = WireRequest {
             token: self.token.clone(),
             prompt: prompt.expose().to_string(),
             max_tokens,
+            schema: schema_wire_name(schema),
         };
         write_json(&mut *stream, &request).map_err(|_| EngineError::Unavailable)?;
         let response: WireResponse = read_json(&mut *stream).map_err(|_| EngineError::Timeout)?;

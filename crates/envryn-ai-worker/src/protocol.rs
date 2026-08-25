@@ -21,6 +21,17 @@ pub struct Request {
     pub token: String,
     pub prompt: String,
     pub max_tokens: u32,
+    /// Which known schema (if any) the response must conform to -- a plain
+    /// string tag, not a shared enum type, since this crate must not depend
+    /// on `envryn-core` at all (AI-INV-001/002/004/005): the wire format
+    /// itself is the only contract with `envryn_core::ai::worker_client`,
+    /// which sends this field's wire spelling from its own
+    /// `SchemaKind`. Absent (or any value this binary does not recognise)
+    /// means ordinary unconstrained generation -- a client built against a
+    /// newer schema name than this worker understands degrades to the
+    /// existing prompting-only behaviour rather than failing the request.
+    #[serde(default)]
+    pub schema: Option<String>,
 }
 
 #[derive(Serialize)]

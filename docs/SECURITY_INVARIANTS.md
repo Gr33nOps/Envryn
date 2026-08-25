@@ -55,9 +55,9 @@ Legend for the *Enforced by* column:
 
 These restate §61 of the product specification. The *Enforced by* column is the addition.
 **Implemented** as of the AI subsystem's build (`crates/envryn-core/src/ai/`,
-`crates/envryn-ai-worker/`, `src-tauri/src/ai.rs`); see `docs/AI_SECURITY.md` for the two
-recorded deviations from the original design (candle instead of llama.cpp; no
-grammar-constrained decode) neither of which weakens anything in this table.
+`crates/envryn-ai-worker/`, `src-tauri/src/ai.rs`); see `docs/AI_SECURITY.md` for the recorded
+deviation from the original design (candle instead of llama.cpp) and where grammar-constrained
+decode now stands, neither of which weakens anything in this table.
 
 | ID | Invariant | Enforced by |
 |---|---|---|

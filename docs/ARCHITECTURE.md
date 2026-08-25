@@ -181,9 +181,9 @@ independent trigger for the identical lock sequence -- see section 7 for both.
 ## 6. AI subsystem
 
 **Implemented** (`crates/envryn-core/src/ai/`, `crates/envryn-ai-worker/`,
-`src-tauri/src/ai.rs`). Full detail, including two recorded deviations from the design below
-(candle instead of llama.cpp, no grammar-constrained decode), is in `AI_SECURITY.md`.
-Structurally, as built:
+`src-tauri/src/ai.rs`). Full detail, including one remaining recorded deviation from the design
+below (candle instead of llama.cpp) and where grammar-constrained decode now stands (real for
+one schema, not yet the others), is in `AI_SECURITY.md`. Structurally, as built:
 
 ```
 User intent (a plain value from a form, or a SecretId)
@@ -193,8 +193,9 @@ User intent (a plain value from a form, or a SecretId)
                            one implementation; envryn-core also owns spawning it
                            (worker_client.rs), not src-tauri, so it stays testable as a
                            plain library the same way sync/'s TCP/TLS code already is
-   -> strict deserialisation   deny_unknown_fields; no grammar-constrained decode layer
-                                exists ahead of this -- see AI_SECURITY.md section 5
+   -> grammar-constrained decode (ClassificationOutput only -- envryn-ai-worker::constrained)
+      or strict deserialisation (every other schema -- deny_unknown_fields)
+                                -- see AI_SECURITY.md section 5 for which is which and why
    -> UI shows a suggestion  (wired for classification only today -- AI_DATA_ACCESS.md)
    -> user confirms
    -> vault applies the change
@@ -213,9 +214,11 @@ better fit for this development environment: llama.cpp's C++ build requires a C+
 (cmake plus MSVC or an ABI-compatible compiler) that was not reliably available, while candle's
 CPU backend compiles as pure Rust with no C/C++ dependency at all. This also means the
 `LocalAiEngine` trait's real implementation gains nothing by being Tauri-specific, which is why
-it lives in `envryn-core` per the paragraph above. The cost: llama.cpp's GBNF grammar-constrained
-decoding has no equivalent implemented here -- `AI_SECURITY.md` section 5 records exactly what
-that gap means and what still holds without it.
+it lives in `envryn-core` per the paragraph above. The cost was llama.cpp's GBNF
+grammar-constrained decoding having no candle equivalent; `crates/envryn-ai-worker/src/constrained.rs`
+now implements a real one, purpose-built for `ClassificationOutput` (the one schema actually
+wired to the UI) rather than a general grammar engine -- `AI_SECURITY.md` section 5 has the
+mechanism and what still relies on deserialisation alone.
 
 The `LocalAiEngine` trait exists so the model and runtime can change without touching feature
 code (spec section 7). Raw model calls appear in exactly one place.

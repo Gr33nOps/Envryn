@@ -37,6 +37,6 @@ pub mod operations;
 pub mod schemas;
 pub mod worker_client;
 
-pub use engine::{EngineError, LocalAiEngine};
+pub use engine::{EngineError, LocalAiEngine, SchemaKind};
 pub use gateway::{AiError, AiGateway, SanitizedPrompt};
 pub use operations::{AiOperation, ExposureLevel};

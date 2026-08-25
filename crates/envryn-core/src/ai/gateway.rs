@@ -18,7 +18,7 @@
 use serde::de::DeserializeOwned;
 
 use crate::ai::budgets;
-use crate::ai::engine::{EngineError, LocalAiEngine};
+use crate::ai::engine::{EngineError, LocalAiEngine, SchemaKind};
 use crate::ai::operations::AiOperation;
 use crate::ai::schemas::{
     ClassificationOutput, EnvNameClassificationOutput, ExtractedFieldsOutput, NameSuggestionOutput,
@@ -94,12 +94,17 @@ impl<E: LocalAiEngine> AiGateway<E> {
         Self { engine }
     }
 
-    fn run<T: DeserializeOwned>(&self, system_prompt: &str, body: String) -> Result<T, AiError> {
+    fn run<T: DeserializeOwned>(
+        &self,
+        system_prompt: &str,
+        body: String,
+        schema: SchemaKind,
+    ) -> Result<T, AiError> {
         let text = format!("{system_prompt}\n\n{}", wrap_untrusted(&body));
         let prompt = SanitizedPrompt(text);
         let raw = self
             .engine
-            .complete(&prompt, budgets::MAX_RESPONSE_TOKENS)?;
+            .complete_for_schema(&prompt, budgets::MAX_RESPONSE_TOKENS, schema)?;
         parse_json_strict(&raw)
     }
 
@@ -110,7 +115,11 @@ impl<E: LocalAiEngine> AiGateway<E> {
         if query.len() > budgets::MAX_QUERY_BYTES {
             return Err(AiError::BudgetExceeded);
         }
-        self.run(SEARCH_INTENT_PROMPT, query.to_string())
+        self.run(
+            SEARCH_INTENT_PROMPT,
+            query.to_string(),
+            SchemaKind::Unconstrained,
+        )
     }
 
     /// L1. Variable names only -- the caller (the `.env` import flow) is
@@ -126,7 +135,7 @@ impl<E: LocalAiEngine> AiGateway<E> {
             return Err(AiError::BudgetExceeded);
         }
         let body = names.join("\n");
-        self.run(CLASSIFY_ENV_NAMES_PROMPT, body)
+        self.run(CLASSIFY_ENV_NAMES_PROMPT, body, SchemaKind::Unconstrained)
     }
 
     /// L2. The single pasted value, for the shortest possible lifetime --
@@ -135,7 +144,11 @@ impl<E: LocalAiEngine> AiGateway<E> {
         if value.len() > budgets::MAX_VALUE_BYTES {
             return Err(AiError::BudgetExceeded);
         }
-        self.run(CLASSIFY_VALUE_PROMPT, value.to_string())
+        self.run(
+            CLASSIFY_VALUE_PROMPT,
+            value.to_string(),
+            SchemaKind::ClassificationOutput,
+        )
     }
 
     /// L2. The value plus its already-detected provider (from
@@ -152,7 +165,7 @@ impl<E: LocalAiEngine> AiGateway<E> {
             Some(p) => format!("value: {value}\nprovider: {p}"),
             None => format!("value: {value}\nprovider: unknown"),
         };
-        self.run(SUGGEST_NAME_PROMPT, body)
+        self.run(SUGGEST_NAME_PROMPT, body, SchemaKind::Unconstrained)
     }
 
     /// L3. A block the user explicitly submitted for extraction.
@@ -160,7 +173,11 @@ impl<E: LocalAiEngine> AiGateway<E> {
         if block.len() > budgets::MAX_BLOCK_BYTES {
             return Err(AiError::BudgetExceeded);
         }
-        self.run(EXTRACT_FIELDS_PROMPT, block.to_string())
+        self.run(
+            EXTRACT_FIELDS_PROMPT,
+            block.to_string(),
+            SchemaKind::Unconstrained,
+        )
     }
 
     /// Dispatch by [`AiOperation`], for callers (the IPC layer) that build
