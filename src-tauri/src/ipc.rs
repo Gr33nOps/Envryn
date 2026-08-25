@@ -42,8 +42,8 @@ use crate::settings;
 /// serialiser is exactly how internal detail escapes.
 #[derive(Debug, Serialize)]
 pub struct IpcError {
-    code: &'static str,
-    message: String,
+    pub(crate) code: &'static str,
+    pub(crate) message: String,
 }
 
 impl From<Error> for IpcError {
@@ -67,16 +67,16 @@ impl From<Error> for IpcError {
     }
 }
 
-type IpcResult<T> = std::result::Result<T, IpcError>;
+pub(crate) type IpcResult<T> = std::result::Result<T, IpcError>;
 
-fn internal(message: &str) -> IpcError {
+pub(crate) fn internal(message: &str) -> IpcError {
     IpcError {
         code: "internal",
         message: message.to_string(),
     }
 }
 
-fn invalid(message: &str) -> IpcError {
+pub(crate) fn invalid(message: &str) -> IpcError {
     IpcError {
         code: "invalid_input",
         message: message.to_string(),
@@ -90,7 +90,7 @@ fn invalid(message: &str) -> IpcError {
 pub struct VaultState(pub Mutex<Option<Vault>>);
 
 impl VaultState {
-    fn with<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, Error>) -> IpcResult<T> {
+    pub(crate) fn with<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, Error>) -> IpcResult<T> {
         let mut guard = self
             .0
             .lock()
@@ -99,7 +99,7 @@ impl VaultState {
         Ok(f(vault)?)
     }
 
-    fn install(&self, vault: Vault) -> IpcResult<()> {
+    pub(crate) fn install(&self, vault: Vault) -> IpcResult<()> {
         let mut guard = self
             .0
             .lock()
@@ -113,7 +113,7 @@ impl VaultState {
 ///
 /// Derived from the OS app-data directory, never supplied by the caller. This
 /// is why no IPC command accepts a path for this -- see the module docs.
-fn vault_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, IpcError> {
+pub(crate) fn vault_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, IpcError> {
     let dir = app
         .path()
         .app_data_dir()

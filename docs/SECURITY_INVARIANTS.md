@@ -40,16 +40,16 @@ Legend for the *Enforced by* column:
 
 | ID | Invariant | Enforced by |
 |---|---|---|
-| **INV-101** | The device private identity key never leaves the platform keystore. | A, M |
-| **INV-102** | A sync session is established only over TLS 1.3 with **mutual** authentication. | A |
-| **INV-103** | A peer certificate is accepted only if its fingerprint is present in `trusted_devices`. There is no "trust on first use" during sync. | A |
-| **INV-104** | Revoking a device causes the **TLS handshake itself** to fail — not an application-layer check that could be skipped. | A |
-| **INV-105** | The VMK is transferred only during pairing, only after the user has confirmed a matching short authentication string (SAS) on both devices. | A, M |
-| **INV-106** | Pairing sessions are single-use and expire. An expired or consumed session cannot be resumed. | A |
-| **INV-107** | Discovery grants no trust. Being discoverable and being paired are independent. | A |
-| **INV-108** | Record payloads remain AEAD-sealed while in transit. The sync layer never handles plaintext secret values. | T, A |
-| **INV-109** | Sync never destroys data without preserving the losing side of a conflict. | A |
-| **INV-110** | Deletions propagate as tombstones with a retention window, never as immediate row removal. | A |
+| **INV-101** | The device private identity key never leaves the platform keystore. | T, A — the key never has an accessor that returns it; `sync::identity` seals it via `platform::dpapi_protect` and only ever hands out a `Fingerprint` or a signature. Tests: `creates_and_reloads_identically`, `corrupt_identity_file_is_rejected`. |
+| **INV-102** | A sync session is established only over TLS 1.3 with **mutual** authentication. | A — `sync::transport::tests::mutual_tls_succeeds_between_devices_that_trust_each_other` (real loopback TCP + TLS) |
+| **INV-103** | A peer certificate is accepted only if its fingerprint is present in `trusted_devices`. There is no "trust on first use" during sync. | A — `sync::transport::tests::handshake_fails_when_client_is_not_trusted` |
+| **INV-104** | Revoking a device causes the **TLS handshake itself** to fail — not an application-layer check that could be skipped. | A — `sync::transport::tests::revoked_fingerprint_is_rejected_on_the_next_handshake` |
+| **INV-105** | The VMK is transferred only during pairing, only after the user has confirmed a matching short authentication string (SAS) on both devices. | A, M — `sync::handshake::tests::vmk_transfers_over_the_paired_connection` proves the wire mechanics; that a *human* actually compared the SAS before the IPC layer's `pairing_confirm` is called is enforced by the UI flow (`apps/ui/src/routes/vault/devices.tsx`), not by an automated test — **M**, not A, for that half. |
+| **INV-106** | Pairing sessions are single-use and expire. An expired or consumed session cannot be resumed. | T, M — `PairingState` in `src-tauri/src/sync.rs` holds an `Option<Sender>` that `pairing_confirm`/`pairing_cancel` `.take()`, making reuse a type-level impossibility once consumed; connect/confirm timeouts (120s / 90s) bound how long a session waits. Not covered by an automated test (no `src-tauri` test suite yet) — verify by review. |
+| **INV-107** | Discovery grants no trust. Being discoverable and being paired are independent. | A, D — `sync::discovery`'s tests never touch `TrustedFingerprints`; `sync::transport`'s verifier has no code path that reads a `DiscoveredPeer` at all, so a discovery result cannot influence a handshake decision even accidentally. |
+| **INV-108** | Record payloads remain AEAD-sealed while in transit. The sync layer never handles plaintext secret values. | T, A — `sync::protocol`'s `WireRecord` carries only an opaque `sealed: Vec<u8>`, no plaintext field exists to populate; `sync::protocol::tests::two_vaults_converge_over_real_tls` |
+| **INV-109** | Sync never destroys data without preserving the losing side of a conflict. | **Not implemented.** `storage::upsert_from_sync` is pure last-writer-wins: the losing write is overwritten, not retained anywhere. See `THREAT_MODEL.md` S-09 for why (a plain HLC comparison cannot distinguish "peer was behind" from "genuine concurrent edit" without version bookkeeping this pass did not build) and treat this invariant as **aspirational** until it is. |
+| **INV-110** | Deletions propagate as tombstones, never as immediate row removal. | A — `storage::tests::soft_delete_leaves_a_tombstone`, `soft_delete_clears_the_ciphertext`. The "retention window" (scheduled purge of old tombstones) named in the original wording is **not implemented**; tombstones persist indefinitely, which is safe (no resurrection window to fall outside of) but was never built as a bounded window. Wording adjusted to match. |
 
 ## 3. AI invariants
 

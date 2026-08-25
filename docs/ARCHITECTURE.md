@@ -38,6 +38,11 @@ logic in a Rust core, plus a separate AI worker process. One codebase targets Wi
 IPC contract has exactly one definition. Hand-maintaining the same shape twice is how the two
 sides drift.
 
+**`sync/` is implemented** (identity, pairing, discovery, mutual-TLS transport, and the
+manifest-exchange protocol) — see `CRYPTOGRAPHY.md` sections 6-8 for the cryptographic detail
+and `THREAT_MODEL.md` section 7 for what has and has not been verified. `ai/` and
+`crates/envryn-ai-worker` remain not started (Phase 3).
+
 ---
 
 ## 2. Why Tauri rather than Flutter
@@ -85,7 +90,7 @@ secrets         id, project_id, environment_id, name, type,
                 nonce, ciphertext, fingerprint,
                 created_hlc, updated_hlc, deleted, record_version
 tags            secret_id, tag
-trusted_devices device_id, name, cert_fingerprint, paired_at, last_sync
+trusted_devices device_id, fingerprint, sealed, paired_ms
 vault_meta      crypto_version, kdf_params, wrapped_vmk_password,
                 wrapped_vmk_platform, device_id
 ```
@@ -93,6 +98,14 @@ vault_meta      crypto_version, kdf_params, wrapped_vmk_password,
 Rows are opaque. `secrets.sealed` holds the entire record — name, project, environment, tags,
 notes and payload — as one AEAD blob. The remaining columns exist only so sync can order and
 reconcile records without decrypting them, and so duplicates can be found by keyed fingerprint.
+
+`trusted_devices` follows the same pattern: the device's display name and pairing history live
+inside `sealed`, under the Record Key, not in a plaintext column. The one exception is
+`fingerprint` itself — deliberately plaintext, because it is not a secret (the same role an SSH
+host key fingerprint plays: it is read aloud and compared on screen during pairing) and
+`sync::transport`'s TLS verifier needs the whole trusted set in memory to check every incoming
+handshake, which is cheaper to build from a plain column than by unsealing every row up front
+for a value that was never secret in the first place.
 
 There is deliberately **no plaintext `name` or `project` column**; `CRYPTOGRAPHY.md` section 3.1
 explains why, and a schema test fails if one is added. The accepted residual leak is record
@@ -124,12 +137,19 @@ the form.
 
 ### Hybrid logical clocks
 
-Every mutable row carries `(wall_ms, counter, device_id)`. Sync resolves last-writer-wins by HLC
+**Implemented and tested** — `storage::Hlc` (`crates/envryn-core/src/storage/hlc.rs`). Every
+mutable row carries `(wall_ms, counter, device_id)`. Sync resolves last-writer-wins by HLC
 with device id as a deterministic tiebreak. Wall-clock alone is unusable — phone and desktop
-clocks disagree, and a clock that jumps backwards would silently lose edits.
+clocks disagree, and a clock that jumps backwards would silently lose edits; `Hlc::tick`
+guarantees monotonicity even when the wall clock itself moves backwards.
 
-Deletions are tombstones with a retention window. Immediate row removal would let a deletion
-racing a sync resurrect the record.
+Deletions are tombstones (a `deleted` flag; content cleared, row kept), not immediate row
+removal — a deletion racing a sync cannot be resurrected by a concurrent edit, since the
+delete's HLC is compared like any other write. **No retention window is implemented**:
+tombstone rows persist indefinitely rather than being purged after a bounded period. See
+`CRYPTOGRAPHY.md` section 8 for the full picture, including the honestly-unresolved gap this
+scheme has today: pure LWW discards the losing side of a genuine concurrent edit rather than
+preserving it (`THREAT_MODEL.md` S-09, `SECURITY_INVARIANTS.md` INV-109).
 
 ---
 
@@ -217,7 +237,8 @@ so shipping without on-device inference costs organisation, not correctness.
 
 ```
 apps/ui/              React SPA
-src-tauri/            Tauri shell: window creation, IPC (ipc.rs), non-secret
+src-tauri/            Tauri shell: window creation, vault IPC (ipc.rs), sync/
+                       pairing/discovery/trusted-device IPC (sync.rs), non-secret
                        app settings (settings.rs), idle auto-lock (autolock.rs),
                        capture protection (capture_protection.rs)
 crates/

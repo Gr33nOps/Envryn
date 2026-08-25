@@ -96,8 +96,26 @@ Stated plainly, because a threat model that claims to cover everything is not cr
 | **S-06** | Replay of captured sync traffic | TLS 1.3 anti-replay; HLC ordering rejects stale writes | None significant |
 | **S-07** | Malicious peer sends malformed records | Strict schema validation; AEAD verification before any parse | Denial of service against the sync session only |
 | **S-08** | Rogue device discovered on LAN and trusted | Discovery grants zero trust; pairing requires physical SAS confirmation | User pairs with an attacker's device deliberately |
-| **S-09** | Concurrent edits silently destroy a credential | LWW by HLC, **losing side preserved** and surfaced | User must review conflicts |
-| **S-10** | Deletion race resurrects a record | Tombstones with retention window | Bounded by the window |
+| **S-09** | Concurrent edits silently destroy a credential | LWW by HLC (`storage::upsert_from_sync`), deterministic device-id tiebreak on an exact tie | **Not yet implemented as designed.** The losing write is discarded, not preserved. A pure last-writer-wins comparison cannot distinguish "the peer was simply behind" from "both sides genuinely edited this record since they last synced" without additional version bookkeeping (e.g. retaining prior sealed blobs, or a three-way merge base) — that bookkeeping was not built in Phase 2. A user who edits the same secret on two devices before they next sync can lose one edit with no record it happened. Flagged here rather than left silently unfixed; see `ARCHITECTURE.md`'s open items. |
+| **S-10** | Deletion race resurrects a record | Tombstones (`deleted` flag; `soft_delete` clears the sealed content but keeps the row) rather than immediate row removal. A delete's HLC is compared like any other write, so a concurrent edit with an older HLC cannot un-delete a record. | No retention window / purge is implemented — tombstone rows persist indefinitely rather than being reclaimed after a bounded period. This is a storage-growth concern, not a resurrection risk: their content is already cleared. |
+
+**Verification scope for sync/pairing (S-01 through S-10).** Every row above whose
+mechanism lives in `envryn_core::sync` is exercised by a real test over real loopback
+TCP/TLS — mutual TLS handshake success/rejection/revocation (`sync::transport`), SPAKE2
+and ECDH pairing convergence and MITM-produces-different-SAS (`sync::pairing`,
+`sync::handshake`), and full manifest-exchange sync convergence between two independent
+`Store`s (`sync::protocol`). What is **not** exercised is the interactive, two-human,
+two-physical-device flow the Tauri IPC layer (`src-tauri/src/sync.rs`) drives on top of
+those primitives — there is no second physical machine in this development environment.
+The background-thread pairing state machine there has been reviewed carefully but should
+be treated as unverified in practice until it has run against a second real device.
+
+**Pairing rendezvous is address-carried, not discovery-assisted.** The design in this
+document describes discovery (mDNS) as separate from pairing; in the implementation, the
+host side of a pairing session displays its LAN address and port directly (alongside the
+code, for the manual path) rather than the joining device finding it via `sync::discovery`.
+This keeps the two mechanisms decoupled — mDNS discovery is used only for already-trusted
+peers finding each other for an ongoing sync session, never for establishing initial trust.
 
 ## 8. AI threats
 
@@ -141,7 +159,7 @@ large native-code surfaces that process untrusted input.
 Each of these is testable, and each has a test:
 
 - Secrets are encrypted on your devices. — *Crypto suite; disk inspection*
-- Devices synchronise directly after explicit pairing. — *Two-device integration test*
+- Devices synchronise directly after explicit pairing. — *Two-vault integration test over real loopback TLS (`sync::protocol::two_vaults_converge_over_real_tls`); not yet verified against two physical devices — see section 7's verification-scope note*
 - No cloud vault, no account, no telemetry. — *Egress test; dependency audit*
 - AI processing happens locally. — *Offline AI test*
 - The AI has restricted vault access and is not part of encryption or authentication. — *Gateway tests; AI-disabled run*

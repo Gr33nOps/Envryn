@@ -124,10 +124,22 @@ impl VaultMasterKey {
         Ok(Self(SymmetricKey::generate()?))
     }
 
-    /// Adopt a VMK received over a completed pairing exchange, or reconstruct
-    /// one in a test. Not reachable from the IPC surface: a VMK must only ever
-    /// enter the process by unwrapping or by pairing.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The raw 32 bytes, for the one legitimate reason code outside this
+    /// module ever needs them: transferring the VMK to a newly paired device
+    /// (`sync::pairing::seal_vmk`) or adopting one received from pairing
+    /// (`vault::Vault::create_with_vmk`). Scoped `pub(crate)` -- never
+    /// exported past the crate boundary, and in particular never reachable
+    /// from `ipc.rs`, which is why no IPC command can return a VMK.
+    pub(crate) fn expose_bytes(&self) -> zeroize::Zeroizing<[u8; KEY_LEN]> {
+        let mut out = [0u8; KEY_LEN];
+        out.copy_from_slice(self.0.as_slice());
+        zeroize::Zeroizing::new(out)
+    }
+
+    /// Adopt a VMK received over a completed pairing exchange
+    /// (`sync::pairing::open_vmk`), or reconstruct one in a test. Not
+    /// reachable from the IPC surface: a VMK must only ever enter the
+    /// process by unwrapping or by pairing.
     pub(crate) fn from_key(key: SymmetricKey) -> Self {
         Self(key)
     }

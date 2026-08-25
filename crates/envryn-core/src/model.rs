@@ -269,6 +269,21 @@ pub struct SecretUpdate {
     pub mark_rotated: bool,
 }
 
+/// A paired device this vault will accept a sync connection from.
+///
+/// The sealed content -- everything but `device_id` and `fingerprint`, which
+/// `sync::transport` needs before the vault's own decryption is relevant.
+/// See `docs/CRYPTOGRAPHY.md` section 6 for the fingerprint format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustedDevice {
+    pub device_id: String,
+    pub fingerprint_hex: String,
+    pub name: String,
+    pub paired_ms: i64,
+    #[serde(default)]
+    pub last_sync_ms: Option<i64>,
+}
+
 /// Validation limits.
 ///
 /// Bounded so that a malformed or hostile import cannot produce a record that

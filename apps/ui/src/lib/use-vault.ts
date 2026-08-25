@@ -39,6 +39,23 @@ export function useDevices() {
   });
 }
 
+export function useRenameDevice() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ deviceId, name }: { deviceId: string; name: string }) =>
+      tauriVaultRepository.renameDevice(deviceId, name),
+    onSuccess: () => client.invalidateQueries({ queryKey: DEVICES_KEY }),
+  });
+}
+
+export function useRevokeDevice() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (deviceId: string) => tauriVaultRepository.revokeDevice(deviceId),
+    onSuccess: () => client.invalidateQueries({ queryKey: DEVICES_KEY }),
+  });
+}
+
 /**
  * Projects, derived from the records that reference them.
  *

@@ -206,40 +206,67 @@ role in duplicate detection is *semantic* similarity over metadata (spec section
 
 ## 6. Device identity and transport
 
-**Identity.** One Ed25519 keypair per installation, generated at first run. The private key
-is sealed by the platform keystore and never leaves it. A self-signed X.509 certificate
-carries the public key. The device fingerprint shown in the UI is
-`SHA-256(SubjectPublicKeyInfo)`, rendered as colon-separated uppercase hex.
+**Implemented and tested** (`crates/envryn-core/src/sync/identity.rs`,
+`crates/envryn-core/src/sync/transport.rs`).
+
+**Identity.** One Ed25519 keypair per installation, generated at first run and stored in its
+own small file independent of any vault (so resetting a vault does not change how paired
+peers recognise this device). The private key is sealed with `platform::dpapi_protect` and
+never leaves it in plaintext. A self-signed X.509 certificate carries the public key, built
+fresh from the identity on demand rather than cached, so the identity file remains the single
+source of truth.
+
+The device fingerprint is `SHA-256(raw 32-byte Ed25519 public key)`, rendered as
+colon-separated uppercase hex. This is **deliberately not** `SHA-256(SubjectPublicKeyInfo DER)`
+as earlier drafts of this document assumed: for Ed25519, RFC 8410 defines the SPKI's BIT
+STRING content as exactly the raw 32-byte key with no further ASN.1 structure around it, so
+hashing the raw key produces the identical value with strictly less code and no DER-encoding
+decision (canonical form, etc.) to get subtly wrong. `sync::transport`'s verifier extracts the
+same 32 bytes from a peer's presented certificate via `x509-parser` before hashing, so both
+sides always agree regardless of which framing either side thinks about it in.
 
 **Transport.** TLS 1.3 with mutual authentication via `rustls`, using a custom
 `ServerCertVerifier` and `ClientCertVerifier` that accept **only** fingerprints present in
 the `trusted_devices` table. No web PKI, no certificate authorities, no name validation —
-the pinned fingerprint set *is* the trust store.
+the pinned fingerprint set *is* the trust store, held live behind an `Arc<RwLock<..>>`
+(`TrustedFingerprints`) so a revocation is visible to the *next* handshake without rebuilding
+any TLS config. Tested end-to-end over real loopback TCP: successful mutual handshake, a
+client whose fingerprint is not trusted, and a fingerprint revoked between two handshake
+attempts (`sync::transport::tests::*`).
 
-Revocation is a row delete. Because the verifier consults that table during the handshake,
-a revoked device fails to establish a connection at all (INV-104). There is no application-layer
-authorisation check that a future refactor could accidentally skip.
+Revocation is a row delete. Because the verifier consults the live trusted set during the
+handshake, a revoked device fails to establish a connection at all (INV-104). There is no
+application-layer authorisation check that a future refactor could accidentally skip.
 
 ---
 
 ## 7. Pairing
 
-Both paths establish a shared secret, derive a 6-digit SAS, require the human to confirm the
-SAS matches on both screens, and only then transfer the VMK.
+**Implemented and tested** (`crates/envryn-core/src/sync/pairing.rs`,
+`crates/envryn-core/src/sync/handshake.rs`). Both paths establish a shared secret, derive a
+6-digit SAS, require the human to confirm the SAS matches on both screens, and only then
+transfer the VMK.
 
 ### QR path (Windows to Android)
 
-The QR code carries: device id, certificate fingerprint, LAN address hints, and a 256-bit
-ephemeral pairing secret. Because the channel carrying the secret is a camera — out of band
-and high entropy — X25519 ECDH with fingerprint pinning is sufficient.
+The QR code carries: device id, certificate fingerprint, and a LAN address to connect to.
+**This is a deliberate simplification from an earlier draft of this document**, which
+described the QR as also carrying a 256-bit ephemeral pairing secret or public key directly.
+In the implementation, the X25519 ephemeral public keys that actually key the ECDH exchange
+travel over the established connection instead — exactly like a SPAKE2 message does on the
+manual path (see `sync::handshake`, which is why one shared function drives both paths'
+network exchange). This costs nothing: an active man-in-the-middle substituting a key in
+transit is still caught by the SAS comparison either way, and the QR's real job — an
+authenticated, out-of-band channel for the address and claimed identity — is unaffected.
 
 ### Manual code path (Windows to Windows)
 
 There is no camera, so the user types a short code. **A short code cannot safely key a plain
 ECDH**: an attacker who intercepts the exchange could brute-force a 6- or 8-character code
-offline at leisure. This path therefore uses **SPAKE2**, a password-authenticated key exchange
-designed for exactly this situation. An attacker gets one online guess per attempt and learns
-nothing from a failed one.
+offline at leisure. This path therefore uses **SPAKE2** in its symmetric mode (`spake2` crate,
+`Spake2::start_symmetric`) — a password-authenticated key exchange designed for exactly this
+situation, and symmetric because neither device is fixed as "initiator." An attacker gets one
+online guess per attempt and learns nothing from a failed one.
 
 Using ECDH on both paths would be simpler, and would be a real vulnerability on the second one.
 
@@ -249,14 +276,53 @@ Using ECDH on both paths would be simpler, and would be a real vulnerability on 
 SAS = HKDF-SHA256(shared_secret, info = "envryn/v1/sas" || transcript)  -> 6 decimal digits
 ```
 
-The transcript covers both device ids and both certificate fingerprints, so a man-in-the-middle
-who substituted either identity produces a different SAS and the user sees a mismatch.
+The transcript covers both device ids and both certificate fingerprints, sorted so it is
+identical regardless of which side is "device A," so a man-in-the-middle who substituted
+either identity produces a different SAS and the user sees a mismatch. Verified for both
+paths, including an explicit MITM-produces-different-SAS test
+(`sync::pairing::tests::qr_pairing_mitm_produces_a_different_sas`) and end-to-end over real
+loopback TCP for both paths (`sync::handshake::tests::*`), including the VMK transfer itself.
 
-**Sessions are single-use and expire after 120 seconds** (INV-106).
+**Sessions are single-use and bounded in time.** The connect wait (waiting for a peer to dial
+in) times out after 120 seconds; once a SAS is computed, the wait for the human's confirmation
+times out after a further 90 seconds. A session's confirmation channel is consumed
+(`Option::take`) on first use, so replaying a confirmation is a type-level impossibility, not
+just a runtime check (`src-tauri/src/sync.rs`, `PairingState`). Not exercised by an automated
+test — `src-tauri` has no test suite yet — so treat this half of INV-106 as verified by review
+rather than by CI.
 
 ---
 
-## 8. Backup format
+## 8. Sync protocol: ordering and reconciliation
+
+**Implemented and tested** (`crates/envryn-core/src/storage/hlc.rs`,
+`crates/envryn-core/src/sync/protocol.rs`). Not itself cryptography, but it decides which
+ciphertext wins when two devices disagree, which is why it lives in this document rather than
+`ARCHITECTURE.md`.
+
+Every write is stamped with a **hybrid logical clock**: `(wall_ms, counter, device_id)`. Two
+peers exchange a manifest of `(id, hlc, deleted)` for every record, request only the ids where
+the peer's HLC is strictly newer than their own (or the record is unknown locally), and apply
+the transferred records with a plain `Ord` comparison on the HLC tuple — last-writer-wins,
+with `device_id` as a deterministic tiebreak on an exact `(wall_ms, counter)` tie so every peer
+resolves a tie the same way rather than by connection order.
+
+**Known gap, stated plainly.** This is *pure* LWW: the losing write is discarded, not
+retained anywhere. A plain HLC comparison cannot tell "the peer was simply behind" apart from
+"both devices genuinely edited this record since they last synced" without extra version
+bookkeeping (keeping prior sealed blobs, or a three-way merge base) — that bookkeeping was not
+built in this pass. See `THREAT_MODEL.md` S-09 and `SECURITY_INVARIANTS.md` INV-109, which is
+marked **not implemented** rather than claimed satisfied. Records travel still encrypted
+throughout: `sync::protocol`'s wire types carry only the opaque `sealed` blob, never plaintext.
+
+Deletions are tombstones (a `deleted` flag; the sealed content is cleared but the row stays)
+rather than row removal, and a delete's HLC is compared like any other write — so a concurrent
+edit with an older HLC cannot resurrect a deleted record. No retention window (scheduled purge
+of old tombstones) is implemented; see `THREAT_MODEL.md` S-10.
+
+---
+
+## 9. Backup format
 
 **Implemented** (`crates/envryn-core/src/backup.rs`). Backups are independently encrypted — a
 backup file is restorable using only the backup password, and does not depend on the source
@@ -295,7 +361,7 @@ never included regardless (spec section 19).
 
 ---
 
-## 9. Memory hygiene
+## 10. Memory hygiene
 
 - All key material and decrypted plaintext is held in `zeroize::Zeroizing` or
   `secrecy::SecretBox`, so it is wiped on drop and cannot be printed by a derived `Debug`.
@@ -310,7 +376,7 @@ vault process has already won, and no amount of zeroization changes that.
 
 ---
 
-## 10. Versioning
+## 11. Versioning
 
 Every persisted cryptographic artefact carries an explicit version: `vault_meta.crypto_version`,
 `record.format_version`, the backup header, and the `v1` in every HKDF `info` string.

@@ -19,10 +19,10 @@ use crate::crypto::keys::{KeySlot, SymmetricKey, VaultKeys, VaultMasterKey, KEY_
 use crate::error::{Error, Result};
 use crate::model::{
     self, Environment, NewSecret, SecretId, SecretPayload, SecretRecord, SecretSummary,
-    SecretUpdate,
+    SecretUpdate, TrustedDevice,
 };
 use crate::platform;
-use crate::storage::{meta_keys, Store, StoredRecord, RECORD_VERSION};
+use crate::storage::{meta_keys, Hlc, Store, StoredRecord, RECORD_VERSION};
 
 pub const CRYPTO_VERSION: u32 = 1;
 
@@ -33,6 +33,22 @@ struct UnlockedState {
     /// the database needs no plaintext columns at all
     /// (docs/CRYPTOGRAPHY.md section 4).
     index: Vec<SecretRecord>,
+    /// Numeric id this device stamps its own writes with, for HLC
+    /// tie-breaking. Zero until [`Vault::set_local_device_id`] is called
+    /// (which the IPC layer does once, right after unlock, from the
+    /// installation's `DeviceIdentity` fingerprint) -- a vault that has
+    /// never been paired simply never needs to break a tie against a peer,
+    /// so zero is a harmless default rather than a placeholder that must be
+    /// fixed before anything works.
+    local_device_id: u64,
+    /// The most recent HLC this device has produced or observed, advanced by
+    /// [`Vault::tick_hlc`]. Starts at `Hlc::ZERO` each session rather than
+    /// being persisted and reloaded -- real wall-clock time dominates
+    /// ordering in every practical case, and the only scenario that would
+    /// need persisted counter state (two writes racing within the same
+    /// millisecond, separated by an app restart) is not worth the added
+    /// complexity to close.
+    last_hlc: Hlc,
 }
 
 impl Drop for UnlockedState {
@@ -58,11 +74,32 @@ impl Vault {
         Ok(Self { store, state: None })
     }
 
-    /// Create a new vault, protected by `password`.
+    /// Create a new vault, protected by `password`, with a freshly generated
+    /// VMK.
     ///
     /// Refuses if one already exists: the alternative is overwriting somebody's
     /// keys, which destroys every record irrecoverably.
     pub fn create(path: &Path, password: &Zeroizing<String>, params: KdfParams) -> Result<Self> {
+        Self::create_with_vmk(path, password, params, VaultMasterKey::generate()?)
+    }
+
+    /// Create a new vault seeded with an *existing* VMK rather than a fresh
+    /// random one.
+    ///
+    /// This is what makes device pairing work: two devices that hold the
+    /// same VMK derive identical record and fingerprint subkeys, so sealed
+    /// rows sync as opaque bytes with no re-encryption at either end (see
+    /// docs/CRYPTOGRAPHY.md section 2, "paired devices may each have a
+    /// different master password"). The receiving device calls this with the
+    /// VMK recovered from [`crate::sync::pairing::open_vmk`] and whatever
+    /// local master password the user chooses for *this* device -- the two
+    /// need not match.
+    pub fn create_with_vmk(
+        path: &Path,
+        password: &Zeroizing<String>,
+        params: KdfParams,
+        vmk: VaultMasterKey,
+    ) -> Result<Self> {
         let store = Store::open(path)?;
         if store.is_initialised()? {
             return Err(Error::VaultExists);
@@ -70,8 +107,6 @@ impl Vault {
 
         let salt = kdf::generate_salt()?;
         let kek = kdf::derive_kek(password, &salt, params)?;
-
-        let vmk = VaultMasterKey::generate()?;
         let wrapped = vmk.wrap(&kek, KeySlot::Password)?;
 
         store.set_meta(meta_keys::CRYPTO_VERSION, &CRYPTO_VERSION.to_le_bytes())?;
@@ -85,6 +120,8 @@ impl Vault {
             state: Some(UnlockedState {
                 keys,
                 index: Vec::new(),
+                local_device_id: 0,
+                last_hlc: Hlc::ZERO,
             }),
         })
     }
@@ -143,7 +180,12 @@ impl Vault {
         let keys = VaultKeys::derive_from(&vmk)?;
 
         let index = load_index(&self.store, &keys.record)?;
-        self.state = Some(UnlockedState { keys, index });
+        self.state = Some(UnlockedState {
+            keys,
+            index,
+            local_device_id: 0,
+            last_hlc: Hlc::ZERO,
+        });
         Ok(())
     }
 
@@ -164,6 +206,25 @@ impl Vault {
 
     fn state_mut(&mut self) -> Result<&mut UnlockedState> {
         self.state.as_mut().ok_or(Error::Locked)
+    }
+
+    /// Set the numeric id this vault stamps its own writes with, for HLC
+    /// tie-breaking against synced peers. Called once by the IPC layer right
+    /// after unlock, derived from the installation's `DeviceIdentity`
+    /// fingerprint (`storage::Hlc::device_id_from_fingerprint_bytes`) -- the
+    /// vault itself has no dependency on device identity or the network
+    /// (`sync` depends on `storage` and `vault`, never the reverse).
+    pub fn set_local_device_id(&mut self, id: u64) -> Result<()> {
+        self.state_mut()?.local_device_id = id;
+        Ok(())
+    }
+
+    /// Advance and return this vault's HLC for a new local write.
+    fn tick_hlc(&mut self) -> Result<Hlc> {
+        let state = self.state_mut()?;
+        let next = state.last_hlc.tick(state.local_device_id, now_ms());
+        state.last_hlc = next;
+        Ok(next)
     }
 
     // --- reads --------------------------------------------------------------
@@ -266,8 +327,8 @@ impl Vault {
             rotated_ms: None,
         };
 
-        let state = self.state()?;
-        let stored = seal_record(&record, &state.keys)?;
+        let hlc = self.tick_hlc()?;
+        let stored = seal_record(&record, &self.state()?.keys, hlc)?;
         self.store.insert(&stored)?;
 
         let summary = record.summary();
@@ -282,14 +343,19 @@ impl Vault {
     /// The only caller is backup restore ([`crate::backup::restore`] feeding
     /// into this). Reconstructing prior state should reproduce it faithfully
     /// rather than treating every restored record as newly created at the
-    /// moment of restore.
+    /// moment of restore. It does, however, get a fresh local HLC tick:
+    /// `SecretRecord` carries no HLC of its own (that lives only in
+    /// `StoredRecord`, one layer down), so from the sync system's point of
+    /// view a restored record is indistinguishable from a freshly written
+    /// one -- consistent with backups being data-only (see `crate::backup`).
     pub fn import_record(&mut self, record: SecretRecord) -> Result<()> {
         if record.name.trim().is_empty() {
             return Err(Error::InvalidInput("a secret needs a name"));
         }
         model::validate_payload(&record.payload)?;
 
-        let stored = seal_record(&record, &self.state()?.keys)?;
+        let hlc = self.tick_hlc()?;
+        let stored = seal_record(&record, &self.state()?.keys, hlc)?;
         self.store.insert(&stored)?;
         self.state_mut()?.index.insert(0, record);
         Ok(())
@@ -352,7 +418,8 @@ impl Vault {
             return Err(Error::InvalidInput("a secret needs a name"));
         }
 
-        let stored = seal_record(&record, &self.state()?.keys)?;
+        let hlc = self.tick_hlc()?;
+        let stored = seal_record(&record, &self.state()?.keys, hlc)?;
         self.store.update(&stored)?;
 
         let summary = record.summary();
@@ -365,7 +432,8 @@ impl Vault {
 
     pub fn delete_secret(&mut self, id: SecretId) -> Result<()> {
         self.state()?;
-        self.store.soft_delete(id, now_ms())?;
+        let hlc = self.tick_hlc()?;
+        self.store.soft_delete(id, hlc)?;
         self.state_mut()?.index.retain(|r| r.id != id);
         Ok(())
     }
@@ -490,6 +558,123 @@ impl Vault {
         Ok(())
     }
 
+    /// Recover the VMK to hand to a new peer during pairing.
+    ///
+    /// Requires the current master password again, exactly like
+    /// [`Vault::enable_platform_protection`] does for the same reason:
+    /// handing your VMK to another device is at least as sensitive as
+    /// opening a new local unlock route, so it gets at least as much
+    /// friction. The VMK is not otherwise held anywhere in `UnlockedState`
+    /// for the session -- only derived subkeys are -- so this is also the
+    /// only place a whole VMK exists in memory outside of unlock itself.
+    ///
+    /// The caller (`sync::pairing`) seals this under a key derived from the
+    /// pairing session, and only after the human has confirmed the SAS
+    /// matches -- this method itself has no opinion on that; it is purely
+    /// "prove you know the password, then here is the key."
+    pub fn export_vmk_for_pairing(
+        &self,
+        current_password: &Zeroizing<String>,
+    ) -> Result<VaultMasterKey> {
+        self.state()?;
+
+        let salt_bytes = self
+            .store
+            .get_meta(meta_keys::KDF_SALT)?
+            .ok_or(Error::AuthenticationFailed)?;
+        let salt: [u8; SALT_LEN] = salt_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::AuthenticationFailed)?;
+        let params: KdfParams = self
+            .store
+            .get_meta(meta_keys::KDF_PARAMS)?
+            .ok_or(Error::AuthenticationFailed)
+            .and_then(|b| serde_json::from_slice(&b).map_err(|_| Error::AuthenticationFailed))?;
+        let wrapped_bytes = self
+            .store
+            .get_meta(&wrapped_key(KeySlot::Password))?
+            .ok_or(Error::AuthenticationFailed)?;
+        let wrapped = Sealed::from_bytes(wrapped_bytes).map_err(|_| Error::AuthenticationFailed)?;
+
+        let kek = kdf::derive_kek(current_password, &salt, params)?;
+        VaultMasterKey::unwrap_from(&kek, &wrapped, KeySlot::Password)
+    }
+
+    // --- trusted devices ------------------------------------------------------
+    //
+    // `fingerprint` here is always raw bytes, never `sync::Fingerprint` --
+    // envryn-core's dependency graph runs storage -> vault -> sync, and a
+    // typed dependency the other way would invert it. The Tauri shell and
+    // `sync` itself convert to/from `sync::Fingerprint` at their own
+    // boundary.
+
+    /// Record a newly paired device. The caller has already completed
+    /// pairing (SAS confirmed, VMK exchanged if this device was the
+    /// receiver) -- this only records the relationship so future sync
+    /// connections from `fingerprint` are accepted.
+    pub fn add_trusted_device(
+        &mut self,
+        device_id: &str,
+        fingerprint: &[u8],
+        name: &str,
+    ) -> Result<TrustedDevice> {
+        let now = now_ms();
+        let device = TrustedDevice {
+            device_id: device_id.to_string(),
+            fingerprint_hex: hex_encode(fingerprint),
+            name: name.to_string(),
+            paired_ms: now,
+            last_sync_ms: None,
+        };
+        let sealed = seal_trusted_device(&device, &self.state()?.keys)?;
+        self.store
+            .insert_trusted_device(device_id, fingerprint, sealed.as_bytes(), now)?;
+        Ok(device)
+    }
+
+    pub fn list_trusted_devices(&self) -> Result<Vec<TrustedDevice>> {
+        let keys = &self.state()?.keys;
+        let rows = self.store.list_trusted_devices()?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            out.push(open_trusted_device(&row.device_id, &row.sealed, keys)?);
+        }
+        Ok(out)
+    }
+
+    pub fn rename_trusted_device(&mut self, device_id: &str, name: &str) -> Result<TrustedDevice> {
+        let mut device = self
+            .list_trusted_devices()?
+            .into_iter()
+            .find(|d| d.device_id == device_id)
+            .ok_or(Error::NotFound)?;
+        device.name = name.to_string();
+        let sealed = seal_trusted_device(&device, &self.state()?.keys)?;
+        self.store
+            .update_trusted_device_sealed(device_id, sealed.as_bytes())?;
+        Ok(device)
+    }
+
+    /// Revoke a device. The very next sync attempt from its fingerprint fails
+    /// at the TLS handshake itself once the caller rebuilds
+    /// `sync::transport::TrustedFingerprints` from the (now smaller) result
+    /// of `Vault::trusted_fingerprints` -- see INV-104.
+    pub fn revoke_trusted_device(&mut self, device_id: &str) -> Result<()> {
+        self.state()?;
+        self.store.revoke_trusted_device(device_id)
+    }
+
+    /// Every trusted fingerprint, for building `sync::transport`'s live
+    /// verifier set. Requires the vault to be unlocked, even though the
+    /// fingerprints themselves are unencrypted columns -- sync is something
+    /// the user starts from inside the unlocked app, not a background
+    /// listener that runs against a locked vault.
+    pub fn trusted_fingerprints(&self) -> Result<Vec<Vec<u8>>> {
+        self.state()?;
+        self.store.list_trusted_fingerprints()
+    }
+
     /// Unlock using the platform slot instead of the master password.
     ///
     /// Fails closed exactly like [`Vault::unlock`]: a missing slot, a DPAPI
@@ -535,7 +720,12 @@ impl Vault {
 
         let keys = VaultKeys::derive_from(&vmk)?;
         let index = load_index(&self.store, &keys.record)?;
-        self.state = Some(UnlockedState { keys, index });
+        self.state = Some(UnlockedState {
+            keys,
+            index,
+            local_device_id: 0,
+            last_hlc: Hlc::ZERO,
+        });
         Ok(())
     }
 }
@@ -550,7 +740,7 @@ fn record_aad(id: SecretId, version: i64) -> Vec<u8> {
     format!("envryn/v1/record/{id}/{version}").into_bytes()
 }
 
-fn seal_record(record: &SecretRecord, keys: &VaultKeys) -> Result<StoredRecord> {
+fn seal_record(record: &SecretRecord, keys: &VaultKeys, hlc: Hlc) -> Result<StoredRecord> {
     let plaintext = Zeroizing::new(serde_json::to_vec(record)?);
     let sealed = aead::seal(
         &keys.record,
@@ -569,7 +759,8 @@ fn seal_record(record: &SecretRecord, keys: &VaultKeys) -> Result<StoredRecord> 
         sealed: sealed.into_bytes(),
         fingerprint,
         created_ms: record.created_ms,
-        updated_ms: record.updated_ms,
+        hlc,
+        deleted: false,
     })
 }
 
@@ -587,6 +778,37 @@ fn open_record(stored: &StoredRecord, record_key: &SymmetricKey) -> Result<Secre
         &record_aad(stored.id, stored.record_version),
     )?;
     Ok(serde_json::from_slice(&plaintext)?)
+}
+
+/// AAD binding a trusted-device blob to the device id it belongs to, for the
+/// same reason `record_aad` binds a secret to its row: without it, a
+/// database write could move one device's sealed name onto another device's
+/// row undetected.
+fn trusted_device_aad(device_id: &str) -> Vec<u8> {
+    format!("envryn/v1/trusted-device/{device_id}").into_bytes()
+}
+
+fn seal_trusted_device(device: &TrustedDevice, keys: &VaultKeys) -> Result<Sealed> {
+    let plaintext = Zeroizing::new(serde_json::to_vec(device)?);
+    aead::seal(
+        &keys.record,
+        &plaintext,
+        &trusted_device_aad(&device.device_id),
+    )
+}
+
+fn open_trusted_device(
+    device_id: &str,
+    sealed_bytes: &[u8],
+    keys: &VaultKeys,
+) -> Result<TrustedDevice> {
+    let sealed = Sealed::from_bytes(sealed_bytes.to_vec())?;
+    let plaintext = aead::open(&keys.record, &sealed, &trusted_device_aad(device_id))?;
+    Ok(serde_json::from_slice(&plaintext)?)
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn load_index(store: &Store, record_key: &SymmetricKey) -> Result<Vec<SecretRecord>> {

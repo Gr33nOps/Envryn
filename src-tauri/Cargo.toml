@@ -21,6 +21,15 @@ serde.workspace = true
 serde_json.workspace = true
 zeroize.workspace = true
 thiserror.workspace = true
+# Only for a human-facing 6-digit pairing code -- not used for anything
+# cryptographic, so this does not need to match envryn-core's rand_core/OsRng
+# discipline.
+rand = "0.8"
+# Same version/features as envryn-core's own dependency (crates/envryn-core/Cargo.toml)
+# -- this crate only drives the `rustls::Stream`/`ServerConnection`/
+# `ClientConnection` plumbing around the `rustls::ServerConfig`/`ClientConfig`
+# that `envryn_core::sync::transport` builds; it never touches TLS internals.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 # Only "time" beyond what Tauri itself already pulls in (rt, rt-multi-thread,
 # sync, fs, io-util) -- the auto-lock poll and the clipboard clear timer are

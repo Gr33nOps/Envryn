@@ -1,6 +1,6 @@
 [package]
 name = "envryn-core"
-description = "Envryn vault core: cryptography, storage, and vault state. No UI, no Tauri, no network."
+description = "Envryn vault core: cryptography, storage, vault state, and LAN sync. No UI, no Tauri."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,6 +16,7 @@ zeroize.workspace = true
 subtle.workspace = true
 getrandom.workspace = true
 rand_core.workspace = true
+rand = "0.8"
 
 rusqlite.workspace = true
 uuid.workspace = true
@@ -25,6 +26,27 @@ serde_json.workspace = true
 
 thiserror.workspace = true
 time.workspace = true
+
+# --- sync/: the one deliberate exception to "no network" (INV-010 permits
+# LAN sync with an already-paired device). Nothing outside crate::sync may
+# import these -- see docs/DEPENDENCY_POLICY.md.
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+spake2 = "0.4"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls-pki-types = "1"
+# For extracting the SubjectPublicKeyInfo from a peer's presented certificate
+# during the TLS handshake, so it can be hashed and checked against
+# trusted_devices. Chosen over hand-parsing DER, and over RFC 7250 raw public
+# keys (which rustls supports but far less commonly, with much less
+# real-world usage to draw on) -- self-signed X.509 plus SPKI fingerprint
+# pinning is the well-trodden pattern here, and getting this parsing wrong is
+# not a place to economise.
+x509-parser = "0.18"
+tokio = { version = "1", features = ["net", "rt", "io-util", "time", "sync"] }
+mdns-sd = "0.13"
 
 [target.'cfg(windows)'.dependencies]
 # Version left unpinned to the patch: Tauri itself depends on `windows = "0.61"`

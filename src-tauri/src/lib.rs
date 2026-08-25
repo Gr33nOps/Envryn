@@ -8,8 +8,10 @@ mod autolock;
 mod capture_protection;
 mod ipc;
 mod settings;
+mod sync;
 
 use ipc::VaultState;
+use sync::{PairingState, SyncListenState};
 
 /// Start the application.
 ///
@@ -22,6 +24,8 @@ use ipc::VaultState;
 pub fn run() {
     tauri::Builder::default()
         .manage(VaultState::default())
+        .manage(PairingState::default())
+        .manage(SyncListenState::default())
         .setup(|app| {
             let handle = app.handle().clone();
             capture_protection::apply(&handle);
@@ -49,6 +53,18 @@ pub fn run() {
             ipc::backup_restore,
             settings::settings_get,
             settings::settings_set,
+            sync::device_identity,
+            sync::trusted_device_list,
+            sync::trusted_device_rename,
+            sync::trusted_device_revoke,
+            sync::discovery_browse,
+            sync::sync_now,
+            sync::sync_listen_start,
+            sync::sync_listen_stop,
+            sync::pairing_host_start,
+            sync::pairing_join_start,
+            sync::pairing_confirm,
+            sync::pairing_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Envryn");

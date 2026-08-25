@@ -3,7 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Check, Copy, Laptop, Pencil, Plus, Smartphone, X } from "lucide-react";
 import { toast } from "sonner";
 import { type Device } from "@/lib/envryn-data";
-import { useDevices } from "@/lib/use-vault";
+import * as ipc from "@/lib/ipc";
+import { useDevices, useRenameDevice, useRevokeDevice } from "@/lib/use-vault";
 import {
   Button,
   ConfirmDialog,
@@ -31,29 +32,139 @@ function statusTone(status: Device["status"]) {
       : ("neutral" as const);
 }
 
+/**
+ * Manual-code pairing, driven by real IPC. This device always plays the
+ * "host" role here (it listens; the other device dials in) -- there is no
+ * "join" screen yet for a brand-new install to pair *into* an existing
+ * vault, since that belongs on a first-run screen this session did not
+ * build. See docs/ARCHITECTURE.md's open items.
+ */
+type PairingStage = "waiting" | "found" | "confirming" | "error";
+
+function usePairingSession(onPaired: () => void) {
+  const [open, setOpen] = React.useState(false);
+  const [stage, setStage] = React.useState<PairingStage>("waiting");
+  const [host, setHost] = React.useState<ipc.PairingHostStarted | null>(null);
+  const [sas, setSas] = React.useState<ipc.PairingSasReady | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [password, setPassword] = React.useState("");
+  const unlistenRef = React.useRef<(() => void) | null>(null);
+
+  const stop = React.useCallback(() => {
+    unlistenRef.current?.();
+    unlistenRef.current = null;
+  }, []);
+
+  React.useEffect(() => () => stop(), [stop]);
+
+  const start = React.useCallback(async () => {
+    setOpen(true);
+    setStage("waiting");
+    setHost(null);
+    setSas(null);
+    setError(null);
+    setPassword("");
+    stop();
+    try {
+      unlistenRef.current = await ipc.listenPairingEvents({
+        onSasReady: (event) => {
+          setSas(event);
+          setStage("found");
+        },
+        onFailed: (event) => {
+          setError(event.message);
+          setStage("error");
+        },
+        onComplete: () => {
+          setOpen(false);
+          toast("Device paired");
+          onPaired();
+        },
+      });
+      const info = await ipc.pairingHostStart(true);
+      setHost(info);
+    } catch (err) {
+      setError(err instanceof ipc.IpcError ? err.message : "Could not start pairing.");
+      setStage("error");
+    }
+  }, [onPaired, stop]);
+
+  const cancel = React.useCallback(() => {
+    stop();
+    void ipc.pairingCancel();
+    setOpen(false);
+  }, [stop]);
+
+  const confirm = React.useCallback(async () => {
+    setStage("confirming");
+    try {
+      await ipc.pairingConfirm(password);
+      // Outcome arrives as a pairing://complete or pairing://failed event.
+    } catch (err) {
+      setError(err instanceof ipc.IpcError ? err.message : "Could not confirm pairing.");
+      setStage("error");
+    }
+  }, [password]);
+
+  return { open, stage, host, sas, error, password, setPassword, start, cancel, confirm };
+}
+
 function TrustedDevices() {
-  const devices = useDevices().data ?? [];
+  const devicesQuery = useDevices();
+  const devices = devicesQuery.data ?? [];
+  const renameDevice = useRenameDevice();
+  const revokeDevice = useRevokeDevice();
+
   const [detail, setDetail] = React.useState<Device | null>(null);
-  const [pairing, setPairing] = React.useState(false);
-  const [stage, setStage] = React.useState<"waiting" | "found" | "expired">("waiting");
   const [revoking, setRevoking] = React.useState<Device | null>(null);
   const [renaming, setRenaming] = React.useState(false);
   const [name, setName] = React.useState("");
-  const [deviceNames, setDeviceNames] = React.useState<Record<string, string>>({});
 
-  function displayName(device: Device) {
-    return deviceNames[device.id] ?? device.name;
-  }
+  const pairing = usePairingSession(() => void devicesQuery.refetch());
 
   function openDetails(device: Device) {
     setDetail(device);
-    setName(displayName(device));
+    setName(device.name);
     setRenaming(false);
   }
+
+  // The list refetches after a rename/revoke; keep the open detail panel in
+  // sync with whichever row it currently points at, and close it if that
+  // device was just revoked.
+  React.useEffect(() => {
+    if (!detail) return;
+    const fresh = devices.find((d) => d.id === detail.id);
+    if (fresh && fresh !== detail) setDetail(fresh);
+    else if (!fresh && devicesQuery.isFetched) setDetail(null);
+  }, [devices, detail, devicesQuery.isFetched]);
 
   function copyFingerprint() {
     if (detail) navigator.clipboard?.writeText(detail.fingerprint);
     toast("Fingerprint copied");
+  }
+
+  async function saveRename() {
+    if (!detail) return;
+    const nextName = name.trim() || detail.name;
+    try {
+      await renameDevice.mutateAsync({ deviceId: detail.deviceId, name: nextName });
+      setRenaming(false);
+      toast("Device name updated");
+    } catch (err) {
+      toast(err instanceof ipc.IpcError ? err.message : "Could not rename that device.");
+    }
+  }
+
+  async function confirmRevoke() {
+    if (!revoking) return;
+    try {
+      await revokeDevice.mutateAsync(revoking.deviceId);
+      setDetail(null);
+      setRevoking(null);
+      toast("Device access removed");
+    } catch (err) {
+      toast(err instanceof ipc.IpcError ? err.message : "Could not revoke that device.");
+    }
   }
 
   return (
@@ -69,14 +180,7 @@ function TrustedDevices() {
               Only devices you approve can connect to this vault.
             </p>
           </div>
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={() => {
-              setStage("waiting");
-              setPairing(true);
-            }}
-          >
+          <Button variant="primary" size="lg" onClick={() => void pairing.start()}>
             <Plus />
             Pair a device
           </Button>
@@ -84,50 +188,55 @@ function TrustedDevices() {
 
         <div className="mb-3 flex items-center justify-between border-y border-border/70 py-2.5 text-[11.5px] text-muted-foreground">
           <span>
-            {devices.length} approved devices ·{" "}
-            {devices.filter((device) => device.status !== "Offline").length} online
+            {devices.length} approved device{devices.length === 1 ? "" : "s"}
           </span>
           <span>Review access regularly</span>
         </div>
 
         <div className={detail ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]" : "grid gap-4"}>
           <div className="overflow-hidden rounded-lg border border-border bg-surface">
-            {devices.map((device) => {
-              const Icon = deviceIcon(displayName(device));
-              const selected = detail?.id === device.id;
-              return (
-                <button
-                  type="button"
-                  key={device.id}
-                  onClick={() => openDetails(device)}
-                  className={`device-row group flex w-full items-center gap-3 border-b border-border/60 px-4 py-3.5 text-left transition-colors last:border-0 ${selected ? "bg-surface-3 shadow-[inset_2px_0_0_var(--primary)]" : "hover:bg-surface-2/65"}`}
-                >
-                  <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
-                    <Icon className="size-4" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium text-foreground">
-                      {displayName(device)}
+            {devices.length === 0 ? (
+              <div className="px-4 py-8 text-center text-[12px] text-subtle-foreground">
+                No devices paired yet. Pair one to start syncing.
+              </div>
+            ) : (
+              devices.map((device) => {
+                const Icon = deviceIcon(device.name);
+                const selected = detail?.id === device.id;
+                return (
+                  <button
+                    type="button"
+                    key={device.id}
+                    onClick={() => openDetails(device)}
+                    className={`device-row group flex w-full items-center gap-3 border-b border-border/60 px-4 py-3.5 text-left transition-colors last:border-0 ${selected ? "bg-surface-3 shadow-[inset_2px_0_0_var(--primary)]" : "hover:bg-surface-2/65"}`}
+                  >
+                    <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
+                      <Icon className="size-4" />
                     </span>
-                    <span className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <StatusLabel tone={statusTone(device.status)}>{device.status}</StatusLabel>
-                      <span>Last seen {device.lastSync}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12.5px] font-medium text-foreground">
+                        {device.name}
+                      </span>
+                      <span className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <StatusLabel tone={statusTone(device.status)}>{device.status}</StatusLabel>
+                        <span>Last seen {device.lastSync}</span>
+                      </span>
                     </span>
-                  </span>
-                  <span className="hidden text-right md:block">
-                    <span className="block font-mono text-[10.5px] text-muted-foreground">
-                      {device.fingerprint.slice(0, 14)}...
+                    <span className="hidden text-right md:block">
+                      <span className="block font-mono text-[10.5px] text-muted-foreground">
+                        {device.fingerprint.slice(0, 14)}...
+                      </span>
+                      <span className="mt-1 block text-[10px] text-subtle-foreground">
+                        {device.deviceId}
+                      </span>
                     </span>
-                    <span className="mt-1 block text-[10px] text-subtle-foreground">
-                      {device.deviceId}
+                    <span className="shrink-0 text-[11px] text-subtle-foreground transition-colors group-hover:text-foreground">
+                      Details
                     </span>
-                  </span>
-                  <span className="shrink-0 text-[11px] text-subtle-foreground transition-colors group-hover:text-foreground">
-                    Details
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })
+            )}
           </div>
 
           {detail ? (
@@ -135,11 +244,11 @@ function TrustedDevices() {
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <div className="flex items-center gap-2.5">
                   <span className="inline-flex size-7 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
-                    {React.createElement(deviceIcon(displayName(detail)), {
+                    {React.createElement(deviceIcon(detail.name), {
                       className: "size-3.5",
                     })}
                   </span>
-                  <span className="text-[12.5px] font-medium">{displayName(detail)}</span>
+                  <span className="text-[12.5px] font-medium">{detail.name}</span>
                 </div>
                 <IconButton label="Close details" onClick={() => setDetail(null)}>
                   <X />
@@ -156,13 +265,8 @@ function TrustedDevices() {
                       />
                       <Button
                         variant="primary"
-                        onClick={() => {
-                          const nextName = name.trim() || detail.name;
-                          setDeviceNames((current) => ({ ...current, [detail.id]: nextName }));
-                          setDetail({ ...detail, name: nextName });
-                          setRenaming(false);
-                          toast("Device name updated");
-                        }}
+                        loading={renameDevice.isPending}
+                        onClick={() => void saveRename()}
                       >
                         Save
                       </Button>
@@ -216,47 +320,41 @@ function TrustedDevices() {
       </div>
 
       <Modal
-        open={pairing}
-        onOpenChange={setPairing}
+        open={pairing.open}
+        onOpenChange={(open) => !open && pairing.cancel()}
         title="Pair a device"
-        description="Open Envryn on the other device and scan this code."
+        description="Enter this code and address on the other device."
         footer={
-          stage === "found" ? (
+          pairing.stage === "found" || pairing.stage === "confirming" ? (
             <>
-              <Button onClick={() => setPairing(false)}>Cancel</Button>
+              <Button onClick={pairing.cancel}>Cancel</Button>
               <Button
                 variant="primary"
-                onClick={() => {
-                  setPairing(false);
-                  toast("Device paired");
-                }}
+                loading={pairing.stage === "confirming"}
+                disabled={pairing.password.length < 8}
+                onClick={() => void pairing.confirm()}
               >
                 <Check />
                 Trust device
               </Button>
             </>
-          ) : stage === "expired" ? (
+          ) : pairing.stage === "error" ? (
             <>
-              <Button onClick={() => setPairing(false)}>Cancel</Button>
-              <Button variant="primary" onClick={() => setStage("waiting")}>
-                Generate new code
+              <Button onClick={pairing.cancel}>Close</Button>
+              <Button variant="primary" onClick={() => void pairing.start()}>
+                Try again
               </Button>
             </>
           ) : (
-            <>
-              <Button onClick={() => setStage("expired")}>Cancel</Button>
-              <Button variant="primary" onClick={() => setStage("found")}>
-                I found the device
-              </Button>
-            </>
+            <Button onClick={pairing.cancel}>Cancel</Button>
           )
         }
       >
-        {stage === "expired" ? (
+        {pairing.stage === "error" ? (
           <div className="py-4 text-center">
-            <p className="text-[12.5px]">This pairing code expired.</p>
+            <p className="text-[12.5px]">Pairing didn't complete.</p>
             <p className="mt-1 text-[11.5px] text-muted-foreground">
-              Generate a new code to continue.
+              {pairing.error ?? "Something went wrong."}
             </p>
           </div>
         ) : (
@@ -280,12 +378,30 @@ function TrustedDevices() {
               <div className="text-[10.5px] uppercase tracking-[0.08em] text-subtle-foreground">
                 Verification code
               </div>
-              <div className="mt-0.5 font-mono text-[16px] tracking-[0.2em]">481 927</div>
+              <div className="mt-0.5 font-mono text-[16px] tracking-[0.2em]">
+                {pairing.host?.code ?? "······"}
+              </div>
+              {pairing.host ? (
+                <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                  {pairing.host.address}:{pairing.host.port}
+                </div>
+              ) : null}
             </div>
-            {stage === "found" ? (
-              <p className="max-w-[34ch] text-center text-[12px] text-muted-foreground">
-                Android Phone wants to connect. Make sure this code matches the other device.
-              </p>
+            {pairing.stage === "found" || pairing.stage === "confirming" ? (
+              <div className="w-full space-y-2.5">
+                <p className="max-w-[34ch] text-center text-[12px] text-muted-foreground">
+                  {pairing.sas?.peer_device_id} wants to connect. Make sure this code matches the
+                  other device: <span className="font-mono">{pairing.sas?.sas}</span>
+                </p>
+                <Field label="Your current master password">
+                  <Input
+                    type="password"
+                    autoFocus
+                    value={pairing.password}
+                    onChange={(event) => pairing.setPassword(event.target.value)}
+                  />
+                </Field>
+              </div>
             ) : (
               <p className="text-[11.5px] text-muted-foreground">Waiting for the other device...</p>
             )}
@@ -299,11 +415,7 @@ function TrustedDevices() {
         title={`Revoke ${revoking?.name}?`}
         body="This device will stop syncing with the vault. You will need to pair it again to reconnect."
         confirmLabel="Revoke device"
-        onConfirm={() => {
-          setDetail(null);
-          setRevoking(null);
-          toast("Device access removed");
-        }}
+        onConfirm={() => void confirmRevoke()}
       />
     </div>
   );

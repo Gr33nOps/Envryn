@@ -105,6 +105,53 @@ export interface RestoreSummary {
   restored: number;
 }
 
+export interface TrustedDevice {
+  device_id: string;
+  fingerprint_hex: string;
+  name: string;
+  paired_ms: number;
+  last_sync_ms: number | null;
+}
+
+export interface OwnIdentity {
+  device_id: string;
+  fingerprint_display: string;
+  fingerprint_hex: string;
+}
+
+export interface DiscoveredPeer {
+  device_id: string;
+  fingerprint_hex: string;
+  addresses: string[];
+  port: number;
+}
+
+export interface SyncSummary {
+  records_applied: number;
+}
+
+export interface PairingHostStarted {
+  address: string;
+  port: number;
+  code: string | null;
+  device_id: string;
+  fingerprint_display: string;
+}
+
+export interface PairingSasReady {
+  sas: string;
+  peer_device_id: string;
+  peer_fingerprint_display: string;
+}
+
+export interface PairingFailed {
+  message: string;
+}
+
+export interface PairingComplete {
+  peer_device_id: string;
+}
+
 // --- Errors -----------------------------------------------------------------
 
 export type IpcErrorCode =
@@ -205,3 +252,55 @@ export const backupRestore = (path: string, backupPassword: string, newMasterPas
     backupPassword,
     newMasterPassword,
   });
+
+// --- Sync: identity, trusted devices, discovery, manual sync ----------------
+
+export const deviceIdentity = () => call<OwnIdentity>("device_identity");
+
+export const trustedDeviceList = () => call<TrustedDevice[]>("trusted_device_list");
+export const trustedDeviceRename = (deviceId: string, name: string) =>
+  call<TrustedDevice>("trusted_device_rename", { deviceId, name });
+export const trustedDeviceRevoke = (deviceId: string) =>
+  call<void>("trusted_device_revoke", { deviceId });
+
+export const discoveryBrowse = () => call<DiscoveredPeer[]>("discovery_browse");
+
+export const syncNow = (address: string, port: number) =>
+  call<SyncSummary>("sync_now", { address, port });
+export const syncListenStart = () => call<number>("sync_listen_start");
+export const syncListenStop = () => call<void>("sync_listen_stop");
+
+// --- Pairing ------------------------------------------------------------------
+//
+// `pairing_host_start`/`pairing_join_start` return once a listener/connection
+// exists; the actual outcome (a verification code to compare, success, or
+// failure) arrives later as a `pairing://*` event -- see `listenPairingEvents`
+// below. This mirrors the Rust side: the human confirming the code is what
+// authorises the vault key transfer, not the command call itself.
+
+export const pairingHostStart = (manual: boolean) =>
+  call<PairingHostStarted>("pairing_host_start", { manual });
+export const pairingJoinStart = (address: string, port: number, code: string | null) =>
+  call<void>("pairing_join_start", { address, port, code });
+export const pairingConfirm = (secret: string) => call<void>("pairing_confirm", { secret });
+export const pairingCancel = () => call<void>("pairing_cancel");
+
+/**
+ * Subscribe to the three pairing lifecycle events emitted from the Rust
+ * background thread driving an in-progress pairing session. Returns an
+ * unsubscribe function; callers should invoke it on unmount so a closed
+ * pairing modal does not keep a stale listener alive.
+ */
+export async function listenPairingEvents(handlers: {
+  onSasReady: (event: PairingSasReady) => void;
+  onFailed: (event: PairingFailed) => void;
+  onComplete: (event: PairingComplete) => void;
+}): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await Promise.all([
+    listen<PairingSasReady>("pairing://sas-ready", (e) => handlers.onSasReady(e.payload)),
+    listen<PairingFailed>("pairing://failed", (e) => handlers.onFailed(e.payload)),
+    listen<PairingComplete>("pairing://complete", (e) => handlers.onComplete(e.payload)),
+  ]);
+  return () => unlisten.forEach((fn) => fn());
+}

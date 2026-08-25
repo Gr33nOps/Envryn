@@ -573,3 +573,133 @@ fn restore_fails_with_the_wrong_backup_password() {
         Err(Error::AuthenticationFailed)
     ));
 }
+
+// --- HLC stamping on real writes -------------------------------------------
+
+#[test]
+fn writes_are_stamped_with_the_local_device_id() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    vault.set_local_device_id(4242).unwrap();
+
+    let id = vault
+        .create_secret(api_key("K", "P", Environment::Production, "v"))
+        .unwrap()
+        .id;
+
+    let conn = rusqlite::Connection::open(&t.path).unwrap();
+    let hlc_device: String = conn
+        .query_row(
+            "SELECT hlc_device FROM secrets WHERE id = ?1",
+            [id.to_string()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(hlc_device, "4242");
+}
+
+/// Two writes to two different records must produce strictly increasing
+/// HLCs -- this is what a peer relies on to know which of two writes is
+/// newer during reconciliation.
+#[test]
+fn successive_writes_advance_the_clock() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    vault.set_local_device_id(1).unwrap();
+
+    let id_a = vault
+        .create_secret(api_key("A", "P", Environment::Production, "a"))
+        .unwrap()
+        .id;
+    let id_b = vault
+        .create_secret(api_key("B", "P", Environment::Production, "b"))
+        .unwrap()
+        .id;
+
+    let conn = rusqlite::Connection::open(&t.path).unwrap();
+    let read_hlc = |id: &str| -> (i64, i64) {
+        conn.query_row(
+            "SELECT updated_ms, hlc_counter FROM secrets WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    let (wall_a, counter_a) = read_hlc(&id_a.to_string());
+    let (wall_b, counter_b) = read_hlc(&id_b.to_string());
+    assert!(
+        (wall_b, counter_b) > (wall_a, counter_a),
+        "second write's HLC must be strictly newer than the first"
+    );
+}
+
+// --- Trusted devices --------------------------------------------------------
+
+#[test]
+fn trusted_devices_round_trip_and_revoke() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+
+    let fp = [7u8; 32];
+    vault
+        .add_trusted_device("device-1", &fp, "Android Phone")
+        .unwrap();
+
+    let listed = vault.list_trusted_devices().unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "Android Phone");
+    assert_eq!(listed[0].fingerprint_hex, "07".repeat(32));
+
+    assert_eq!(vault.trusted_fingerprints().unwrap(), vec![fp.to_vec()]);
+
+    vault
+        .rename_trusted_device("device-1", "Work Phone")
+        .unwrap();
+    assert_eq!(vault.list_trusted_devices().unwrap()[0].name, "Work Phone");
+
+    vault.revoke_trusted_device("device-1").unwrap();
+    assert!(vault.list_trusted_devices().unwrap().is_empty());
+    assert!(vault.trusted_fingerprints().unwrap().is_empty());
+}
+
+#[test]
+fn trusted_devices_persist_across_lock() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    vault
+        .add_trusted_device("device-1", &[1u8; 32], "Laptop")
+        .unwrap();
+    vault.lock();
+
+    let mut vault = Vault::open(&t.path).unwrap();
+    vault.unlock(&pw("p")).unwrap();
+    assert_eq!(vault.list_trusted_devices().unwrap().len(), 1);
+}
+
+#[test]
+fn trusted_device_names_are_not_stored_in_plaintext() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    vault
+        .add_trusted_device("device-1", &[1u8; 32], "DISTINCTIVE_DEVICE_NAME")
+        .unwrap();
+    vault.lock();
+
+    let bytes = std::fs::read(&t.path).unwrap();
+    assert!(
+        !bytes
+            .windows(b"DISTINCTIVE_DEVICE_NAME".len())
+            .any(|w| w == b"DISTINCTIVE_DEVICE_NAME"),
+        "device name was found in plaintext on disk"
+    );
+}
+
+#[test]
+fn revoking_an_unknown_device_errors() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    assert!(matches!(
+        vault.revoke_trusted_device("nonexistent"),
+        Err(Error::NotFound)
+    ));
+}

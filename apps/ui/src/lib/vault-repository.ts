@@ -17,6 +17,8 @@ export interface VaultRepository {
   searchSecrets(query: string): Promise<Secret[]>;
   revealSecret(id: string): Promise<string>;
   listDevices(): Promise<Device[]>;
+  renameDevice(deviceId: string, name: string): Promise<Device>;
+  revokeDevice(deviceId: string): Promise<void>;
   createSecret(input: CreateSecretInput): Promise<Secret>;
   updateSecret(id: string, input: UpdateSecretInput): Promise<Secret>;
   deleteSecret(id: string): Promise<void>;
@@ -149,6 +151,37 @@ function toSecret(summary: ipc.SecretSummary): Secret {
   };
 }
 
+/**
+ * Colon-separated uppercase hex, matching the format
+ * `sync::identity::Fingerprint::to_display_string` produces on the Rust
+ * side (and what earlier UI mockups already assumed).
+ */
+function toDisplayFingerprint(hex: string): string {
+  return (hex.match(/.{1,2}/g) ?? [hex]).join(":").toUpperCase();
+}
+
+/**
+ * Map a trusted-device record into the UI's display shape.
+ *
+ * `status` is always "Trusted" here -- this call does not check whether the
+ * device is currently reachable on the LAN (that needs a several-second mDNS
+ * browse, `ipc.discoveryBrowse`, which the devices list should not block on).
+ * "Trusted" is still accurate: it is the vault's approval state, independent
+ * of whether the device happens to be online right now. `sync.tsx` layers
+ * live reachability on top via a separate browse when the user asks to sync.
+ */
+function toDevice(device: ipc.TrustedDevice): Device {
+  return {
+    id: device.device_id,
+    name: device.name,
+    status: "Trusted",
+    lastSync: device.last_sync_ms ? relative(device.last_sync_ms) : "Never",
+    fingerprint: toDisplayFingerprint(device.fingerprint_hex),
+    deviceId: device.device_id,
+    added: ABSOLUTE.format(new Date(device.paired_ms)),
+  };
+}
+
 function requireTauri(): void {
   if (!ipc.isTauri()) {
     throw new ipc.IpcError(
@@ -177,10 +210,17 @@ export const tauriVaultRepository: VaultRepository = {
 
   async listDevices() {
     requireTauri();
-    // Device identity and pairing arrive in Phase 2 (M13-M18). Returning an
-    // empty list is honest; fabricating entries would make the Trusted Devices
-    // screen claim a security property that does not exist yet.
-    return [];
+    return (await ipc.trustedDeviceList()).map(toDevice);
+  },
+
+  async renameDevice(deviceId, name) {
+    requireTauri();
+    return toDevice(await ipc.trustedDeviceRename(deviceId, name));
+  },
+
+  async revokeDevice(deviceId) {
+    requireTauri();
+    await ipc.trustedDeviceRevoke(deviceId);
   },
 
   async createSecret(input) {

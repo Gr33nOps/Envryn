@@ -22,7 +22,7 @@ use crate::error::{Error, Result};
 /// Bump only alongside a migration. A vault whose schema is newer than the
 /// running build is refused rather than opened optimistically -- see
 /// docs/CRYPTOGRAPHY.md section 10.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Record format version, embedded in each record's AAD so a ciphertext
 /// cannot be rolled back to an earlier format undetected.
@@ -47,6 +47,9 @@ pub fn initialise(conn: &Connection) -> Result<()> {
 
     if current < 1 {
         migrate_to_v1(conn)?;
+    }
+    if current < 2 {
+        migrate_to_v2(conn)?;
     }
 
     Ok(())
@@ -88,6 +91,35 @@ fn migrate_to_v1(conn: &Connection) -> Result<()> {
          CREATE INDEX idx_secrets_updated ON secrets(updated_ms);
 
          PRAGMA user_version = 1;
+         COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn migrate_to_v2(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "BEGIN;
+
+         -- Paired devices this vault will accept a sync connection from.
+         -- Opaque, like `secrets`: name and pairing history live inside
+         -- `sealed`, under the same Record Key. `fingerprint` is the one
+         -- exception -- it is not a secret (it is read aloud and compared on
+         -- screen during pairing, the same role an SSH host key fingerprint
+         -- plays) and `sync::transport`'s TLS verifier needs the whole
+         -- trusted set in memory to check every incoming handshake, which is
+         -- simpler and cheaper to build from a plain column than by
+         -- unsealing every row up front for a value that was never secret.
+         CREATE TABLE trusted_devices (
+             device_id   TEXT PRIMARY KEY NOT NULL,
+             fingerprint BLOB NOT NULL,
+             sealed      BLOB NOT NULL,
+             paired_ms   INTEGER NOT NULL
+         );
+
+         CREATE UNIQUE INDEX idx_trusted_devices_fingerprint
+             ON trusted_devices(fingerprint);
+
+         PRAGMA user_version = 2;
          COMMIT;",
     )?;
     Ok(())
@@ -177,6 +209,27 @@ mod tests {
             assert!(
                 permitted.contains(&col.as_str()),
                 "unexpected column `{col}` in secrets -- metadata belongs inside the sealed blob"
+            );
+        }
+    }
+
+    /// `trusted_devices` may expose `fingerprint` (not a secret -- see the
+    /// migration's doc comment) but nothing else meaningful in plaintext.
+    #[test]
+    fn trusted_devices_exposes_only_the_fingerprint() {
+        let c = conn();
+        let mut stmt = c.prepare("PRAGMA table_info(trusted_devices)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let permitted = ["device_id", "fingerprint", "sealed", "paired_ms"];
+        for col in &cols {
+            assert!(
+                permitted.contains(&col.as_str()),
+                "unexpected column `{col}` in trusted_devices -- device names and history belong inside the sealed blob"
             );
         }
     }

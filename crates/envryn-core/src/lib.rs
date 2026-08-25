@@ -24,6 +24,7 @@ pub mod error;
 pub mod model;
 pub mod platform;
 pub mod storage;
+pub mod sync;
 pub mod vault;
 
 pub use error::{Error, Result};
