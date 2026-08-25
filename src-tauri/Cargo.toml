@@ -54,6 +54,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # unifies with Tauri's own `tokio = "1"` requirement into one runtime instance.
 tokio = { version = "1", features = ["time"] }
 
+# packages/contract/: generated TypeScript bindings for the IPC-facing types
+# that live in this crate rather than envryn-core (VaultStatus, AppSettings,
+# sync/pairing summaries, AiStatus, ...). See docs/ARCHITECTURE.md.
+ts-rs.workspace = true
+
 [dev-dependencies]
 # Real Tauri IPC dispatch against a `MockRuntime`, not a mock of our own --
 # `assert_ipc_response`/`get_ipc_response` invoke a command by its real

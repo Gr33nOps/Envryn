@@ -141,7 +141,8 @@ fn require_enabled(app: &AppHandle) -> IpcResult<()> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct AiStatus {
     pub enabled_in_settings: bool,
     pub model_downloaded: bool,

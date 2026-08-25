@@ -5,7 +5,11 @@ members = ["crates/envryn-core", "crates/envryn-ai-worker", "src-tauri"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+# Bumped from 1.82 for ts-rs 12's MSRV (1.88) -- see the contract-generation
+# entry below. This is an application (`publish = false` everywhere), not a
+# library other crates depend on, so tracking the toolchain this closely
+# costs nothing real; CI already always builds on latest stable.
+rust-version = "1.88"
 license = "MIT"
 
 [workspace.dependencies]
@@ -33,6 +37,13 @@ serde_json = "1.0"
 # --- Errors / misc ----------------------------------------------------------
 thiserror = "2.0"
 time = { version = "0.3", features = ["formatting", "parsing", "serde"] }
+
+# --- IPC contract generation --------------------------------------------------
+# Generates packages/contract/bindings/*.ts from the real Rust types
+# (`.cargo/config.toml` sets TS_RS_EXPORT_DIR so every workspace member
+# exports to the same place regardless of its own depth from the repo root).
+# `uuid-impl` is needed for `SecretId` (a transparent wrapper around `Uuid`).
+ts-rs = { version = "12.0", features = ["uuid-impl"] }
 
 [profile.release]
 # A vault should not leak its own source structure in a shipped binary.

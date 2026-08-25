@@ -10,13 +10,15 @@
 //! is the fallback for whatever this module returns `None` for.
 
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::model::SecretKind;
 
 /// A high-confidence classification. `provider` is a short, stable string
 /// suitable for display and for [`crate::ai::gateway::AiGateway::suggest_name`]'s
 /// input -- never inferred, only ever a literal match on a known prefix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
 pub struct DeterministicMatch {
     pub kind: SecretKind,
     pub provider: Option<&'static str>,

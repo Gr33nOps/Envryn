@@ -11,6 +11,7 @@
 //! the type it returns has nowhere to put one.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
@@ -18,8 +19,13 @@ use crate::error::{Error, Result};
 
 /// Opaque record identifier. UUIDv7, so ids sort by creation time without
 /// carrying a separate sequence column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+// ts-rs's serde-compat doesn't recognize `transparent` specifically (hence
+// the harmless "failed to parse serde attribute" build warning) -- it still
+// generates the right `export type SecretId = string;` regardless, since a
+// one-field tuple struct is treated as a newtype independently of that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(transparent)]
+#[ts(export)]
 pub struct SecretId(pub Uuid);
 
 impl SecretId {
@@ -49,7 +55,11 @@ impl std::fmt::Display for SecretId {
 /// Deployment environment. `Unassigned` is a first-class value rather than an
 /// `Option`, because "this credential has no environment" is a state the
 /// cleanup assistant reports on, not missing data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+// Renamed on the TS side only: `apps/ui/src/lib/envryn-data.ts` already has
+// its own UI-facing `Environment` type (using "—" instead of "Unassigned"),
+// and importing both into the same file needs distinct names.
+#[ts(export, rename = "RustEnvironment")]
 pub enum Environment {
     Development,
     Staging,
@@ -70,7 +80,8 @@ impl Environment {
 
 /// The kind of credential. Kept in sync with [`SecretPayload`] by
 /// [`SecretPayload::kind`]; the UI's form-field map is generated from this.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum SecretKind {
     ApiKey,
     Token,
@@ -90,8 +101,9 @@ pub enum SecretKind {
 /// pushes parsing into the UI and makes structured import impossible.
 ///
 /// Every variant zeroizes on drop.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, TS)]
 #[serde(tag = "kind")]
+#[ts(export)]
 pub enum SecretPayload {
     ApiKey {
         value: String,
@@ -132,7 +144,8 @@ pub enum SecretPayload {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize, TS)]
+#[ts(export)]
 pub struct CustomField {
     pub label: String,
     pub value: String,
@@ -178,7 +191,8 @@ impl SecretPayload {
 /// A full record, secret material included.
 ///
 /// Never leaves the Rust core in this form except through an explicit reveal.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct SecretRecord {
     pub id: SecretId,
     pub name: String,
@@ -222,7 +236,8 @@ impl SecretRecord {
 /// Structurally incapable of carrying secret material: there is no field for
 /// it. `has_notes` is a flag rather than the note text for the same reason --
 /// a note can contain a credential (specification section 32).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct SecretSummary {
     pub id: SecretId,
     pub name: String,
@@ -239,33 +254,62 @@ pub struct SecretSummary {
 
 /// What a caller supplies to create a record. Timestamps and id are assigned
 /// by the vault, never by the caller.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
 pub struct NewSecret {
     pub name: String,
     pub project: String,
     pub environment: Environment,
     pub payload: SecretPayload,
+    // `#[serde(default)]` alone only affects deserialization leniency, not
+    // whether ts-rs's serde-compat marks a field optional (it additionally
+    // requires `skip_serializing_if`, which a `Deserialize`-only type like
+    // this one has no reason to carry) -- `#[ts(optional = nullable)]`
+    // states the intended TS shape directly: the key may be omitted, and if
+    // present may be `null`, matching how every caller in vault-repository.ts
+    // already treats these fields.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub notes: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub provider: Option<String>,
 }
 
 /// A partial update. `None` means "leave unchanged", which is why every field
 /// is an `Option` even where the underlying field is already optional.
-#[derive(Debug, Clone, Default, Deserialize)]
+///
+/// Every field is `#[ts(optional...)]`: `apps/ui/src/lib/vault-repository.ts`
+/// builds this from `const update: ipc.SecretUpdate = {}` and assigns fields
+/// incrementally, so the generated TS type must accept an empty object --
+/// unlike `#[serde(default)]` alone, which only affects deserialization
+/// leniency and (per ts-rs's serde-compat) does not by itself make a field
+/// optional in the generated type.
+#[derive(Debug, Clone, Default, Deserialize, TS)]
+#[ts(export)]
 pub struct SecretUpdate {
+    #[ts(optional)]
     pub name: Option<String>,
+    #[ts(optional)]
     pub project: Option<String>,
+    #[ts(optional)]
     pub environment: Option<Environment>,
+    #[ts(optional)]
     pub payload: Option<SecretPayload>,
+    // `as = "Option<String>"` (single layer, matching the outer Option's
+    // inner type) keeps the generated union to one `| null` instead of a
+    // redundant `| null | null` from the real `Option<Option<String>>`.
+    #[ts(as = "Option<String>", optional = nullable)]
     pub notes: Option<Option<String>>,
+    #[ts(optional)]
     pub tags: Option<Vec<String>>,
+    #[ts(as = "Option<String>", optional = nullable)]
     pub provider: Option<Option<String>>,
     /// Set true to stamp the rotation date as now.
     #[serde(default)]
+    #[ts(as = "Option<bool>", optional)]
     pub mark_rotated: bool,
 }
 
@@ -274,7 +318,8 @@ pub struct SecretUpdate {
 /// The sealed content -- everything but `device_id` and `fingerprint`, which
 /// `sync::transport` needs before the vault's own decryption is relevant.
 /// See `docs/CRYPTOGRAPHY.md` section 6 for the fingerprint format.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct TrustedDevice {
     pub device_id: String,
     pub fingerprint_hex: String,

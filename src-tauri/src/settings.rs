@@ -22,8 +22,9 @@ const MAX_AUTO_LOCK_MINUTES: u32 = 240;
 const MIN_CLIPBOARD_SECONDS: u32 = 5;
 const MAX_CLIPBOARD_SECONDS: u32 = 300;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS)]
 #[serde(default)]
+#[ts(export)]
 pub struct AppSettings {
     pub auto_lock_minutes: u32,
     pub clipboard_clear_seconds: u32,

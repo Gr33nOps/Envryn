@@ -63,6 +63,11 @@ mdns-sd = "0.13"
 # stack via native-tls/openssl.
 ureq = { version = "2", default-features = false, features = ["tls"] }
 
+# packages/contract/: generated TypeScript bindings for every IPC-facing
+# type, so the frontend contract has one source of truth instead of being
+# hand-maintained in apps/ui/src/lib/ipc.ts. See docs/ARCHITECTURE.md.
+ts-rs.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 # Version left unpinned to the patch: Tauri itself depends on `windows = "0.61"`
 # with an overlapping feature set, and Cargo unifies both to one crate instance

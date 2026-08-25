@@ -119,6 +119,22 @@ Every crate here is expected to be present. Anything else in `crates/envryn-core
 
 **Tauri** — `tauri`, `tauri-plugin-biometric`, `tauri-plugin-barcode-scanner`
 
+**Contract generation** — `ts-rs` (build-time-only proc-macro/trait crate: derives `TS` and, in
+`cargo test`, writes `packages/contract/bindings/*.ts` from the real Rust types -- see
+`docs/ARCHITECTURE.md`). Review: (1) generates the TypeScript side of the IPC contract from Rust
+types, which would otherwise be ~30 hand-maintained interfaces, already caught drifting from the
+real Rust shapes (`VaultStatus` was missing two fields) before this was added; (2) well beyond
+the ~100-line bar, and not cryptographic; (3) actively maintained (Aleph-Alpha, MSRV 1.88,
+released 2025); (4) small dependency footprint, no native code; (5) no native code; (6) no I/O at
+runtime -- its only filesystem writes are `cargo test`'s own `export_bindings_*` tests writing
+`.ts` files, never touched by the shipped binary; (7) MIT/Apache-2.0; (8) never sees key material
+or plaintext -- it only ever sees type *shapes* (struct/enum definitions), and only at compile
+time. It ships in `crates/envryn-core` and `src-tauri`'s dependency graph, but the only code path
+that actually runs is the `#[cfg(test)]`-gated `export_bindings_*` test itself -- the derived
+`impl TS` methods it calls are ordinary functions with no other caller, left to the release
+profile's existing `lto = true` / `strip = true` (already set for this reason among others) to
+remove from a shipped binary rather than something separately verified here.
+
 **Note on `tauri-plugin-stronghold`:** evaluated and **not** adopted. Envryn needs control over
 the record format so that sealed payloads can move over sync, and the key hierarchy in
 `CRYPTOGRAPHY.md` is specified around that requirement. Adopting a second, differently-shaped

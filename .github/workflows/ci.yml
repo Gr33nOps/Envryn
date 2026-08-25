@@ -88,6 +88,15 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      # `cargo test` above just regenerated every packages/contract/bindings/*.ts
+      # file from the current Rust types (ts-rs's export_bindings_* tests run
+      # as part of the normal suite, not a separate step) -- if that produced
+      # a diff, someone changed a Rust IPC type and forgot to regenerate and
+      # commit the bindings, which is exactly the drift this generation exists
+      # to prevent. Fails loudly instead of letting a stale contract merge.
+      - name: contract bindings are up to date
+        run: git diff --exit-code -- packages/contract/bindings
+
       - name: cargo deny check
         # Not the EmbarkStudios/cargo-deny-action marketplace action: it is
         # a Docker container action, and GitHub Actions only supports

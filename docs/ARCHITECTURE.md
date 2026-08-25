@@ -293,8 +293,16 @@ crates/
   envryn-ai-worker/   local inference sidecar (candle-based). Does not depend on
                        envryn-core -- verified with `cargo tree -p envryn-ai-worker
                        -i envryn-core` (no match), per AI-INV-001/002/004/005
-packages/contract/    generated TS types -- not yet started; the IPC contract
-                       is hand-maintained today in apps/ui/src/lib/ipc.ts
+packages/contract/    generated TS types (ts-rs, `cargo test --workspace
+                       export_bindings`) -- packages/contract/bindings/*.ts are
+                       generated and committed; index.ts is the one
+                       hand-maintained barrel re-exporting them. CI fails if
+                       `cargo test` regenerates a different bindings/ than
+                       what's committed. apps/ui/src/lib/ipc.ts imports these
+                       rather than declaring the shapes itself; only its
+                       command wrappers, IpcError, and isTauri() remain
+                       hand-written, since those are UI-side glue, not wire
+                       shapes
 docs/                 this directory
 ```
 

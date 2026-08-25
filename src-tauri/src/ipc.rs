@@ -123,7 +123,8 @@ pub(crate) fn vault_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, I
     Ok(dir.join("envryn.db"))
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct VaultStatus {
     pub exists: bool,
     pub unlocked: bool,
@@ -439,7 +440,8 @@ pub fn clipboard_copy(app: tauri::AppHandle, value: String) -> IpcResult<()> {
     Ok(())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RestoreSummary {
     pub restored: usize,
 }

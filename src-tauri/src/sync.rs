@@ -110,7 +110,8 @@ fn trusted_fingerprint_set(state: &VaultState) -> IpcResult<TrustedFingerprints>
 
 // --- device identity ---------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct OwnIdentity {
     pub device_id: String,
     pub fingerprint_display: String,
@@ -153,7 +154,10 @@ pub fn trusted_device_revoke(state: State<'_, VaultState>, device_id: String) ->
 
 // --- discovery -----------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+// The Rust name carries a "Dto" suffix that has no reason to leak into the
+// generated contract; the frontend already calls this DiscoveredPeer.
+#[ts(export, rename = "DiscoveredPeer")]
 pub struct DiscoveredPeerDto {
     pub device_id: String,
     pub fingerprint_hex: String,
@@ -193,7 +197,8 @@ pub async fn discovery_browse(app: AppHandle) -> IpcResult<Vec<DiscoveredPeerDto
 
 // --- manual sync ---------------------------------------------------------------
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SyncSummary {
     pub records_applied: usize,
     /// Genuine concurrent edits detected during this sync (INV-109) -- the
@@ -382,7 +387,8 @@ enum PairingCommand {
 #[derive(Default)]
 pub struct PairingState(Mutex<Option<mpsc::Sender<PairingCommand>>>);
 
-#[derive(Serialize)]
+#[derive(Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PairingHostStarted {
     pub address: String,
     pub port: u16,
@@ -391,19 +397,22 @@ pub struct PairingHostStarted {
     pub fingerprint_display: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, rename = "PairingSasReady")]
 struct SasReadyEvent {
     sas: String,
     peer_device_id: String,
     peer_fingerprint_display: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, rename = "PairingFailed")]
 struct PairingFailedEvent {
     message: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, rename = "PairingComplete")]
 struct PairingCompleteEvent {
     peer_device_id: String,
 }

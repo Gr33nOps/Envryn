@@ -28,7 +28,8 @@ pub const CRYPTO_VERSION: u32 = 1;
 
 /// The decrypted losing side of a genuine concurrent edit (INV-109), paired
 /// with the id needed to act on it -- see [`Vault::list_conflicts`].
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ConflictSummary {
     pub conflict_id: String,
     pub record: SecretRecord,

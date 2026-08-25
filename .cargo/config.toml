@@ -1,0 +1,14 @@
+# `relative = true` resolves against this file's own directory (the repo
+# root), not the compiling crate's directory -- so both envryn-core
+# (crates/envryn-core) and envryn (src-tauri) export to the exact same
+# packages/contract/bindings/ regardless of their own depth from the root.
+# See ts-rs's own doc comment (crate root) for this exact recommended pattern.
+[env]
+TS_RS_EXPORT_DIR = { value = "packages/contract/bindings", relative = true }
+# ts-rs defaults i64/u64/i128/u128 to `bigint`, but every one of this repo's
+# large-int fields (timestamps in milliseconds) actually crosses the wire as
+# a plain JSON number via serde_json/Tauri's IPC -- a real BigInt would not
+# match what the frontend actually receives. `number` matches the
+# hand-maintained types this generation replaces, and every value here
+# (millisecond timestamps) is comfortably within f64's exact-integer range.
+TS_RS_LARGE_INT = "number"
