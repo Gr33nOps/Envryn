@@ -12,6 +12,7 @@
     "tauri": "cargo tauri",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
+    "prepare:sidecar": "node .dev-tools/prepare-sidecar.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "npm run typecheck --workspace @envryn/ui"

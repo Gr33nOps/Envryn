@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev --workspace @envryn/ui",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build --workspace @envryn/ui",
+    "beforeBuildCommand": "npm run build --workspace @envryn/ui && npm run prepare:sidecar",
     "frontendDist": "../apps/ui/dist"
   },
   "app": {
@@ -43,6 +43,7 @@
     "icon": ["icons/icon.ico", "icons/128x128.png", "icons/32x32.png"],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" }
-    }
+    },
+    "externalBin": ["binaries/envryn-ai-worker"]
   }
 }

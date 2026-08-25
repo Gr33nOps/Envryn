@@ -104,9 +104,18 @@ it is spawned via plain `std::process::Command` from `worker_client.rs` (in `env
 via Tauri's sidecar `Command` API from `src-tauri` -- this keeps the spawn-and-connect logic
 testable as a plain library (see the verification note below) the same way the rest of this
 crate is. `src-tauri/src/ai.rs` still resolves *where the bundled binary lives on disk* (a
-genuinely Tauri-specific concern) and hands that path in; packaging it via
-`tauri.conf.json`'s `bundle.externalBin` so the sidecar path resolves in a released build
-remains an open item (`docs/ARCHITECTURE.md`).
+genuinely Tauri-specific concern) and hands that path in.
+
+Packaging is real now: `tauri.conf.json`'s `bundle.externalBin` names
+`binaries/envryn-ai-worker`, and `.dev-tools/prepare-sidecar.mjs` (run automatically via
+`beforeBuildCommand`, so both `cargo tauri dev` and `cargo tauri build` cover it) builds
+`envryn-ai-worker` in release mode and places it at the target-triple-suffixed name Tauri's own
+`copy_binaries` build-script step expects. Verified by actually running
+`cargo build -p envryn --release` after preparing the sidecar and confirming
+`envryn-ai-worker.exe` lands next to `envryn.exe` in `target/release/` unprompted -- that build
+script step runs from any `cargo build`, not only through the Tauri CLI. Not yet exercised:
+the full installed-MSI/NSIS path, where `resource_dir()` resolves somewhere other than the
+plain-build target directory (`docs/ARCHITECTURE.md`).
 
 It receives: a model path, a tokenizer path, and nothing else that identifies the vault.
 It does not receive: a database path, any key, or any vault type.

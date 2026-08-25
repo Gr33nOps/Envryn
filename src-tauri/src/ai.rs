@@ -77,11 +77,21 @@ fn models_dir(app: &AppHandle) -> IpcResult<PathBuf> {
 }
 
 /// Resolve the worker binary. Tries the Tauri sidecar convention first
-/// (bundled alongside the app resources, target-triple-suffixed); falls
-/// back to a plain sibling of the currently running executable, which is
-/// where `cargo build` places it in development. Packaging a release build
-/// so the sidecar path actually exists is tracked as an open item --
-/// see docs/ARCHITECTURE.md.
+/// (bundled alongside the app resources, target-triple-suffixed), then falls
+/// back to a plain sibling of the currently running executable.
+///
+/// Both are real now: `tauri.conf.json`'s `bundle.externalBin` plus
+/// `.dev-tools/prepare-sidecar.mjs` (wired into `beforeBuildCommand`) build
+/// `envryn-ai-worker` in release mode and place it at
+/// `src-tauri/binaries/envryn-ai-worker-<host-triple>.exe`, the exact name
+/// `tauri-build`'s own `copy_binaries` step (run from `build.rs`, so it fires
+/// on *any* `cargo build`, not only `cargo tauri build`) looks for and copies
+/// next to the compiled `envryn` binary -- confirmed by actually running
+/// `cargo build -p envryn --release` after placing the sidecar and finding
+/// `envryn-ai-worker.exe` alongside `envryn.exe` in `target/release/`
+/// unprompted. Packaging into an installed MSI/NSIS bundle specifically
+/// (where `resource_dir()` resolves somewhere else entirely) has not been
+/// exercised end to end.
 fn worker_binary_path(app: &AppHandle) -> IpcResult<PathBuf> {
     if let Ok(resource_dir) = app.path().resource_dir() {
         let candidate = worker_client::worker_binary_path(&resource_dir);
