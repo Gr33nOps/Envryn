@@ -32,6 +32,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             capture_protection::apply(&handle);
+            autolock::watch_session_lock(handle.clone());
             autolock::spawn(handle);
             Ok(())
         })

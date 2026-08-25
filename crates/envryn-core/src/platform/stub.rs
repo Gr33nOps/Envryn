@@ -37,6 +37,14 @@ pub fn exclude_window_from_capture(_hwnd: isize) -> Result<()> {
     Err(Error::PlatformUnavailable)
 }
 
+/// Non-Windows placeholder for `windows_impl::watch_session_lock` -- there is
+/// no equivalent session-lock notification wired up for this platform yet.
+pub fn watch_session_lock(_hwnd: isize, _on_lock: impl Fn() + Send + Sync + 'static) -> Result<()> {
+    Err(Error::PlatformUnavailable)
+}
+
+pub fn unwatch_session_lock(_hwnd: isize) {}
+
 /// Non-Windows placeholder for `windows_impl::KillOnCloseJob` -- there is
 /// no equivalent primitive implemented for this platform yet. Callers
 /// (`crate::ai::worker_client::WorkerClient`) already treat this as a

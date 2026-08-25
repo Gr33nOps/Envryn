@@ -9,8 +9,13 @@
 //! the password slot, so a bug here cannot silently weaken record encryption.
 #![allow(unsafe_code)]
 
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::OnceLock;
+
 use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HGLOBAL, HLOCAL, HWND};
+use windows::Win32::Foundation::{
+    CloseHandle, LocalFree, HANDLE, HGLOBAL, HLOCAL, HWND, LPARAM, LRESULT, WPARAM,
+};
 use windows::Win32::Security::Cryptography::{
     CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
@@ -25,9 +30,15 @@ use windows::Win32::System::JobObjects::{
 };
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::CF_UNICODETEXT;
+use windows::Win32::System::RemoteDesktop::{
+    WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
+};
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
-use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallWindowProcW, SetWindowDisplayAffinity, SetWindowLongPtrW, GWLP_WNDPROC,
+    WDA_EXCLUDEFROMCAPTURE, WM_WTSSESSION_CHANGE, WNDPROC, WTS_SESSION_LOCK,
+};
 use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
@@ -415,9 +426,176 @@ impl Drop for KillOnCloseJob {
     }
 }
 
+/// Global state for the single main-window subclass this app installs. One
+/// process, one main window, for the process's whole lifetime -- the same
+/// assumption `capture_protection`'s single startup call already makes in
+/// `src-tauri` -- so one global slot per piece of state is enough; there is
+/// no scenario in this codebase where a second window needs a second
+/// callback.
+static PREV_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+static SESSION_LOCK_CALLBACK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// Subclass the main window to react to Windows locking *this* session
+/// (`WM_WTSSESSION_CHANGE` / `WTS_SESSION_LOCK`) directly, rather than only
+/// discovering it later via the idle poll -- closes the gap
+/// `docs/ARCHITECTURE.md` section 7 previously recorded as open. `on_lock`
+/// fires exactly when this session locks; every other session-change reason
+/// (unlock, remote-connect, another session's own lock) is deliberately
+/// ignored, and every other window message is forwarded unchanged to the
+/// window's real procedure.
+///
+/// `on_lock` lives in a process-wide global to match the process-wide window
+/// subclass it answers to -- Envryn has exactly one main window for the life
+/// of the process, so this is called at most once in practice.
+pub fn watch_session_lock(hwnd: isize, on_lock: impl Fn() + Send + Sync + 'static) -> Result<()> {
+    let hwnd = HWND(hwnd as *mut _);
+    // A second call would silently replace the queued callback rather than
+    // stacking -- fine, since nothing in this codebase calls it more than
+    // once, and `OnceLock` makes a genuine double-call a deliberate no-op
+    // rather than a panic.
+    let _ = SESSION_LOCK_CALLBACK.set(Box::new(on_lock));
+
+    // SAFETY: `hwnd` is a live window handle the caller (the Tauri main
+    // window) owns for the life of the process. `NOTIFY_FOR_THIS_SESSION`
+    // asks only for this session's own lock/unlock events.
+    unsafe {
+        WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION)
+            .map_err(|_| Error::Internal("could not register for session notifications"))?;
+    }
+
+    // SAFETY: installing a window procedure is the documented way to observe
+    // a message Tauri's own `WindowEvent` does not expose (there is no
+    // variant for an arbitrary `WM_*` message). `subclass_proc` below always
+    // forwards to the procedure captured here, so every message this window
+    // already handled keeps being handled identically.
+    let previous =
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, subclass_proc as *const () as isize) };
+    PREV_WNDPROC.store(previous, Ordering::SeqCst);
+
+    Ok(())
+}
+
+unsafe extern "system" fn subclass_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if msg == WM_WTSSESSION_CHANGE && wparam.0 == WTS_SESSION_LOCK as usize {
+        if let Some(callback) = SESSION_LOCK_CALLBACK.get() {
+            callback();
+        }
+    }
+
+    let previous = PREV_WNDPROC.load(Ordering::SeqCst);
+    // SAFETY: `previous` was captured by `watch_session_lock` from the same
+    // `SetWindowLongPtrW` call that installed this procedure as the current
+    // one -- it is the window's real prior procedure, always safe to
+    // forward to for any message this function does not itself act on.
+    let prev_wndproc: WNDPROC = unsafe { std::mem::transmute(previous) };
+    unsafe { CallWindowProcW(prev_wndproc, hwnd, msg, wparam, lparam) }
+}
+
+/// Undo [`watch_session_lock`]. Not currently called anywhere -- the
+/// subclass and notification registration are meant to live for the whole
+/// process, torn down implicitly on exit -- but provided so a future caller
+/// (e.g. tests, or a window that can legitimately close before the process
+/// exits) is not forced to reinvent an unregister path.
+pub fn unwatch_session_lock(hwnd: isize) {
+    let hwnd = HWND(hwnd as *mut _);
+    // SAFETY: unregistering a session notification for a handle this process
+    // previously registered (or never registered, in which case this is a
+    // harmless no-op the API itself defines).
+    unsafe {
+        let _ = WTSUnRegisterSessionNotification(hwnd);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A real native window, real `SendMessageW` delivery, and the actual
+    /// installed subclass procedure -- not a unit test calling
+    /// `subclass_proc` directly, which would prove the logic but not that
+    /// `watch_session_lock` actually wired it into the window's message
+    /// pipeline. Uses the built-in "STATIC" window class so the test needs
+    /// no `RegisterClassW`/GDI setup of its own.
+    #[test]
+    fn subclassed_window_reports_a_session_lock_and_forwards_everything_else() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, SendMessageW, HWND_MESSAGE, WINDOW_EX_STYLE, WS_POPUP,
+        };
+
+        let hinstance = unsafe { GetModuleHandleW(PCWSTR::null()) }.expect("GetModuleHandleW");
+        let class_name = HSTRING::from("STATIC");
+        // SAFETY: "STATIC" is a system window class registered by user32 for
+        // every process; no class of our own needs registering first. This
+        // window is never shown (WS_POPUP, no WS_VISIBLE) and parented to
+        // HWND_MESSAGE so it never appears on screen during the test run.
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                PCWSTR(class_name.as_ptr()),
+                PCWSTR::null(),
+                WS_POPUP,
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                Some(hinstance.into()),
+                None,
+            )
+        }
+        .expect("CreateWindowExW");
+
+        let locked = Arc::new(AtomicBool::new(false));
+        let locked_flag = locked.clone();
+        watch_session_lock(hwnd.0 as isize, move || {
+            locked_flag.store(true, Ordering::SeqCst);
+        })
+        .expect("watch_session_lock");
+
+        // A message this subclass does not act on must still reach the
+        // window's real procedure -- proving `subclass_proc` forwards rather
+        // than swallows. WM_NULL is defined to do nothing and always return 0.
+        const WM_NULL: u32 = 0;
+        let forwarded = unsafe { SendMessageW(hwnd, WM_NULL, None, None) };
+        assert_eq!(
+            forwarded.0, 0,
+            "an unrelated message must still be forwarded"
+        );
+
+        assert!(
+            !locked.load(Ordering::SeqCst),
+            "must not fire before the message"
+        );
+
+        // The message Windows actually sends on a real session lock.
+        unsafe {
+            SendMessageW(
+                hwnd,
+                WM_WTSSESSION_CHANGE,
+                Some(WPARAM(WTS_SESSION_LOCK as usize)),
+                Some(LPARAM(0)),
+            );
+        }
+        assert!(
+            locked.load(Ordering::SeqCst),
+            "the callback should have fired for WTS_SESSION_LOCK"
+        );
+
+        unwatch_session_lock(hwnd.0 as isize);
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
 
     /// DPAPI round-trips whatever bytes it is given, including ones that
     /// happen to look like they could confuse a length calculation.

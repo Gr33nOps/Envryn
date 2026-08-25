@@ -167,14 +167,14 @@ Unlock (password): derive KEK -> unwrap VMK (password slot) -> derive subkeys
 Unlock (platform):  DPAPI-recover platform key -> unwrap VMK (platform slot)
                     -> derive subkeys -> build in-memory index
 Lock:               zeroize VMK, subkeys, index -> checkpoint WAL -> kill AI worker
-Triggers:           idle timeout (implemented) | Windows session lock (not yet --
+Triggers:           idle timeout (implemented) | Windows session lock (implemented --
                     see section 7) | Android background (not yet) | Ctrl+L | crash
 ```
 
 Lock is idempotent and must never fail. A lock path that can error is a lock path that can
 leave the vault open. Idle-timeout auto-lock is a background poll in the Tauri shell
-(`src-tauri/src/autolock.rs`), not a listener on the vault itself -- see section 7 for why
-polling was chosen over the `WTS_SESSION_LOCK` window message.
+(`src-tauri/src/autolock.rs`); the Windows session-lock hook (same file) is a second,
+independent trigger for the identical lock sequence -- see section 7 for both.
 
 ---
 
@@ -234,19 +234,27 @@ is ordinary code, which is faster, more private, and works with no model install
 | Key storage | **Implemented:** DPAPI (`CryptProtectData`/`CryptUnprotectData`), `platform::windows_impl` | Not yet. Keystore + `setUserAuthenticationRequired` + StrongBox where present, planned |
 | Screen capture | **Implemented:** `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, applied unconditionally at startup | Not yet. `FLAG_SECURE` via a custom Kotlin plugin, planned |
 | Clipboard | **Implemented:** native write + `ExcludeClipboardContentFromMonitorProcessing` tag + Rust-side timed clear, configurable in Settings | Not yet. `ClipDescription.EXTRA_IS_SENSITIVE`, planned |
-| Lock trigger | **Implemented:** system-wide idle poll (`GetLastInputInfo`, every 5s). **Not implemented:** `WTS_SESSION_LOCK` -- see below | Not yet. Lifecycle background trigger, planned |
+| Lock trigger | **Implemented:** system-wide idle poll (`GetLastInputInfo`, every 5s) plus a direct `WTS_SESSION_LOCK` hook (window-procedure subclass via `WTSRegisterSessionNotification` -- see below), both converging on the same lock sequence | Not yet. Lifecycle background trigger, planned |
 | Local AI | **Implemented:** bundled `candle`-based sidecar (`envryn-ai-worker`), spawned via `std::process::Command`. As of M22, additionally assigned to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job object (`platform::windows_impl::KillOnCloseJob`) so the OS guarantees the worker dies even if this process itself crashes or is force-killed, not only on a normal `Drop`. **Not implemented:** packaging the sidecar via Tauri's `bundle.externalBin` so a released installer includes it -- development builds resolve the binary as a sibling of the running executable | **Not in v1** (spec section 52) |
 | Min version | Windows 10 1809+ | API 26+ (StrongBox 28+) |
 
-**Why idle-poll rather than `WTS_SESSION_LOCK` for now.** A native session-lock hook needs a
-window-message subscription (`WTSRegisterSessionNotification` plus handling `WM_WTSSESSION_CHANGE`
-in the window procedure) -- a real native hook, not a library call. The idle poll
-(`src-tauri/src/autolock.rs`) covers the common case -- the user walked away -- at a fraction of
-the implementation cost, and works identically regardless of whether the OS session itself locks.
-Reacting to the session-lock event directly remains open work -- not addressed in the Phase 4
-(M22-M28) hardening pass, which focused on the AI attack surface, the network-privacy proof, and
-supply-chain policy enforcement (see `AI_SECURITY.md` section 10 and `DEPENDENCY_POLICY.md`
-section 6) rather than platform-trigger coverage. It stays a real, open gap, just not one this
+**The direct `WTS_SESSION_LOCK` hook, implemented.** `platform::windows_impl::watch_session_lock`
+subclasses the Tauri main window's procedure (`SetWindowLongPtrW(GWLP_WNDPROC, ...)`, forwarding
+every other message to the window's real procedure via `CallWindowProcW`) and calls
+`WTSRegisterSessionNotification` so Windows delivers `WM_WTSSESSION_CHANGE` to it. On
+`WTS_SESSION_LOCK` specifically, it fires the same `autolock::lock_now` the idle poll uses --
+`Win+L`, the screen saver locking, or a remote session disconnecting now locks the vault
+immediately rather than waiting for the next idle-poll tick to notice. Proven against a real
+native window (the built-in "STATIC" class, never shown) and a real `SendMessageW` delivery in
+`platform::windows_impl::tests::subclassed_window_reports_a_session_lock_and_forwards_everything_else`,
+which also confirms an unrelated message still reaches the window's original procedure unchanged.
+Installed alongside the idle poll (`src-tauri/src/lib.rs`'s `.setup()`), not instead of it: a
+window-message hook can still fail to register (no main window yet, a non-Windows target, the OS
+call itself failing), in which case the idle poll remains the only trigger -- the same coverage
+this app shipped with before. This closes the item that stayed open through the Phase 4
+(M22-M28) hardening pass, which had focused on the AI attack surface, the network-privacy proof,
+and supply-chain policy enforcement instead (see `AI_SECURITY.md` section 10 and
+`DEPENDENCY_POLICY.md` section 6) rather than platform-trigger coverage.
 pass closed.
 
 **What "Unlock with this Windows account" actually is.** It is DPAPI (`CryptProtectData`), tied to
