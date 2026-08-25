@@ -53,7 +53,7 @@ const TYPE_TO_KIND: Record<SecretType, ipc.SecretKind> = {
   Custom: "Custom",
 };
 
-const toUiEnvironment = (env: ipc.RustEnvironment): Environment =>
+export const toUiEnvironment = (env: ipc.RustEnvironment): Environment =>
   env === "Unassigned" ? "—" : env;
 
 const toRustEnvironment = (env: Environment): ipc.RustEnvironment =>

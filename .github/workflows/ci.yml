@@ -21,6 +21,16 @@ on:
   pull_request:
     branches: [main]
 
+# A superseded run (an older commit on the same branch, once a newer one has
+# been pushed) is cancelled rather than left to finish -- discovered costing
+# real time and runner minutes for nothing when several commits landed in
+# quick succession during this workflow's own rollout: three separate ~15+
+# minute Rust jobs queued and ran to completion validating commits that were
+# already obsolete the moment the next one was pushed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     name: Rust (fmt, clippy, test, deny, audit)

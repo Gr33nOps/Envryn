@@ -1,9 +1,35 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Search } from "lucide-react";
+import { Search, Sparkles } from "lucide-react";
 import { type Secret } from "@/lib/envryn-data";
 import { useSecretList } from "@/lib/use-vault";
+import { KIND_TO_TYPE, toUiEnvironment } from "@/lib/vault-repository";
 import { cn } from "@/lib/utils";
+import * as ipc from "@/lib/ipc";
+
+/**
+ * Turn a parsed `SearchFilterOutput` into the same `Secret[]` shape plain
+ * substring filtering already produces, so both paths render through one
+ * result list. `text` (if the model extracted a residual free-text term)
+ * still matches by substring -- only `project`/`environment`/`kind`/`tags`
+ * are structured.
+ */
+function applyAiFilter(secrets: Secret[], filter: ipc.SearchFilterOutput): Secret[] {
+  const text = filter.text?.trim().toLowerCase();
+  return secrets.filter((s) => {
+    if (filter.project && s.project.toLowerCase() !== filter.project.toLowerCase()) return false;
+    if (filter.environment && s.environment !== toUiEnvironment(filter.environment)) return false;
+    if (filter.kind && s.type !== KIND_TO_TYPE[filter.kind]) return false;
+    if (filter.tags.length && !filter.tags.some((t) => (s.tags ?? []).includes(t))) return false;
+    if (text) {
+      const haystack = [s.name, s.project, s.provider ?? "", ...(s.tags ?? [])]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(text)) return false;
+    }
+    return true;
+  });
+}
 
 export function SearchPalette({
   open,
@@ -17,15 +43,18 @@ export function SearchPalette({
   const secrets = useSecretList();
   const [q, setQ] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
+  const [aiResults, setAiResults] = React.useState<Secret[] | null>(null);
+  const [aiSearching, setAiSearching] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
       setQ("");
       setCursor(0);
+      setAiResults(null);
     }
   }, [open]);
 
-  const results = React.useMemo(() => {
+  const substringResults = React.useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return secrets.slice(0, 6);
     return secrets.filter((s) =>
@@ -35,6 +64,43 @@ export function SearchPalette({
         .includes(t),
     );
   }, [q, secrets]);
+
+  // Natural-language fallback (docs/AI_DATA_ACCESS.md Tier 1 "search"): only
+  // attempted once plain substring matching finds nothing and the query
+  // looks like a sentence rather than a single term someone would expect to
+  // match literally -- never replaces the fast, deterministic path above,
+  // only fills the gap it deliberately leaves (no fuzzy/semantic matching).
+  React.useEffect(() => {
+    setAiResults(null);
+    if (!ipc.isTauri() || substringResults.length > 0) return;
+    const trimmed = q.trim();
+    if (trimmed.split(/\s+/).length < 2) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        setAiSearching(true);
+        try {
+          const status = await ipc.aiStatus();
+          if (!status.enabled_in_settings || !status.engine_running) return;
+          const filter = await ipc.aiParseSearchIntent(trimmed);
+          if (!cancelled) setAiResults(applyAiFilter(secrets, filter));
+        } catch {
+          // No AI result is a silent fallback to "no matches," never a
+          // blocked search -- the substring path already answered the user.
+        } finally {
+          if (!cancelled) setAiSearching(false);
+        }
+      })();
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [q, secrets, substringResults.length]);
+
+  const results = aiResults ?? substringResults;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -64,6 +130,18 @@ export function SearchPalette({
             />
             <span className="kbd">Esc</span>
           </div>
+
+          {aiSearching ? (
+            <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
+              <Sparkles className="size-3 animate-pulse" />
+              Asking local AI what you mean...
+            </div>
+          ) : aiResults ? (
+            <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
+              <Sparkles className="size-3" />
+              Matched by local AI, not an exact search
+            </div>
+          ) : null}
 
           {results.length === 0 ? (
             <div className="px-4 py-8 text-center">
