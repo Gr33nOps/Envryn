@@ -140,14 +140,19 @@ racing a sync resurrect the record.
                               |                 ^
                               +----unlock-------+
 
-Unlock:   derive KEK -> unwrap VMK -> derive subkeys -> open SQLCipher
-          -> build in-memory index -> start auto-lock timer
-Lock:     zeroize VMK, subkeys, index -> close DB -> kill AI worker
-Triggers: idle timeout | Windows session lock | Android background | Ctrl+L | crash
+Unlock (password): derive KEK -> unwrap VMK (password slot) -> derive subkeys
+                    -> build in-memory index
+Unlock (platform):  DPAPI-recover platform key -> unwrap VMK (platform slot)
+                    -> derive subkeys -> build in-memory index
+Lock:               zeroize VMK, subkeys, index -> checkpoint WAL -> kill AI worker
+Triggers:           idle timeout (implemented) | Windows session lock (not yet --
+                    see section 7) | Android background (not yet) | Ctrl+L | crash
 ```
 
 Lock is idempotent and must never fail. A lock path that can error is a lock path that can
-leave the vault open.
+leave the vault open. Idle-timeout auto-lock is a background poll in the Tauri shell
+(`src-tauri/src/autolock.rs`), not a listener on the vault itself -- see section 7 for why
+polling was chosen over the `WTS_SESSION_LOCK` window message.
 
 ---
 
@@ -181,12 +186,27 @@ is ordinary code, which is faster, more private, and works with no model install
 
 | Concern | Windows | Android |
 |---|---|---|
-| Key storage | DPAPI / Windows Hello `KeyCredentialManager` | Keystore, `setUserAuthenticationRequired`, StrongBox where present |
-| Screen capture | `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` | `FLAG_SECURE` (custom Kotlin plugin) |
-| Clipboard | Timed clear + `ExcludeClipboardContentFromMonitorProcessing` | `ClipDescription.EXTRA_IS_SENSITIVE` |
-| Lock trigger | `WTS_SESSION_LOCK`, idle timer | lifecycle background, idle timer |
-| Local AI | Bundled llama.cpp sidecar | **Not in v1** (spec section 52) |
+| Key storage | **Implemented:** DPAPI (`CryptProtectData`/`CryptUnprotectData`), `platform::windows_impl` | Not yet. Keystore + `setUserAuthenticationRequired` + StrongBox where present, planned |
+| Screen capture | **Implemented:** `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, applied unconditionally at startup | Not yet. `FLAG_SECURE` via a custom Kotlin plugin, planned |
+| Clipboard | **Implemented:** native write + `ExcludeClipboardContentFromMonitorProcessing` tag + Rust-side timed clear, configurable in Settings | Not yet. `ClipDescription.EXTRA_IS_SENSITIVE`, planned |
+| Lock trigger | **Implemented:** system-wide idle poll (`GetLastInputInfo`, every 5s). **Not implemented:** `WTS_SESSION_LOCK` -- see below | Not yet. Lifecycle background trigger, planned |
+| Local AI | Bundled llama.cpp sidecar -- Phase 3, not started | **Not in v1** (spec section 52) |
 | Min version | Windows 10 1809+ | API 26+ (StrongBox 28+) |
+
+**Why idle-poll rather than `WTS_SESSION_LOCK` for now.** A native session-lock hook needs a
+window-message subscription (`WTSRegisterSessionNotification` plus handling `WM_WTSSESSION_CHANGE`
+in the window procedure) -- a real native hook, not a library call. The idle poll
+(`src-tauri/src/autolock.rs`) covers the common case -- the user walked away -- at a fraction of
+the implementation cost, and works identically regardless of whether the OS session itself locks.
+Reacting to the session-lock event directly remains open for M22 hardening.
+
+**What "Unlock with this Windows account" actually is.** It is DPAPI (`CryptProtectData`), tied to
+the current Windows user account -- not `KeyCredentialManager`, and not a biometric gesture. The
+UI is worded to match: "Unlock with this Windows account," never "Windows Hello." DPAPI may
+itself be backed by a TPM or a Hello-protected profile depending on the machine's configuration,
+but Envryn does not invoke that layer directly, so it does not claim to. See
+`docs/CRYPTOGRAPHY.md` section 2 for how the platform slot's key hierarchy stays independent of
+this distinction (DPAPI protects a random platform key, never the VMK directly).
 
 Android receives AI-generated metadata through sync once confirmed on Windows (spec section 53),
 so shipping without on-device inference costs organisation, not correctness.
@@ -197,16 +217,28 @@ so shipping without on-device inference costs organisation, not correctness.
 
 ```
 apps/ui/              React SPA
-src-tauri/            Rust core + Tauri config, capabilities, CSP
+src-tauri/            Tauri shell: window creation, IPC (ipc.rs), non-secret
+                       app settings (settings.rs), idle auto-lock (autolock.rs),
+                       capture protection (capture_protection.rs)
 crates/
-  envryn-core/        crypto, vault, storage, sync - no Tauri dependency
-  envryn-ai-worker/   sidecar; does NOT depend on envryn-core
-packages/contract/    generated TS types
+  envryn-core/        crypto, model, storage, vault, backup, platform --
+                       no Tauri dependency
+  envryn-ai-worker/   sidecar; not yet started (Phase 3). Will not depend on
+                       envryn-core, per AI-INV-001/002/004/005
+packages/contract/    generated TS types -- not yet started; the IPC contract
+                       is hand-maintained today in apps/ui/src/lib/ipc.ts
 docs/                 this directory
 ```
 
 `envryn-core` is free of Tauri so the security-critical code can be tested as a plain library,
-without a windowing system. That is also what makes the "AI disabled" CI run cheap.
+without a windowing system -- including `platform::windows_impl`, whose tests exercise real
+DPAPI and the real OS clipboard, not mocks. That is also what makes the "AI disabled" CI run
+cheap, once Phase 3 makes that distinction meaningful.
+
+`envryn-core::platform` is the one place in the vault core permitted to contain `unsafe` (the
+crate-level lint is `deny`, not `forbid`, specifically so this one module can carry a scoped
+`#[allow(unsafe_code)]`) -- every other module, including every cryptographic one, remains
+unsafe-free.
 
 ---
 

@@ -92,6 +92,17 @@ export interface SecretUpdate {
 export interface VaultStatus {
   exists: boolean;
   unlocked: boolean;
+  platform_protection_available: boolean;
+  platform_protection_enabled: boolean;
+}
+
+export interface AppSettings {
+  auto_lock_minutes: number;
+  clipboard_clear_seconds: number;
+}
+
+export interface RestoreSummary {
+  restored: number;
 }
 
 // --- Errors -----------------------------------------------------------------
@@ -105,6 +116,7 @@ export type IpcErrorCode =
   | "invalid_input"
   | "unsupported_version"
   | "decryption_failed"
+  | "platform_unavailable"
   | "internal";
 
 export class IpcError extends Error {
@@ -154,7 +166,13 @@ export function isTauri(): boolean {
 export const vaultStatus = () => call<VaultStatus>("vault_status");
 export const vaultCreate = (password: string) => call<void>("vault_create", { password });
 export const vaultUnlock = (password: string) => call<void>("vault_unlock", { password });
+export const vaultUnlockWithPlatform = () => call<void>("vault_unlock_with_platform");
 export const vaultLock = () => call<void>("vault_lock");
+export const vaultChangePassword = (currentPassword: string, newPassword: string) =>
+  call<void>("vault_change_password", { currentPassword, newPassword });
+export const vaultEnablePlatformProtection = (password: string) =>
+  call<void>("vault_enable_platform_protection", { password });
+export const vaultDisablePlatformProtection = () => call<void>("vault_disable_platform_protection");
 
 export const secretList = () => call<SecretSummary[]>("secret_list");
 export const secretSearch = (query: string) => call<SecretSummary[]>("secret_search", { query });
@@ -164,3 +182,26 @@ export const secretUpdate = (id: string, update: SecretUpdate) =>
   call<SecretSummary>("secret_update", { id, update });
 export const secretDelete = (id: string) => call<void>("secret_delete", { id });
 export const secretDuplicates = (id: string) => call<string[]>("secret_duplicates", { id });
+
+/**
+ * Copy a value to the OS clipboard.
+ *
+ * Routed through Rust rather than `navigator.clipboard`: only the native call
+ * can tag the write so Windows clipboard history and cloud clipboard sync
+ * skip it, and only a timer in the Rust process keeps clearing it on schedule
+ * regardless of what happens to this webview's own JS event loop.
+ */
+export const clipboardCopy = (value: string) => call<void>("clipboard_copy", { value });
+
+export const settingsGet = () => call<AppSettings>("settings_get");
+export const settingsSet = (settings: AppSettings) =>
+  call<AppSettings>("settings_set", { settings });
+
+export const backupCreate = (path: string, password: string) =>
+  call<void>("backup_create", { path, password });
+export const backupRestore = (path: string, backupPassword: string, newMasterPassword: string) =>
+  call<RestoreSummary>("backup_restore", {
+    path,
+    backupPassword,
+    newMasterPassword,
+  });

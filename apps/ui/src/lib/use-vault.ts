@@ -116,3 +116,15 @@ export function useClearVaultCache() {
     client.removeQueries({ queryKey: DEVICES_KEY });
   }, [client]);
 }
+
+/**
+ * Refetch rather than clear: after a backup restore the vault is already
+ * unlocked again, holding a different set of records under a different
+ * password than whatever was cached a moment ago.
+ */
+export function useRefreshVaultCache() {
+  const client = useQueryClient();
+  return React.useCallback(() => {
+    void client.invalidateQueries({ queryKey: SECRETS_KEY });
+  }, [client]);
+}

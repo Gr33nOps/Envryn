@@ -74,7 +74,6 @@ impl SymmetricKey {
 pub const INFO_RECORD: &[u8] = b"envryn/v1/record";
 pub const INFO_FINGERPRINT: &[u8] = b"envryn/v1/fingerprint";
 pub const INFO_SQLCIPHER: &[u8] = b"envryn/v1/sqlcipher";
-pub const INFO_BACKUP: &[u8] = b"envryn/v1/backup";
 
 /// AAD binding the wrapped VMK to the slot that holds it, so a `platform`
 /// wrapper cannot be substituted for a `password` wrapper.
@@ -167,7 +166,6 @@ impl VaultMasterKey {
 pub struct VaultKeys {
     pub record: SymmetricKey,
     pub fingerprint: SymmetricKey,
-    pub backup: SymmetricKey,
 }
 
 impl VaultKeys {
@@ -175,7 +173,6 @@ impl VaultKeys {
         Ok(Self {
             record: vmk.derive(INFO_RECORD)?,
             fingerprint: vmk.derive(INFO_FINGERPRINT)?,
-            backup: vmk.derive(INFO_BACKUP)?,
         })
     }
 }
@@ -258,11 +255,8 @@ mod tests {
         let vmk = VaultMasterKey::generate().unwrap();
         let record = vmk.derive(INFO_RECORD).unwrap();
         let fingerprint = vmk.derive(INFO_FINGERPRINT).unwrap();
-        let backup = vmk.derive(INFO_BACKUP).unwrap();
 
         assert_ne!(record.as_slice(), fingerprint.as_slice());
-        assert_ne!(record.as_slice(), backup.as_slice());
-        assert_ne!(fingerprint.as_slice(), backup.as_slice());
     }
 
     #[test]

@@ -15,12 +15,13 @@ use zeroize::Zeroizing;
 use crate::crypto::aead::{self, Sealed};
 use crate::crypto::fingerprint;
 use crate::crypto::kdf::{self, KdfParams, SALT_LEN};
-use crate::crypto::keys::{KeySlot, SymmetricKey, VaultKeys, VaultMasterKey};
+use crate::crypto::keys::{KeySlot, SymmetricKey, VaultKeys, VaultMasterKey, KEY_LEN};
 use crate::error::{Error, Result};
 use crate::model::{
     self, Environment, NewSecret, SecretId, SecretPayload, SecretRecord, SecretSummary,
     SecretUpdate,
 };
+use crate::platform;
 use crate::storage::{meta_keys, Store, StoredRecord, RECORD_VERSION};
 
 pub const CRYPTO_VERSION: u32 = 1;
@@ -274,6 +275,40 @@ impl Vault {
         Ok(summary)
     }
 
+    /// Insert a fully-formed record exactly as given -- id, timestamps, and
+    /// all -- bypassing the "assign a new id, stamp now" path
+    /// [`Vault::create_secret`] uses.
+    ///
+    /// The only caller is backup restore ([`crate::backup::restore`] feeding
+    /// into this). Reconstructing prior state should reproduce it faithfully
+    /// rather than treating every restored record as newly created at the
+    /// moment of restore.
+    pub fn import_record(&mut self, record: SecretRecord) -> Result<()> {
+        if record.name.trim().is_empty() {
+            return Err(Error::InvalidInput("a secret needs a name"));
+        }
+        model::validate_payload(&record.payload)?;
+
+        let stored = seal_record(&record, &self.state()?.keys)?;
+        self.store.insert(&stored)?;
+        self.state_mut()?.index.insert(0, record);
+        Ok(())
+    }
+
+    /// Every record, fully decrypted.
+    ///
+    /// This is one of exactly two places in Envryn that ever produce every
+    /// secret value in the vault at once -- the other is
+    /// [`crate::backup::create`], which is this method's only caller. It
+    /// grants no capability an attacker with unlock access does not already
+    /// have via repeated [`Vault::reveal`] calls; it exists so backup export
+    /// can be one explicit, clearly-labelled action instead of many silent
+    /// ones. See `src-tauri/src/ipc.rs` for why every other list-shaped IPC
+    /// command deliberately returns summaries instead.
+    pub fn export_all(&self) -> Result<Vec<SecretRecord>> {
+        Ok(self.state()?.index.clone())
+    }
+
     pub fn update_secret(&mut self, id: SecretId, update: SecretUpdate) -> Result<SecretSummary> {
         let state = self.state()?;
         let position = state
@@ -381,6 +416,126 @@ impl Vault {
             .set_meta(meta_keys::KDF_PARAMS, &serde_json::to_vec(&params)?)?;
         self.store
             .set_meta(&wrapped_key(KeySlot::Password), rewrapped.as_bytes())?;
+        Ok(())
+    }
+
+    /// Whether the platform slot is set up. Callable while locked -- this is
+    /// metadata about the vault, not vault content, so the UI can decide
+    /// whether to offer an "unlock with this Windows account" option before
+    /// the user has typed anything.
+    pub fn platform_protection_enabled(&self) -> Result<bool> {
+        Ok(self.store.get_meta(meta_keys::PLATFORM_KEY_BLOB)?.is_some())
+    }
+
+    /// Enable the platform slot: unlock without the master password, using
+    /// DPAPI to tie that ability to the current Windows user account.
+    ///
+    /// Requires the vault to already be unlocked *and* the current master
+    /// password again. Re-confirming the password here mirrors
+    /// [`Vault::change_password`]: enabling an alternate route into the vault
+    /// is exactly the kind of action that deserves the same friction as
+    /// changing the primary one, not less.
+    ///
+    /// DPAPI never sees the VMK. A fresh random key is generated, DPAPI
+    /// protects *that*, and the VMK is wrapped under it through the same AEAD
+    /// path every other slot uses (`crypto::keys`). If DPAPI's protection is
+    /// ever weakened on some future Windows release, the VMK's own wrapping
+    /// is still standing behind it.
+    pub fn enable_platform_protection(
+        &mut self,
+        current_password: &Zeroizing<String>,
+    ) -> Result<()> {
+        self.state()?;
+
+        let salt_bytes = self
+            .store
+            .get_meta(meta_keys::KDF_SALT)?
+            .ok_or(Error::AuthenticationFailed)?;
+        let salt: [u8; SALT_LEN] = salt_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| Error::AuthenticationFailed)?;
+        let params: KdfParams = self
+            .store
+            .get_meta(meta_keys::KDF_PARAMS)?
+            .ok_or(Error::AuthenticationFailed)
+            .and_then(|b| serde_json::from_slice(&b).map_err(|_| Error::AuthenticationFailed))?;
+        let wrapped_bytes = self
+            .store
+            .get_meta(&wrapped_key(KeySlot::Password))?
+            .ok_or(Error::AuthenticationFailed)?;
+        let wrapped = Sealed::from_bytes(wrapped_bytes).map_err(|_| Error::AuthenticationFailed)?;
+
+        let kek = kdf::derive_kek(current_password, &salt, params)?;
+        let vmk = VaultMasterKey::unwrap_from(&kek, &wrapped, KeySlot::Password)?;
+
+        let platform_kek = SymmetricKey::generate()?;
+        let platform_blob = platform::dpapi_protect(platform_kek.as_slice())?;
+        let wrapped_platform = vmk.wrap(&platform_kek, KeySlot::Platform)?;
+
+        self.store
+            .set_meta(meta_keys::PLATFORM_KEY_BLOB, &platform_blob)?;
+        self.store
+            .set_meta(&wrapped_key(KeySlot::Platform), wrapped_platform.as_bytes())?;
+        Ok(())
+    }
+
+    /// Disable the platform slot. The password slot is untouched, so this can
+    /// never be the operation that locks someone out (INV-007) -- there is
+    /// nothing here that could fail in a way that also breaks the password.
+    pub fn disable_platform_protection(&mut self) -> Result<()> {
+        self.state()?;
+        self.store.delete_meta(meta_keys::PLATFORM_KEY_BLOB)?;
+        self.store.delete_meta(&wrapped_key(KeySlot::Platform))?;
+        Ok(())
+    }
+
+    /// Unlock using the platform slot instead of the master password.
+    ///
+    /// Fails closed exactly like [`Vault::unlock`]: a missing slot, a DPAPI
+    /// blob that belongs to a different Windows user account, and a tampered
+    /// wrapped VMK are all indistinguishable `AuthenticationFailed` results.
+    pub fn unlock_with_platform(&mut self) -> Result<()> {
+        let stored_version = self
+            .store
+            .get_meta(meta_keys::CRYPTO_VERSION)?
+            .ok_or(Error::VaultNotFound)?;
+        let version = u32::from_le_bytes(
+            stored_version
+                .get(..4)
+                .and_then(|b| b.try_into().ok())
+                .ok_or(Error::AuthenticationFailed)?,
+        );
+        if version > CRYPTO_VERSION {
+            return Err(Error::UnsupportedVersion {
+                found: version,
+                supported: CRYPTO_VERSION,
+            });
+        }
+
+        let blob = self
+            .store
+            .get_meta(meta_keys::PLATFORM_KEY_BLOB)?
+            .ok_or(Error::AuthenticationFailed)?;
+        let recovered =
+            platform::dpapi_unprotect(&blob).map_err(|_| Error::AuthenticationFailed)?;
+        if recovered.len() != KEY_LEN {
+            return Err(Error::AuthenticationFailed);
+        }
+        let mut kek_bytes = [0u8; KEY_LEN];
+        kek_bytes.copy_from_slice(&recovered);
+        let platform_kek = SymmetricKey::from_bytes(kek_bytes);
+
+        let wrapped_bytes = self
+            .store
+            .get_meta(&wrapped_key(KeySlot::Platform))?
+            .ok_or(Error::AuthenticationFailed)?;
+        let wrapped = Sealed::from_bytes(wrapped_bytes).map_err(|_| Error::AuthenticationFailed)?;
+        let vmk = VaultMasterKey::unwrap_from(&platform_kek, &wrapped, KeySlot::Platform)?;
+
+        let keys = VaultKeys::derive_from(&vmk)?;
+        let index = load_index(&self.store, &keys.record)?;
+        self.state = Some(UnlockedState { keys, index });
         Ok(())
     }
 }

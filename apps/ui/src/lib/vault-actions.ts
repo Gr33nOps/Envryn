@@ -1,57 +1,44 @@
 import { toast } from "sonner";
-
-const CLIPBOARD_CLEAR_SECONDS = 30;
-
-let clearTimer: ReturnType<typeof setTimeout> | undefined;
-/** The value we put there, so we never clear a clipboard someone else has since filled. */
-let ourClipboardValue: string | undefined;
+import { clipboardCopy, settingsGet, IpcError } from "./ipc";
 
 /**
- * Copy a secret value, then clear it again after a delay.
+ * Copy a secret value to the clipboard.
  *
- * Two caveats worth stating plainly rather than implying they are solved:
- *
- * 1. Clearing only works while Envryn is running. Quitting before the timer
- *    fires leaves the value on the clipboard.
- * 2. Windows clipboard-history and third-party clipboard managers may already
- *    have archived the value. Suppressing that requires the
- *    `ExcludeClipboardContentFromMonitorProcessing` format, which has to be set
- *    from the Rust side -- that is M5, and until it lands this function reduces
- *    exposure rather than eliminating it (THREAT_MODEL.md V-08).
+ * The actual copy, tagging, and timed clear all happen in the Rust process
+ * (`clipboard_copy` in src-tauri/src/ipc.rs), not here. That matters for two
+ * reasons `navigator.clipboard` cannot provide: only the native Win32 call
+ * can tag the write so Windows clipboard history and cloud clipboard sync
+ * skip it (THREAT_MODEL.md V-08), and a timer living in the Rust process
+ * keeps running regardless of what this webview's JS event loop is doing --
+ * including while a modal, a slow render, or a background tab throttles it.
  */
 export async function copyValue(value: string): Promise<void> {
-  if (!value || typeof navigator === "undefined" || !navigator.clipboard) {
+  if (!value) {
     toast("Nothing to copy");
     return;
   }
 
-  await navigator.clipboard.writeText(value);
-  ourClipboardValue = value;
+  try {
+    await clipboardCopy(value);
+  } catch (err) {
+    toast(err instanceof IpcError ? err.message : "That could not be copied.");
+    return;
+  }
 
-  if (clearTimer) clearTimeout(clearTimer);
-  clearTimer = setTimeout(() => {
-    void (async () => {
-      try {
-        // Only clear if the clipboard still holds what we put there.
-        const current = await navigator.clipboard.readText();
-        if (current === ourClipboardValue) await navigator.clipboard.writeText("");
-      } catch {
-        // Reading the clipboard can be denied. Clearing unconditionally would
-        // then destroy whatever the user copied since, so we leave it alone.
-      } finally {
-        ourClipboardValue = undefined;
-      }
-    })();
-  }, CLIPBOARD_CLEAR_SECONDS * 1000);
+  const { clipboard_clear_seconds } = await settingsGet().catch(() => ({
+    clipboard_clear_seconds: 30,
+  }));
 
   toast("Secret copied", {
-    description: `Envryn clears the clipboard in ${CLIPBOARD_CLEAR_SECONDS} seconds.`,
+    description: `Envryn clears the clipboard in ${clipboard_clear_seconds} seconds.`,
   });
 }
 
-/** Cancel a pending clear and forget the value. Called on lock. */
-export function forgetClipboardTimer(): void {
-  if (clearTimer) clearTimeout(clearTimer);
-  clearTimer = undefined;
-  ourClipboardValue = undefined;
-}
+/**
+ * Nothing to cancel any more -- the clear timer lives in the Rust process and
+ * outlives this function's old JS-side timer entirely. Kept as a no-op call
+ * site so `lockVault()` does not need to change shape, and so a future
+ * lock-triggered clipboard wipe (clearing immediately on lock, rather than
+ * waiting out the timer) has an obvious place to go.
+ */
+export function forgetClipboardTimer(): void {}

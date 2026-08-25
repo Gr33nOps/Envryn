@@ -415,3 +415,161 @@ fn fingerprints_do_not_correlate_across_vaults() {
         "identical credentials produced identical fingerprints across vaults"
     );
 }
+
+// --- Platform (DPAPI) key protection -----------------------------------
+
+#[test]
+fn platform_protection_unlocks_without_the_password() {
+    let t = temp();
+    let id;
+    {
+        let mut vault = Vault::create(&t.path, &pw("master-password"), FAST).unwrap();
+        id = vault
+            .create_secret(api_key("K", "P", Environment::Production, "value"))
+            .unwrap()
+            .id;
+        assert!(!vault.platform_protection_enabled().unwrap());
+
+        vault
+            .enable_platform_protection(&pw("master-password"))
+            .unwrap();
+        assert!(vault.platform_protection_enabled().unwrap());
+        vault.lock();
+    }
+
+    let mut vault = Vault::open(&t.path).unwrap();
+    assert!(vault.platform_protection_enabled().unwrap());
+    vault.unlock_with_platform().unwrap();
+
+    match vault.reveal(id).unwrap().payload {
+        SecretPayload::ApiKey { value } => assert_eq!(value, "value"),
+        other => panic!("unexpected payload: {other:?}"),
+    }
+}
+
+/// INV-007: the password slot must keep working after platform protection is
+/// enabled -- an alternate unlock path must never subtract from the original.
+#[test]
+fn platform_protection_does_not_disturb_the_password_slot() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("master-password"), FAST).unwrap();
+    vault
+        .enable_platform_protection(&pw("master-password"))
+        .unwrap();
+    vault.lock();
+
+    let mut vault = Vault::open(&t.path).unwrap();
+    vault.unlock(&pw("master-password")).unwrap();
+    assert!(vault.is_unlocked());
+}
+
+/// The reverse of INV-007: removing platform protection must never touch the
+/// password slot, since disabling a convenience feature must not be able to
+/// lock someone out.
+#[test]
+fn disabling_platform_protection_preserves_password_unlock() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("master-password"), FAST).unwrap();
+    vault
+        .enable_platform_protection(&pw("master-password"))
+        .unwrap();
+    vault.disable_platform_protection().unwrap();
+    assert!(!vault.platform_protection_enabled().unwrap());
+    vault.lock();
+
+    let mut vault = Vault::open(&t.path).unwrap();
+    vault.unlock(&pw("master-password")).unwrap();
+    assert!(vault.is_unlocked());
+    assert!(matches!(
+        vault.unlock_with_platform(),
+        Err(Error::AuthenticationFailed)
+    ));
+}
+
+#[test]
+fn enabling_platform_protection_requires_the_correct_password() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("real-password"), FAST).unwrap();
+    assert!(matches!(
+        vault.enable_platform_protection(&pw("wrong-password")),
+        Err(Error::AuthenticationFailed)
+    ));
+    assert!(!vault.platform_protection_enabled().unwrap());
+}
+
+#[test]
+fn platform_unlock_fails_cleanly_when_never_enabled() {
+    let t = temp();
+    {
+        let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+        vault.lock();
+    }
+    let mut vault = Vault::open(&t.path).unwrap();
+    assert!(matches!(
+        vault.unlock_with_platform(),
+        Err(Error::AuthenticationFailed)
+    ));
+}
+
+// --- Backup / restore -----------------------------------------------------
+
+#[test]
+fn backup_and_restore_through_two_real_vaults() {
+    use envryn_core::backup;
+
+    let source = temp();
+    let restored = temp();
+
+    let mut vault = Vault::create(&source.path, &pw("master-password"), FAST).unwrap();
+    vault
+        .create_secret(api_key("K1", "P1", Environment::Production, "value-one"))
+        .unwrap();
+    vault
+        .create_secret(api_key("K2", "P2", Environment::Development, "value-two"))
+        .unwrap();
+
+    let records = vault.export_all().unwrap();
+    let file = backup::create(&records, &pw("backup-password")).unwrap();
+
+    // Restoring is independent of the source vault's password.
+    let recovered = backup::restore(&file, &pw("backup-password")).unwrap();
+    assert_eq!(recovered.len(), 2);
+
+    let mut new_vault = Vault::create(&restored.path, &pw("new-master-password"), FAST).unwrap();
+    for record in recovered {
+        new_vault.import_record(record).unwrap();
+    }
+    new_vault.lock();
+
+    // The restored vault is unlocked by its own new password, not the
+    // original vault's password or the backup password.
+    let mut new_vault = Vault::open(&restored.path).unwrap();
+    new_vault.unlock(&pw("new-master-password")).unwrap();
+    assert_eq!(new_vault.count().unwrap(), 2);
+
+    let names: Vec<String> = new_vault
+        .list()
+        .unwrap()
+        .into_iter()
+        .map(|s| s.name)
+        .collect();
+    assert!(names.contains(&"K1".to_string()));
+    assert!(names.contains(&"K2".to_string()));
+}
+
+#[test]
+fn restore_fails_with_the_wrong_backup_password() {
+    use envryn_core::backup;
+
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    vault
+        .create_secret(api_key("K", "P", Environment::Production, "v"))
+        .unwrap();
+
+    let file = backup::create(&vault.export_all().unwrap(), &pw("right-backup-password")).unwrap();
+    assert!(matches!(
+        backup::restore(&file, &pw("wrong-backup-password")),
+        Err(Error::AuthenticationFailed)
+    ));
+}

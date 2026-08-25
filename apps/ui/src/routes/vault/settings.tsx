@@ -4,13 +4,25 @@ import { AlertTriangle, ArrowRight, Download, KeyRound, RotateCcw, Trash2 } from
 import { toast } from "sonner";
 import {
   Button,
-  ConfirmDialog,
+  Field,
+  Input,
+  Modal,
   Panel,
   SectionLabel,
   Select,
   SettingsRow,
   Switch,
 } from "@/components/envryn/ui";
+import {
+  IpcError,
+  settingsGet,
+  settingsSet,
+  vaultChangePassword,
+  vaultDisablePlatformProtection,
+  vaultEnablePlatformProtection,
+  vaultStatus,
+  type AppSettings,
+} from "@/lib/ipc";
 
 export const Route = createFileRoute("/vault/settings")({ component: Settings });
 
@@ -34,11 +46,218 @@ function Group({
   );
 }
 
+/** Ask for the current master password before enabling platform protection --
+ * see docs/CRYPTOGRAPHY.md: enabling an alternate unlock path deserves the
+ * same friction as changing the primary one. */
+function EnablePlatformProtectionModal({
+  open,
+  onOpenChange,
+  onEnabled,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onEnabled: () => void;
+}) {
+  const [password, setPassword] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) {
+      setPassword("");
+      setError(null);
+      setLoading(false);
+    }
+  }, [open]);
+
+  async function confirm() {
+    setError(null);
+    setLoading(true);
+    try {
+      await vaultEnablePlatformProtection(password);
+      onOpenChange(false);
+      onEnabled();
+      toast("This Windows account can now unlock the vault");
+    } catch (err) {
+      setError(
+        err instanceof IpcError && err.code === "auth_failed"
+          ? "That password did not work."
+          : "That could not be enabled.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Confirm your master password"
+      description="This lets Envryn unlock without your master password, tied to this Windows user account on this PC. Your master password still works too."
+      footer={
+        <>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="primary" loading={loading} onClick={() => void confirm()}>
+            Enable
+          </Button>
+        </>
+      }
+    >
+      <Field label="Master password" error={error ?? undefined}>
+        <Input
+          type="password"
+          autoFocus
+          value={password}
+          invalid={Boolean(error)}
+          onChange={(event) => {
+            setPassword(event.target.value);
+            setError(null);
+          }}
+        />
+      </Field>
+    </Modal>
+  );
+}
+
+function ChangePasswordModal({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const [current, setCurrent] = React.useState("");
+  const [next, setNext] = React.useState("");
+  const [confirmValue, setConfirmValue] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) {
+      setCurrent("");
+      setNext("");
+      setConfirmValue("");
+      setError(null);
+      setLoading(false);
+    }
+  }, [open]);
+
+  async function confirm() {
+    setError(null);
+    if (next.length < 8) {
+      setError("Your new password must be at least 8 characters.");
+      return;
+    }
+    if (next !== confirmValue) {
+      setError("Those passwords do not match.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await vaultChangePassword(current, next);
+      onOpenChange(false);
+      toast("Master password changed");
+    } catch (err) {
+      setError(
+        err instanceof IpcError && err.code === "auth_failed"
+          ? "Your current password did not match."
+          : "That could not be changed.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Change master password"
+      description="This re-wraps your vault key instantly. Nothing needs to be re-encrypted."
+      footer={
+        <>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="primary" loading={loading} onClick={() => void confirm()}>
+            Change password
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Current password">
+          <Input
+            type="password"
+            autoFocus
+            value={current}
+            onChange={(event) => setCurrent(event.target.value)}
+          />
+        </Field>
+        <Field label="New password">
+          <Input type="password" value={next} onChange={(event) => setNext(event.target.value)} />
+        </Field>
+        <Field label="Confirm new password" error={error ?? undefined}>
+          <Input
+            type="password"
+            invalid={Boolean(error)}
+            value={confirmValue}
+            onChange={(event) => setConfirmValue(event.target.value)}
+          />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
+const AUTO_LOCK_OPTIONS = [1, 5, 15, 30, 60];
+const CLIPBOARD_OPTIONS = [10, 30, 60, 120];
+
 function Settings() {
-  const [requireAuth, setRequireAuth] = React.useState(true);
-  const [lockWithWindows, setLockWithWindows] = React.useState(true);
-  const [discovery, setDiscovery] = React.useState(true);
-  const [danger, setDanger] = React.useState<"reset" | "delete" | null>(null);
+  const [settings, setSettings] = React.useState<AppSettings | null>(null);
+  const [platformAvailable, setPlatformAvailable] = React.useState(false);
+  const [platformEnabled, setPlatformEnabled] = React.useState(false);
+  const [enabling, setEnabling] = React.useState(false);
+  const [changingPassword, setChangingPassword] = React.useState(false);
+
+  React.useEffect(() => {
+    settingsGet()
+      .then(setSettings)
+      .catch(() => toast("Could not load settings"));
+    vaultStatus()
+      .then((status) => {
+        setPlatformAvailable(status.platform_protection_available);
+        setPlatformEnabled(status.platform_protection_enabled);
+      })
+      .catch(() => {
+        // Platform protection availability just stays unknown/off; every
+        // other row on this page still works.
+      });
+  }, []);
+
+  async function updateSettings(patch: Partial<AppSettings>) {
+    if (!settings) return;
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    try {
+      await settingsSet(next);
+    } catch {
+      toast("That setting could not be saved");
+    }
+  }
+
+  async function togglePlatformProtection(enable: boolean) {
+    if (enable) {
+      setEnabling(true);
+      return;
+    }
+    try {
+      await vaultDisablePlatformProtection();
+      setPlatformEnabled(false);
+      toast("This Windows account can no longer unlock the vault on its own");
+    } catch {
+      toast("That could not be disabled");
+    }
+  }
 
   return (
     <div className="min-h-full bg-background">
@@ -63,69 +282,65 @@ function Settings() {
             >
               <SettingsRow
                 label="Auto-lock the vault"
-                description="Lock after you stop using Envryn."
+                description="Lock after this long with no keyboard or mouse activity anywhere on this PC."
                 control={
-                  <Select defaultValue="5" className="w-[130px]">
-                    <option value="1">1 minute</option>
-                    <option value="5">5 minutes</option>
-                    <option value="15">15 minutes</option>
-                    <option value="0">Never</option>
+                  <Select
+                    value={String(settings?.auto_lock_minutes ?? 5)}
+                    onChange={(event) =>
+                      void updateSettings({ auto_lock_minutes: Number(event.target.value) })
+                    }
+                    className="w-[130px]"
+                  >
+                    {AUTO_LOCK_OPTIONS.map((minutes) => (
+                      <option key={minutes} value={minutes}>
+                        {minutes} minute{minutes === 1 ? "" : "s"}
+                      </option>
+                    ))}
                   </Select>
-                }
-              />
-              <SettingsRow
-                label="Require authentication to reveal secrets"
-                description="Use your master password or Windows Hello each time a value is revealed."
-                control={
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11.5px] text-muted-foreground">
-                      {requireAuth ? "On" : "Off"}
-                    </span>
-                    <Switch checked={requireAuth} onCheckedChange={setRequireAuth} />
-                  </div>
                 }
               />
               <SettingsRow
                 label="Clear clipboard after copying"
                 description="Remove secret values from the clipboard after this long."
                 control={
-                  <Select defaultValue="30" className="w-[130px]">
-                    <option value="10">10 seconds</option>
-                    <option value="30">30 seconds</option>
-                    <option value="60">60 seconds</option>
+                  <Select
+                    value={String(settings?.clipboard_clear_seconds ?? 30)}
+                    onChange={(event) =>
+                      void updateSettings({ clipboard_clear_seconds: Number(event.target.value) })
+                    }
+                    className="w-[130px]"
+                  >
+                    {CLIPBOARD_OPTIONS.map((seconds) => (
+                      <option key={seconds} value={seconds}>
+                        {seconds} seconds
+                      </option>
+                    ))}
                   </Select>
                 }
               />
-              <SettingsRow
-                label="Lock when Windows locks"
-                description="Protect the vault whenever your Windows session is locked."
-                control={
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11.5px] text-muted-foreground">
-                      {lockWithWindows ? "On" : "Off"}
-                    </span>
-                    <Switch checked={lockWithWindows} onCheckedChange={setLockWithWindows} />
-                  </div>
-                }
-              />
+              {platformAvailable && (
+                <SettingsRow
+                  label="Unlock with this Windows account"
+                  description="Skip the master password on this PC. Protected by Windows, tied to this user account. Your master password always keeps working."
+                  control={
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11.5px] text-muted-foreground">
+                        {platformEnabled ? "On" : "Off"}
+                      </span>
+                      <Switch
+                        checked={platformEnabled}
+                        onCheckedChange={(checked) => void togglePlatformProtection(checked)}
+                      />
+                    </div>
+                  }
+                />
+              )}
             </Group>
 
             <Group
               label="Devices and sync"
-              description="Envryn uses your local network to connect devices you have approved."
+              description="Direct device-to-device sync is not available yet."
             >
-              <SettingsRow
-                label="Allow local device discovery"
-                description="Lets trusted devices find this PC on your LAN. It does not share secret values with unknown devices."
-                control={
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11.5px] text-muted-foreground">
-                      {discovery ? "On" : "Off"}
-                    </span>
-                    <Switch checked={discovery} onCheckedChange={setDiscovery} />
-                  </div>
-                }
-              />
               <SettingsRow
                 label="Sync details"
                 description="See connected devices, activity, and conflicts."
@@ -145,7 +360,7 @@ function Settings() {
             >
               <SettingsRow
                 label="Encrypted backup"
-                description="Create, restore, or open your latest backup file."
+                description="Create or restore an encrypted backup file."
                 control={
                   <Link to="/vault/backup">
                     <Button size="sm">
@@ -189,10 +404,7 @@ function Settings() {
                   label="Change vault password"
                   description="Update the password used to unlock this vault."
                   control={
-                    <Button
-                      size="sm"
-                      onClick={() => toast("Password change flow is ready to connect")}
-                    >
+                    <Button size="sm" onClick={() => setChangingPassword(true)}>
                       <KeyRound />
                       Change
                     </Button>
@@ -200,19 +412,21 @@ function Settings() {
                 />
                 <SettingsRow
                   label="Export vault"
-                  description="Save a copy of your vault data to a file."
+                  description="Save an encrypted copy of your vault data to a file."
                   control={
-                    <Button size="sm" onClick={() => toast("Export flow is ready to connect")}>
-                      <Download />
-                      Export
-                    </Button>
+                    <Link to="/vault/backup">
+                      <Button size="sm">
+                        <Download />
+                        Export
+                      </Button>
+                    </Link>
                   }
                 />
                 <SettingsRow
                   label="Reset vault"
-                  description="Remove the current vault and start again."
+                  description="Remove the current vault and start again. Not yet available -- use Delete vault, then create a new one, once this ships."
                   control={
-                    <Button size="sm" variant="danger" onClick={() => setDanger("reset")}>
+                    <Button size="sm" variant="danger" disabled title="Coming soon">
                       <RotateCcw />
                       Reset
                     </Button>
@@ -220,9 +434,9 @@ function Settings() {
                 />
                 <SettingsRow
                   label="Delete vault"
-                  description="Permanently delete this vault and all of its secrets."
+                  description="Permanently delete this vault and all of its secrets. Not yet available."
                   control={
-                    <Button size="sm" variant="danger" onClick={() => setDanger("delete")}>
+                    <Button size="sm" variant="danger" disabled title="Coming soon">
                       <Trash2 />
                       Delete
                     </Button>
@@ -238,8 +452,8 @@ function Settings() {
                 <div>
                   <p className="text-[12px] font-medium">A note about local sync</p>
                   <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-                    Only devices you approve can connect. You can remove a device at any time from
-                    Trusted devices.
+                    Direct device-to-device pairing and sync are not built yet. Only this PC can
+                    open this vault for now.
                   </p>
                   <Link
                     to="/vault/devices"
@@ -253,25 +467,13 @@ function Settings() {
           </aside>
         </div>
       </div>
-      <ConfirmDialog
-        open={danger !== null}
-        onOpenChange={(open) => !open && setDanger(null)}
-        title={danger === "delete" ? "Delete this vault?" : "Reset this vault?"}
-        body={
-          danger === "delete"
-            ? "This permanently deletes the vault and all 13 secrets from this PC. Create an encrypted backup first if you might need them later."
-            : "This removes the current vault from this PC and starts a new one. Create an encrypted backup first if you want to keep these secrets."
-        }
-        confirmLabel={danger === "delete" ? "Delete vault" : "Reset vault"}
-        onConfirm={() => {
-          setDanger(null);
-          toast(
-            danger === "delete"
-              ? "Delete vault flow is ready to connect"
-              : "Reset vault flow is ready to connect",
-          );
-        }}
+
+      <EnablePlatformProtectionModal
+        open={enabling}
+        onOpenChange={setEnabling}
+        onEnabled={() => setPlatformEnabled(true)}
       />
+      <ChangePasswordModal open={changingPassword} onOpenChange={setChangingPassword} />
     </div>
   );
 }

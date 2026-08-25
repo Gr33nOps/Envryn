@@ -54,6 +54,15 @@ pub enum Error {
 
     #[error("internal error: {0}")]
     Internal(&'static str),
+
+    /// A platform-specific feature (DPAPI protection, clipboard exclusion,
+    /// idle detection, capture protection) has no implementation on this OS,
+    /// or the underlying OS call failed. Never used for cryptographic
+    /// authentication outcomes -- those are `AuthenticationFailed`, so that a
+    /// DPAPI blob rejected because it belongs to a different Windows user
+    /// account is indistinguishable from a wrong password (INV-006).
+    #[error("platform feature unavailable")]
+    PlatformUnavailable,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

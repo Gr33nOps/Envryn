@@ -100,6 +100,12 @@ pub mod meta_keys {
     pub const KDF_SALT: &str = "kdf_salt";
     pub const WRAPPED_VMK: &str = "wrapped_vmk_";
     pub const DEVICE_ID: &str = "device_id";
+    /// The platform-protected (DPAPI) blob that decrypts to the platform slot's
+    /// wrapping key. Distinct from `WRAPPED_VMK + "platform"`, which is the VMK
+    /// itself wrapped *under* that recovered key -- two layers, so DPAPI never
+    /// touches the VMK directly and the AEAD wrap path stays the only thing
+    /// that ever handles it.
+    pub const PLATFORM_KEY_BLOB: &str = "platform_key_blob";
 }
 
 #[cfg(test)]

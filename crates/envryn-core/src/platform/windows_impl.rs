@@ -1,0 +1,368 @@
+//! Win32 implementation of the platform primitives.
+//!
+//! This is the one module in `envryn-core` permitted to contain `unsafe` --
+//! the crate-level lint is `deny`, not `forbid`, specifically so this
+//! exemption can be scoped here and nowhere else (see Cargo.toml). Every
+//! `unsafe` block below carries a safety comment. None of this module handles
+//! the Vault Master Key or record plaintext directly; it hands back raw bytes
+//! that [`crate::vault`] feeds through the same AEAD wrap/unwrap path used for
+//! the password slot, so a bug here cannot silently weaken record encryption.
+#![allow(unsafe_code)]
+
+use windows::core::HSTRING;
+use windows::Win32::Foundation::{LocalFree, HANDLE, HGLOBAL, HLOCAL, HWND};
+use windows::Win32::Security::Cryptography::{
+    CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+};
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    RegisterClipboardFormatW, SetClipboardData,
+};
+use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::System::Ole::CF_UNICODETEXT;
+use windows::Win32::System::SystemInformation::GetTickCount64;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE};
+use zeroize::Zeroizing;
+
+use crate::error::{Error, Result};
+
+/// A label shown by some Windows credential UI if DPAPI ever prompts. It never
+/// will here (`CRYPTPROTECT_UI_FORBIDDEN`), but the API requires a description.
+const DPAPI_DESCRIPTION: &str = "Envryn vault platform key";
+
+/// The clipboard-history / cloud-sync opt-out format Windows checks for.
+/// See <https://learn.microsoft.com/windows/win32/dataxchg/clipboard-formats>
+/// and docs/CRYPTOGRAPHY.md's clipboard note. Absence of this format on older
+/// Windows builds is a stated residual risk, not a bug -- see THREAT_MODEL.md
+/// V-08.
+const EXCLUDE_FORMAT_NAME: &str = "ExcludeClipboardContentFromMonitorProcessing";
+
+/// Protect `secret` under the current Windows user account.
+///
+/// The returned blob decrypts only for the same Windows user on the same
+/// machine (DPAPI's standard scope). It is opaque ciphertext, safe to store
+/// alongside the vault database.
+pub fn dpapi_protect(secret: &[u8]) -> Result<Vec<u8>> {
+    // SAFETY: `input` borrows `secret` for the duration of the call only;
+    // CryptProtectData reads it and does not retain the pointer. `output` is
+    // zero-initialised and only DPAPI writes into it. The `pbData` it returns
+    // is allocated by DPAPI via LocalAlloc, per the Win32 contract for this
+    // API, and is freed below with LocalFree before returning.
+    unsafe {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: secret.len() as u32,
+            pbData: secret.as_ptr() as *mut u8,
+        };
+        let mut output = CRYPT_INTEGER_BLOB::default();
+
+        CryptProtectData(
+            &input,
+            &HSTRING::from(DPAPI_DESCRIPTION),
+            None,
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+        .map_err(|_| Error::PlatformUnavailable)?;
+
+        let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        let _ = LocalFree(Some(HLOCAL(output.pbData as *mut _)));
+        Ok(bytes)
+    }
+}
+
+/// Recover a value protected by [`dpapi_protect`].
+///
+/// Fails if the blob is corrupt, was protected under a different Windows
+/// user account, or the account's DPAPI master key is unavailable (for
+/// example, a roaming profile that has not synced). All three surface as
+/// [`Error::PlatformUnavailable`] with no further distinction, matching the
+/// no-detail rule INV-006 applies to password authentication.
+pub fn dpapi_unprotect(blob: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+    // SAFETY: as above. `ppszdatadescr` is `None`, so DPAPI does not allocate
+    // or write a description string we would otherwise have to free.
+    unsafe {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: blob.len() as u32,
+            pbData: blob.as_ptr() as *mut u8,
+        };
+        let mut output = CRYPT_INTEGER_BLOB::default();
+
+        CryptUnprotectData(
+            &input,
+            None,
+            None,
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+        .map_err(|_| Error::PlatformUnavailable)?;
+
+        let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        // Zero DPAPI's own copy before freeing it. LocalFree does not zero the
+        // memory it releases, and this buffer briefly held the recovered
+        // platform key.
+        std::ptr::write_bytes(output.pbData, 0, output.cbData as usize);
+        let _ = LocalFree(Some(HLOCAL(output.pbData as *mut _)));
+        Ok(Zeroizing::new(bytes))
+    }
+}
+
+/// Seconds since the last keyboard or mouse input, system-wide.
+///
+/// Used for idle auto-lock. System-wide rather than window-scoped
+/// deliberately: a user reading a long note in Envryn with the mouse still
+/// should not be logged as idle just because they have not touched the
+/// keyboard, but they also should not stay "active" forever just because the
+/// window has focus -- this matches what every other Windows idle-timeout
+/// feature (screen lock, screensaver) already measures.
+pub fn idle_seconds() -> Result<u64> {
+    // SAFETY: `info` is a plain POD struct; GetLastInputInfo only writes to
+    // it. `cbSize` must be set before the call per the Win32 contract, which
+    // is how the API validates struct-layout compatibility across versions.
+    unsafe {
+        let mut info = LASTINPUTINFO {
+            cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+            dwTime: 0,
+        };
+        if !GetLastInputInfo(&mut info).as_bool() {
+            return Err(Error::PlatformUnavailable);
+        }
+        // GetTickCount64 truncated to 32 bits matches GetTickCount's units,
+        // and wrapping_sub handles the ~49.7-day rollover MSDN documents for
+        // this pattern the same way GetTickCount's own callers must.
+        let now = GetTickCount64() as u32;
+        let idle_ms = now.wrapping_sub(info.dwTime);
+        Ok(u64::from(idle_ms) / 1000)
+    }
+}
+
+/// RAII guard ensuring `CloseClipboard` runs on every exit path, including an
+/// early `?` return -- an unclosed clipboard blocks every other application
+/// from reading or writing it until the offending process exits.
+struct ClipboardGuard;
+
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        // SAFETY: only ever constructed immediately after a successful
+        // OpenClipboard in this module, so there is always a matching open
+        // handle to close. CloseClipboard cannot itself panic or corrupt state
+        // on failure; the worst case is a leaked clipboard lock, which a
+        // #[allow(unsafe_code)] guard existing specifically to avoid.
+        unsafe {
+            let _ = CloseClipboard();
+        }
+    }
+}
+
+/// `OpenClipboard` can fail transiently with no real error: Windows'
+/// clipboard-history service, screen readers, and antivirus products all
+/// briefly hold the clipboard open when they notice new content -- which is
+/// exactly the moment every one of these functions calls this. A short retry
+/// loop is the standard remedy (Chromium and most other clipboard-heavy
+/// desktop apps do the same). Not a workaround for a bug in our code; the
+/// clipboard has always been a shared, briefly-contended resource.
+///
+/// # Safety
+/// The caller must close the clipboard (via [`ClipboardGuard`]) after a
+/// successful open.
+unsafe fn open_clipboard_with_retry() -> Result<()> {
+    const ATTEMPTS: u32 = 10;
+    const DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+
+    for attempt in 0..ATTEMPTS {
+        // SAFETY: forwarded to the caller's contract; this function performs
+        // no operation beyond the FFI call itself.
+        if unsafe { OpenClipboard(None) }.is_ok() {
+            return Ok(());
+        }
+        if attempt + 1 < ATTEMPTS {
+            std::thread::sleep(DELAY);
+        }
+    }
+    Err(Error::Internal("clipboard unavailable"))
+}
+
+/// Copy `text` to the clipboard, tagged so Windows clipboard history and
+/// cloud clipboard sync skip it.
+///
+/// The exclusion tag is best-effort: it is a convention third-party clipboard
+/// managers may or may not honour, and Windows versions before the 2018
+/// clipboard-history feature do not check for it at all. Documented as a
+/// residual risk, not solved, in THREAT_MODEL.md V-08.
+pub fn set_clipboard_text_excluded(text: &str) -> Result<()> {
+    // SAFETY: OpenClipboard(None) associates the clipboard with the current
+    // thread rather than a specific window, which is correct for a
+    // background/IPC-triggered copy with no window of its own to pass.
+    unsafe {
+        open_clipboard_with_retry()?;
+        let _guard = ClipboardGuard;
+
+        EmptyClipboard().map_err(|_| Error::Internal("clipboard unavailable"))?;
+
+        let utf16: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let byte_len = utf16.len() * std::mem::size_of::<u16>();
+
+        let hmem = GlobalAlloc(GMEM_MOVEABLE, byte_len)
+            .map_err(|_| Error::Internal("clipboard allocation failed"))?;
+        let ptr = GlobalLock(hmem);
+        if ptr.is_null() {
+            return Err(Error::Internal("clipboard lock failed"));
+        }
+        // SAFETY: `ptr` was just allocated with exactly `byte_len` bytes and
+        // is non-null; `utf16` also has `byte_len` bytes. Non-overlapping:
+        // the two buffers were allocated independently.
+        std::ptr::copy_nonoverlapping(utf16.as_ptr().cast::<u8>(), ptr.cast::<u8>(), byte_len);
+        // A `false` return here can mean either "unlock failed" or "the
+        // object is now fully unlocked" (Win32's own documented ambiguity for
+        // this call) -- the copied bytes are valid either way, so the result
+        // is deliberately ignored.
+        let _ = GlobalUnlock(hmem);
+
+        // Ownership of `hmem` transfers to the clipboard on success; it must
+        // not be freed by us afterwards.
+        SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(hmem.0)))
+            .map_err(|_| Error::Internal("clipboard write failed"))?;
+
+        let exclude_format = RegisterClipboardFormatW(&HSTRING::from(EXCLUDE_FORMAT_NAME));
+        if exclude_format != 0 {
+            // The marker's content is conventionally ignored by consumers of
+            // this format; only its presence matters. A failure to set it
+            // does not affect the primary copy, so it is not propagated.
+            if let Ok(marker) = GlobalAlloc(GMEM_MOVEABLE, 1) {
+                let _ = SetClipboardData(exclude_format, Some(HANDLE(marker.0)));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Read the clipboard's current text, if any.
+///
+/// Used only to confirm the clipboard still holds the value Envryn put there
+/// before clearing it -- never to observe arbitrary clipboard content, and
+/// the result is never logged.
+pub fn read_clipboard_text() -> Result<Option<String>> {
+    // SAFETY: OpenClipboard(None) as above; the handle returned by
+    // GetClipboardData is owned by the clipboard/system, not by us, so it is
+    // never freed here -- only locked, read, and unlocked.
+    unsafe {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT.0 as u32).is_err() {
+            return Ok(None);
+        }
+        open_clipboard_with_retry()?;
+        let _guard = ClipboardGuard;
+
+        let handle = match GetClipboardData(CF_UNICODETEXT.0 as u32) {
+            Ok(h) => h,
+            Err(_) => return Ok(None),
+        };
+        let ptr = GlobalLock(HGLOBAL(handle.0));
+        if ptr.is_null() {
+            return Ok(None);
+        }
+
+        // Find the NUL terminator ourselves: CF_UNICODETEXT carries no
+        // explicit length, only a NUL-terminated UTF-16 buffer, per the
+        // format's own definition.
+        let mut len = 0usize;
+        // SAFETY: CF_UNICODETEXT is documented to be NUL-terminated; `ptr`
+        // was just successfully locked, so it points at a valid, live
+        // allocation for at least as long as the clipboard section is open.
+        while *ptr.cast::<u16>().add(len) != 0 {
+            len += 1;
+        }
+        let text = {
+            let slice = std::slice::from_raw_parts(ptr.cast::<u16>(), len);
+            String::from_utf16_lossy(slice)
+        };
+        let _ = GlobalUnlock(HGLOBAL(handle.0));
+
+        Ok(Some(text))
+    }
+}
+
+/// Empty the clipboard.
+pub fn clear_clipboard() -> Result<()> {
+    // SAFETY: standard open/empty/close sequence; the guard closes on every
+    // exit path.
+    unsafe {
+        open_clipboard_with_retry()?;
+        let _guard = ClipboardGuard;
+        EmptyClipboard().map_err(|_| Error::Internal("clipboard unavailable"))?;
+        Ok(())
+    }
+}
+
+/// Exclude a window from screen capture (`WDA_EXCLUDEFROMCAPTURE`).
+///
+/// `hwnd` is the raw handle value (`HWND.0 as isize`) rather than a typed
+/// window, so this crate needs no dependency on Tauri or any windowing
+/// library to flip one flag on a window it did not create.
+///
+/// This affects screenshots, screen recording, and remote-desktop mirroring
+/// of the window, but not a camera pointed at the physical screen -- stated
+/// plainly in docs/THREAT_MODEL.md rather than implied as complete.
+pub fn exclude_window_from_capture(hwnd: isize) -> Result<()> {
+    // SAFETY: `hwnd` is expected to be a live window handle supplied by the
+    // caller (the Tauri shell, from its own main window). Passing a stale or
+    // invalid handle fails the call rather than causing memory unsafety --
+    // SetWindowDisplayAffinity validates its argument before use.
+    unsafe {
+        SetWindowDisplayAffinity(HWND(hwnd as *mut _), WDA_EXCLUDEFROMCAPTURE)
+            .map_err(|_| Error::Internal("could not enable capture protection"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// DPAPI round-trips whatever bytes it is given, including ones that
+    /// happen to look like they could confuse a length calculation.
+    #[test]
+    fn dpapi_round_trip() {
+        for secret in [b"".as_slice(), b"short", &[0u8; 64], &[0xFFu8; 32]] {
+            let protected = dpapi_protect(secret).expect("dpapi_protect");
+            let recovered = dpapi_unprotect(&protected).expect("dpapi_unprotect");
+            assert_eq!(recovered.as_slice(), secret);
+        }
+    }
+
+    /// The whole reason to use DPAPI instead of a fixed key: a corrupted blob
+    /// must not silently produce wrong-but-plausible plaintext.
+    #[test]
+    fn dpapi_rejects_a_tampered_blob() {
+        let mut protected = dpapi_protect(b"platform key material").expect("dpapi_protect");
+        let last = protected.len() - 1;
+        protected[last] ^= 0x01;
+        assert!(matches!(
+            dpapi_unprotect(&protected),
+            Err(Error::PlatformUnavailable)
+        ));
+    }
+
+    #[test]
+    fn idle_seconds_is_queryable() {
+        // This machine just produced keyboard/mouse input to run the test
+        // suite, or is a CI runner that has never had any -- either way the
+        // call must succeed and return a sane, bounded value.
+        let idle = idle_seconds().expect("idle_seconds");
+        assert!(idle < 60 * 60 * 24 * 365, "idle time is implausibly large");
+    }
+
+    #[test]
+    fn clipboard_round_trip() {
+        set_clipboard_text_excluded("envryn-platform-test-value").expect("set_clipboard");
+        let read = read_clipboard_text().expect("read_clipboard");
+        assert_eq!(read.as_deref(), Some("envryn-platform-test-value"));
+
+        clear_clipboard().expect("clear_clipboard");
+        let after_clear = read_clipboard_text().expect("read_clipboard after clear");
+        assert!(after_clear.is_none() || after_clear.as_deref() == Some(""));
+    }
+}

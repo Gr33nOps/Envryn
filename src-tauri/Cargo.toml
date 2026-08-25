@@ -22,6 +22,12 @@ serde_json.workspace = true
 zeroize.workspace = true
 thiserror.workspace = true
 
+# Only "time" beyond what Tauri itself already pulls in (rt, rt-multi-thread,
+# sync, fs, io-util) -- the auto-lock poll and the clipboard clear timer are
+# the only things here that need it. Left unpinned to the patch so Cargo
+# unifies with Tauri's own `tokio = "1"` requirement into one runtime instance.
+tokio = { version = "1", features = ["time"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 

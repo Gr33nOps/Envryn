@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import { listen } from "@tauri-apps/api/event";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Sidebar } from "@/components/envryn/Sidebar";
@@ -46,18 +47,43 @@ function VaultLayout() {
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();
 
+  // The client-side half of locking: drop cached records, forget any pending
+  // clipboard state, and leave the screen. Shared between a manual lock and
+  // the backend's own idle auto-lock, which has already done the Rust-side
+  // half (zeroizing keys) by the time either path reaches this.
+  const finishLocking = React.useCallback(
+    (message: string) => {
+      clearVaultCache();
+      forgetClipboardTimer();
+      setSelected(null);
+      toast(message);
+      navigate({ to: "/" });
+    },
+    [clearVaultCache, navigate],
+  );
+
   const lockVault = React.useCallback(() => {
-    // Order matters: the Rust core zeroizes its keys first, then we drop the
-    // cached records so nothing decrypted survives in the query cache, then we
-    // leave the screen. Navigating first would briefly render a vault view
+    // Order matters: the Rust core zeroizes its keys first, then the client
+    // side cleans up. Cleaning up first would briefly render a vault view
     // over data the core has already discarded.
     void vaultLock();
-    clearVaultCache();
-    forgetClipboardTimer();
-    setSelected(null);
-    toast("Vault locked");
-    navigate({ to: "/" });
-  }, [clearVaultCache, navigate]);
+    finishLocking("Vault locked");
+  }, [finishLocking]);
+
+  // The vault can also lock itself: idle auto-lock (src-tauri/src/autolock.rs)
+  // runs entirely in Rust and has no way to call back into React directly, so
+  // it emits this event instead. Calling `vaultLock()` again here would be
+  // harmless -- it is idempotent -- but pointless, since the backend has
+  // already locked by the time the event arrives; only the client-side
+  // cleanup is still owed.
+  React.useEffect(() => {
+    const unlisten = listen("vault-locked", () => {
+      finishLocking("Vault locked after inactivity");
+    }).catch(() => undefined);
+    return () => {
+      void unlisten.then((fn) => fn?.());
+    };
+  }, [finishLocking]);
 
   const ctx = React.useMemo(
     () => ({

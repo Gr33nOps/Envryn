@@ -29,7 +29,7 @@ Legend for the *Enforced by* column:
 | **INV-004** | No secret value is ever written to disk outside the encrypted database or an encrypted backup. | A, S |
 | **INV-005** | Locking the vault zeroizes the VMK, all derived subkeys, and the in-memory plaintext index. | A |
 | **INV-006** | A wrong master password yields an authentication failure, never a partial unlock or a distinguishable error. | A |
-| **INV-007** | Platform authentication (Windows Hello / Android biometric) is an **additional** wrapper over the same VMK, never a bypass of it. Removing the platform credential never destroys vault access. | A |
+| **INV-007** | Platform authentication (DPAPI on Windows; Android biometric not yet implemented) is an **additional** wrapper over the same VMK, never a bypass of it. Removing the platform credential never destroys vault access. | A — `platform_protection_does_not_disturb_the_password_slot` and `disabling_platform_protection_preserves_password_unlock` in `crates/envryn-core/tests/vault_lifecycle.rs` |
 | **INV-008** | Every ciphertext is authenticated. Envryn never decrypts without verifying the AEAD tag. | T |
 | **INV-009** | Record ciphertext is bound to its row via AAD. A ciphertext moved between rows fails authentication. | A |
 | **INV-010** | Envryn makes **no** outbound network connection except (a) explicit user-initiated model download, and (b) LAN sync with an already-paired device. | A, S |

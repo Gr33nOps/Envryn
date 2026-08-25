@@ -7,11 +7,22 @@
 //! Rules for anything added here:
 //!
 //! * No command returns a key, a KDF parameter, or a wrapped blob.
-//! * No command takes a filesystem path from the caller. The vault location is
-//!   decided by the Rust side, so a compromised webview cannot redirect reads
-//!   or writes elsewhere.
+//! * No command takes a filesystem path that redirects *the vault's own*
+//!   storage location -- that is always derived from the OS app-data
+//!   directory, never supplied by the caller, so a compromised webview cannot
+//!   redirect vault reads or writes elsewhere. `backup_create` and
+//!   `backup_restore` are the one place a path *does* cross this boundary,
+//!   and it names a destination or source for an explicit user-chosen
+//!   export/import file, not the vault -- the same distinction a native
+//!   "save as" dialog would draw.
 //! * Errors returned to the UI carry no detail that distinguishes "no vault"
 //!   from "wrong password" (INV-006).
+//! * There is no bulk reveal: `secret_list` returns summaries that cannot
+//!   hold a value, and `secret_reveal` is single-record. `backup_create` is
+//!   the one deliberate exception -- a backup is a bulk export by definition
+//!   -- and it grants no capability an attacker with unlock access does not
+//!   already have via repeated `secret_reveal` calls; see
+//!   `envryn_core::vault::Vault::export_all`.
 
 use std::sync::Mutex;
 
@@ -21,6 +32,8 @@ use envryn_core::{crypto::kdf, Error};
 use serde::Serialize;
 use tauri::{Manager, State};
 use zeroize::Zeroizing;
+
+use crate::settings;
 
 /// Error shape crossing to the UI.
 ///
@@ -44,6 +57,7 @@ impl From<Error> for IpcError {
             Error::InvalidInput(_) => "invalid_input",
             Error::UnsupportedVersion { .. } => "unsupported_version",
             Error::DecryptionFailed => "decryption_failed",
+            Error::PlatformUnavailable => "platform_unavailable",
             _ => "internal",
         };
         Self {
@@ -55,6 +69,20 @@ impl From<Error> for IpcError {
 
 type IpcResult<T> = std::result::Result<T, IpcError>;
 
+fn internal(message: &str) -> IpcError {
+    IpcError {
+        code: "internal",
+        message: message.to_string(),
+    }
+}
+
+fn invalid(message: &str) -> IpcError {
+    IpcError {
+        code: "invalid_input",
+        message: message.to_string(),
+    }
+}
+
 /// Vault state, guarded so concurrent commands cannot observe a half-unlocked
 /// vault. A poisoned lock is treated as locked rather than unwrapped: losing
 /// access is recoverable, continuing with unknown state is not.
@@ -63,28 +91,35 @@ pub struct VaultState(pub Mutex<Option<Vault>>);
 
 impl VaultState {
     fn with<T>(&self, f: impl FnOnce(&mut Vault) -> Result<T, Error>) -> IpcResult<T> {
-        let mut guard = self.0.lock().map_err(|_| IpcError {
-            code: "internal",
-            message: "vault state unavailable".into(),
-        })?;
+        let mut guard = self
+            .0
+            .lock()
+            .map_err(|_| internal("vault state unavailable"))?;
         let vault = guard.as_mut().ok_or(Error::Locked)?;
         Ok(f(vault)?)
+    }
+
+    fn install(&self, vault: Vault) -> IpcResult<()> {
+        let mut guard = self
+            .0
+            .lock()
+            .map_err(|_| internal("vault state unavailable"))?;
+        *guard = Some(vault);
+        Ok(())
     }
 }
 
 /// Where the vault file lives.
 ///
 /// Derived from the OS app-data directory, never supplied by the caller. This
-/// is why no IPC command accepts a path.
+/// is why no IPC command accepts a path for this -- see the module docs.
 fn vault_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, IpcError> {
-    let dir = app.path().app_data_dir().map_err(|_| IpcError {
-        code: "internal",
-        message: "could not locate the application data directory".into(),
-    })?;
-    std::fs::create_dir_all(&dir).map_err(|_| IpcError {
-        code: "internal",
-        message: "could not create the application data directory".into(),
-    })?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| internal("could not locate the application data directory"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|_| internal("could not create the application data directory"))?;
     Ok(dir.join("envryn.db"))
 }
 
@@ -92,19 +127,35 @@ fn vault_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, IpcError> {
 pub struct VaultStatus {
     pub exists: bool,
     pub unlocked: bool,
+    /// Whether this OS build supports a platform key at all -- used to decide
+    /// whether the settings UI offers the option.
+    pub platform_protection_available: bool,
+    /// Whether *this* vault currently has the platform slot set up. Readable
+    /// while locked, since it decides whether the unlock screen should offer
+    /// "unlock with this Windows account" before anything has been typed.
+    pub platform_protection_enabled: bool,
 }
 
 #[tauri::command]
 pub fn vault_status(app: tauri::AppHandle, state: State<'_, VaultState>) -> IpcResult<VaultStatus> {
     let path = vault_path(&app)?;
+    let exists = path.exists();
     let unlocked = state
         .0
         .lock()
-        .map(|g| g.as_ref().is_some_and(|v| v.is_unlocked()))
+        .map(|g| g.as_ref().is_some_and(Vault::is_unlocked))
         .unwrap_or(false);
+
+    let platform_protection_enabled = exists
+        && Vault::open(&path)
+            .and_then(|v| v.platform_protection_enabled())
+            .unwrap_or(false);
+
     Ok(VaultStatus {
-        exists: path.exists(),
+        exists,
         unlocked,
+        platform_protection_available: envryn_core::platform::dpapi_available(),
+        platform_protection_enabled,
     })
 }
 
@@ -119,10 +170,9 @@ pub fn vault_create(
     let password = Zeroizing::new(password);
 
     if password.len() < 8 {
-        return Err(IpcError {
-            code: "invalid_input",
-            message: "Your master password must be at least 8 characters.".into(),
-        });
+        return Err(invalid(
+            "Your master password must be at least 8 characters.",
+        ));
     }
 
     let path = vault_path(&app)?;
@@ -130,13 +180,7 @@ pub fn vault_create(
     // budget phone without either becoming unusable.
     let params = kdf::calibrate(700);
     let vault = Vault::create(&path, &password, params)?;
-
-    let mut guard = state.0.lock().map_err(|_| IpcError {
-        code: "internal",
-        message: "vault state unavailable".into(),
-    })?;
-    *guard = Some(vault);
-    Ok(())
+    state.install(vault)
 }
 
 #[tauri::command]
@@ -150,13 +194,20 @@ pub fn vault_unlock(
 
     let mut vault = Vault::open(&path)?;
     vault.unlock(&password)?;
+    state.install(vault)
+}
 
-    let mut guard = state.0.lock().map_err(|_| IpcError {
-        code: "internal",
-        message: "vault state unavailable".into(),
-    })?;
-    *guard = Some(vault);
-    Ok(())
+/// Unlock using the platform slot instead of the master password. Only
+/// reachable when `vault_status` already reported the slot enabled.
+#[tauri::command]
+pub fn vault_unlock_with_platform(
+    app: tauri::AppHandle,
+    state: State<'_, VaultState>,
+) -> IpcResult<()> {
+    let path = vault_path(&app)?;
+    let mut vault = Vault::open(&path)?;
+    vault.unlock_with_platform()?;
+    state.install(vault)
 }
 
 /// Lock the vault. Infallible from the UI's point of view: a lock request must
@@ -169,6 +220,46 @@ pub fn vault_lock(state: State<'_, VaultState>) {
         }
         *guard = None;
     }
+}
+
+/// Enable the platform slot: unlock without the master password, tied to the
+/// current Windows user account. Requires the current master password again
+/// -- enabling an alternate route into the vault deserves the same friction
+/// as changing the primary one.
+#[tauri::command]
+pub fn vault_enable_platform_protection(
+    state: State<'_, VaultState>,
+    password: String,
+) -> IpcResult<()> {
+    let password = Zeroizing::new(password);
+    state.with(|v| v.enable_platform_protection(&password))
+}
+
+/// Disable the platform slot. Never touches the password slot, so this can
+/// never be the operation that locks someone out (INV-007).
+#[tauri::command]
+pub fn vault_disable_platform_protection(state: State<'_, VaultState>) -> IpcResult<()> {
+    state.with(Vault::disable_platform_protection)
+}
+
+/// Change the master password. Requires the current one; see
+/// `Vault::change_password` for why this rewraps the VMK rather than
+/// re-encrypting every record.
+#[tauri::command]
+pub fn vault_change_password(
+    state: State<'_, VaultState>,
+    current_password: String,
+    new_password: String,
+) -> IpcResult<()> {
+    let new_password = Zeroizing::new(new_password);
+    if new_password.len() < 8 {
+        return Err(invalid(
+            "Your new master password must be at least 8 characters.",
+        ));
+    }
+    let current_password = Zeroizing::new(current_password);
+    let params = kdf::calibrate(700);
+    state.with(|v| v.change_password(&current_password, &new_password, params))
 }
 
 /// List records as summaries.
@@ -225,4 +316,117 @@ pub fn secret_duplicates(state: State<'_, VaultState>, id: String) -> IpcResult<
             .map(|i| i.to_string())
             .collect())
     })
+}
+
+/// Copy a value to the clipboard, tagged to skip clipboard history and cloud
+/// sync, and scheduled to clear itself after the configured delay.
+///
+/// The value crosses the IPC boundary once, here, and is never returned to
+/// the UI again -- the caller already has it (this is always called
+/// immediately after a `secret_reveal`), so there is nothing to hand back.
+#[tauri::command]
+pub fn clipboard_copy(app: tauri::AppHandle, value: String) -> IpcResult<()> {
+    envryn_core::platform::set_clipboard_text_excluded(&value)?;
+
+    let clear_after =
+        std::time::Duration::from_secs(u64::from(settings::load(&app).clipboard_clear_seconds));
+
+    // Fire-and-forget: the command returns immediately, and a failure to
+    // clear later has no meaningful way to report back to a call that has
+    // already completed.
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(clear_after).await;
+        // Only clear if the clipboard still holds exactly what we put there
+        // -- otherwise this would destroy something the user copied since.
+        if let Ok(Some(current)) = envryn_core::platform::read_clipboard_text() {
+            if current == value {
+                let _ = envryn_core::platform::clear_clipboard();
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+pub struct RestoreSummary {
+    pub restored: usize,
+}
+
+/// Write an encrypted backup of every record to `path`.
+///
+/// `path` is a user-chosen export destination, not the vault's own storage
+/// location -- see the module docs' note on this being the one deliberate
+/// exception to "no path from the caller."
+#[tauri::command]
+pub fn backup_create(
+    state: State<'_, VaultState>,
+    path: String,
+    password: String,
+) -> IpcResult<()> {
+    if path.trim().is_empty() {
+        return Err(invalid("Choose a location to save the backup."));
+    }
+    let password = Zeroizing::new(password);
+    if password.len() < 8 {
+        return Err(invalid(
+            "Your backup password must be at least 8 characters.",
+        ));
+    }
+    let records = state.with(|v| v.export_all())?;
+    let file = envryn_core::backup::create(&records, &password)?;
+    std::fs::write(&path, file)
+        .map_err(|_| internal("Could not write the backup file. Check the location and try again."))
+}
+
+/// Restore a backup, replacing the current vault.
+///
+/// The existing vault file (and its WAL/SHM sidecars, if present) is renamed
+/// aside with a timestamp rather than deleted, so a mistaken restore is still
+/// recoverable. Restoring always sets a *new* master password -- see
+/// `envryn_core::backup` for why a backup never carries the original one.
+#[tauri::command]
+pub fn backup_restore(
+    app: tauri::AppHandle,
+    state: State<'_, VaultState>,
+    path: String,
+    backup_password: String,
+    new_master_password: String,
+) -> IpcResult<RestoreSummary> {
+    let new_master_password = Zeroizing::new(new_master_password);
+    if new_master_password.len() < 8 {
+        return Err(invalid(
+            "Your new master password must be at least 8 characters.",
+        ));
+    }
+
+    let bytes = std::fs::read(&path).map_err(|_| invalid("Could not read that backup file."))?;
+    let backup_password = Zeroizing::new(backup_password);
+    let records = envryn_core::backup::restore(&bytes, &backup_password)?;
+
+    let vault_path = vault_path(&app)?;
+    if vault_path.exists() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        for suffix in ["", "-wal", "-shm"] {
+            let src = vault_path.with_file_name(format!("envryn.db{suffix}"));
+            if src.exists() {
+                let dst =
+                    vault_path.with_file_name(format!("envryn.db{suffix}.pre-restore-{stamp}"));
+                let _ = std::fs::rename(&src, &dst);
+            }
+        }
+    }
+
+    let params = kdf::calibrate(700);
+    let mut vault = Vault::create(&vault_path, &new_master_password, params)?;
+    for record in &records {
+        vault.import_record(record.clone())?;
+    }
+
+    let restored = records.len();
+    state.install(vault)?;
+    Ok(RestoreSummary { restored })
 }

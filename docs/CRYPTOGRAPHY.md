@@ -90,18 +90,29 @@ under a password-derived key:
 
 Both slots wrap the **same** VMK. Adding or removing a slot never re-encrypts records, and
 never invalidates the other slot — hence INV-007: losing your fingerprint sensor does not
-lose your vault.
+lose your vault. **Implemented and tested** (`crates/envryn-core/src/vault.rs`,
+`enable_platform_protection` / `disable_platform_protection` / `unlock_with_platform`); the
+Android row below is not.
 
 **Platform key details**
 
-- *Windows*: DPAPI (`CryptProtectData`, user scope, `CRYPTPROTECT_LOCAL_MACHINE` **off**)
-  for the at-rest case; Windows Hello via `KeyCredentialManager` where a user gesture is
-  required. DPAPI alone is not a user-presence check — it protects against another user
-  account on the machine, not against malware running as this user. Documented, not overstated.
-- *Android*: an AES key in the Android Keystore created with
+- *Windows, implemented*: DPAPI (`CryptProtectData`/`CryptUnprotectData`, user scope,
+  `CRYPTPROTECT_UI_FORBIDDEN`) protects a freshly generated 32-byte random key — never the VMK
+  directly. That recovered key is then used as an ordinary wrapping key through the same AEAD
+  path every other slot uses (`crypto::keys::VaultMasterKey::wrap`/`unwrap_from`), so DPAPI's
+  only job is protecting 32 bytes of random material, and a bug in the platform layer cannot
+  produce a different code path for unwrapping the VMK itself.
+
+  DPAPI alone is not a user-presence check — it protects against another Windows user account
+  on the machine, not against malware running as this one. The UI accordingly says "Unlock
+  with this Windows account," never "Windows Hello": true Windows Hello (`KeyCredentialManager`,
+  a biometric-gated NCrypt/CNG key) is a different, larger API surface and remains unimplemented.
+  See `docs/ARCHITECTURE.md` section 7.
+
+- *Android, not implemented*: planned as an AES key in the Android Keystore created with
   `setUserAuthenticationRequired(true)`, and `setIsStrongBoxBacked(true)` where StrongBox
-  is available. Key invalidation on biometric enrolment change is **expected behaviour**:
-  the platform slot dies, the password slot survives.
+  is available. Key invalidation on biometric enrolment change would be **expected behaviour**
+  under that design: the platform slot dies, the password slot survives.
 
 ---
 
@@ -247,14 +258,16 @@ who substituted either identity produces a different SAS and the user sees a mis
 
 ## 8. Backup format
 
-Backups are independently encrypted — a backup file must be restorable on a device that has
-never been paired, using only the backup password.
+**Implemented** (`crates/envryn-core/src/backup.rs`). Backups are independently encrypted — a
+backup file is restorable using only the backup password, and does not depend on the source
+vault's VMK, master password, or device identity in any way.
 
 ```
 header (plaintext, authenticated as AAD):
     magic  "ENVRYNBK"
     format_version (u16)
-    kdf params (algorithm, m, t, p, salt)
+    kdf params (memory_kib, iterations, parallelism)
+    salt (16 bytes)
 body:
     XChaCha20-Poly1305( HKDF(Argon2id(backup_password, salt), "envryn/v1/backup") )
 ```
@@ -263,10 +276,22 @@ The header is authenticated but not encrypted, so a future version can read the 
 of an older backup without guessing. `format_version` is checked before anything else; an
 unknown version is a clean refusal, never a best-effort parse.
 
-The backup password is **independent** of the vault master password by default. Reusing the
-vault password is offered but not assumed.
+The backup password is **independent** of the vault master password; Envryn does not currently
+offer to reuse it, since the two are asked for in different flows (vault creation vs. backup
+creation) and conflating them would blur what "changing your master password" is supposed to mean.
 
-Backups contain vault data and AI *preferences*. They never contain model binaries (spec section 19).
+**Restoring is data-only, by design.** The body decrypts to a plain list of full records. Restoring
+always creates a *new* vault, with a master password chosen at restore time, and re-encrypts
+every record under that vault's own fresh VMK — a backup file never carries any of the source
+vault's key material, and restoring one can never result in two live vault files silently
+sharing a VMK. This is a deliberate simplification over "restore this exact vault byte-for-byte":
+multi-device continuity is what device pairing (Phase 2) is for; a backup's job is disaster
+recovery of data, not vault identity. The desktop app currently supports exactly one vault, so
+in practice "restore" replaces it — the existing vault file (and its WAL/SHM sidecars) is renamed
+aside with a timestamp first, never deleted, so a mistaken restore stays recoverable.
+
+Backups contain vault data only. AI preferences do not exist yet (Phase 3); model binaries are
+never included regardless (spec section 19).
 
 ---
 

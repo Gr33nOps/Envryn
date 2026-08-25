@@ -3,7 +3,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, KeyRound, ShieldCheck } from "lucide-react";
 import { Button, IconButton, Input } from "@/components/envryn/ui";
 import { LogoMark } from "@/components/envryn/Logo";
-import { IpcError, vaultCreate, vaultStatus, vaultUnlock } from "@/lib/ipc";
+import {
+  IpcError,
+  vaultCreate,
+  vaultStatus,
+  vaultUnlock,
+  vaultUnlockWithPlatform,
+} from "@/lib/ipc";
 
 export const Route = createFileRoute("/")({
   component: Unlock,
@@ -20,12 +26,16 @@ function Unlock() {
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(false);
+  const [platformUnlock, setPlatformUnlock] = React.useState(false);
+  const [platformLoading, setPlatformLoading] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
     vaultStatus()
       .then((status) => {
-        if (!cancelled) setMode(status.exists ? "unlock" : "create");
+        if (cancelled) return;
+        setMode(status.exists ? "unlock" : "create");
+        setPlatformUnlock(status.platform_protection_enabled);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -36,6 +46,23 @@ function Unlock() {
       cancelled = true;
     };
   }, []);
+
+  async function unlockWithPlatform() {
+    setError(null);
+    setPlatformLoading(true);
+    try {
+      await vaultUnlockWithPlatform();
+      await navigate({ to: "/vault" });
+    } catch (err) {
+      setError(
+        err instanceof IpcError
+          ? "That did not work. Try your master password instead."
+          : "Something went wrong. Your vault is unaffected.",
+      );
+    } finally {
+      setPlatformLoading(false);
+    }
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -155,6 +182,18 @@ function Unlock() {
             >
               {creating ? "Create vault" : "Unlock vault"}
             </Button>
+
+            {platformUnlock && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="block"
+                loading={platformLoading}
+                onClick={() => void unlockWithPlatform()}
+              >
+                Unlock with this Windows account
+              </Button>
+            )}
           </div>
         </div>
 

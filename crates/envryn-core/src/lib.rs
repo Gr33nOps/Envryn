@@ -18,9 +18,11 @@
 //! and of any network client, so that it can be tested as a plain library and
 //! so that the dependency graph itself enforces INV-010.
 
+pub mod backup;
 pub mod crypto;
 pub mod error;
 pub mod model;
+pub mod platform;
 pub mod storage;
 pub mod vault;
 
