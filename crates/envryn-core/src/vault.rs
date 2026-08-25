@@ -26,6 +26,14 @@ use crate::storage::{meta_keys, Hlc, Store, StoredRecord, RECORD_VERSION};
 
 pub const CRYPTO_VERSION: u32 = 1;
 
+/// The decrypted losing side of a genuine concurrent edit (INV-109), paired
+/// with the id needed to act on it -- see [`Vault::list_conflicts`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConflictSummary {
+    pub conflict_id: String,
+    pub record: SecretRecord,
+}
+
 /// Keys and decrypted records held only while unlocked.
 struct UnlockedState {
     keys: VaultKeys,
@@ -305,6 +313,63 @@ impl Vault {
             .into_iter()
             .filter(|other| *other != id)
             .collect())
+    }
+
+    /// Preserved conflicts for one record (INV-109), decrypted for review.
+    /// The live value (what `list`/`reveal` show) already reflects whichever
+    /// side won the original Hlc tiebreak; these are the side(s) that lost,
+    /// kept rather than silently discarded.
+    pub fn list_conflicts(&self, id: SecretId) -> Result<Vec<ConflictSummary>> {
+        let state = self.state()?;
+        self.store
+            .list_conflicts(id)?
+            .into_iter()
+            .map(|c| {
+                Ok(ConflictSummary {
+                    conflict_id: c.conflict_id,
+                    record: open_record(&c.record, &state.keys.record)?,
+                })
+            })
+            .collect()
+    }
+
+    /// Total preserved conflicts across the vault, for a summary badge.
+    pub fn count_conflicts(&self) -> Result<i64> {
+        self.store.count_conflicts()
+    }
+
+    /// Keep a preserved conflict as a brand-new record -- its own id, its own
+    /// HLC -- rather than merging it back into the record that won the
+    /// original conflict. Once a user decides "I want to keep both edits,"
+    /// the two are no longer the same record: they can now evolve
+    /// independently, which a fresh id makes possible.
+    pub fn recover_conflict(&mut self, conflict_id: &str) -> Result<SecretSummary> {
+        let record = {
+            let state = self.state()?;
+            let losing = self
+                .store
+                .get_conflict(conflict_id)?
+                .ok_or(Error::NotFound)?;
+            open_record(&losing.record, &state.keys.record)?
+        };
+        self.store.delete_conflict(conflict_id)?;
+        self.create_secret(NewSecret {
+            name: record.name,
+            project: record.project,
+            environment: record.environment,
+            payload: record.payload,
+            notes: record.notes,
+            tags: record.tags,
+            provider: record.provider,
+        })
+    }
+
+    /// Discard a preserved conflict without keeping it as a record -- the
+    /// user reviewed it and decided the value that won the original tiebreak
+    /// is the one they want.
+    pub fn discard_conflict(&mut self, conflict_id: &str) -> Result<()> {
+        self.store.delete_conflict(conflict_id)?;
+        Ok(())
     }
 
     // --- writes -------------------------------------------------------------
@@ -761,6 +826,9 @@ fn seal_record(record: &SecretRecord, keys: &VaultKeys, hlc: Hlc) -> Result<Stor
         created_ms: record.created_ms,
         hlc,
         deleted: false,
+        // Ignored by `Store::insert`/`update` (see `StoredRecord`'s doc
+        // comment) -- those methods derive the real vector themselves.
+        version_vector: crate::storage::VersionVector::new(),
     })
 }
 

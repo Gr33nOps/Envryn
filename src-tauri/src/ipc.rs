@@ -179,7 +179,8 @@ pub fn vault_create(
     // Calibrated per device, so a fast desktop gets stronger parameters than a
     // budget phone without either becoming unusable.
     let params = kdf::calibrate(700);
-    let vault = Vault::create(&path, &password, params)?;
+    let mut vault = Vault::create(&path, &password, params)?;
+    vault.set_local_device_id(crate::sync::local_device_id(&app)?)?;
     state.install(vault)
 }
 
@@ -194,6 +195,7 @@ pub fn vault_unlock(
 
     let mut vault = Vault::open(&path)?;
     vault.unlock(&password)?;
+    vault.set_local_device_id(crate::sync::local_device_id(&app)?)?;
     state.install(vault)
 }
 
@@ -207,6 +209,7 @@ pub fn vault_unlock_with_platform(
     let path = vault_path(&app)?;
     let mut vault = Vault::open(&path)?;
     vault.unlock_with_platform()?;
+    vault.set_local_device_id(crate::sync::local_device_id(&app)?)?;
     state.install(vault)
 }
 
@@ -320,6 +323,41 @@ pub fn secret_duplicates(state: State<'_, VaultState>, id: String) -> IpcResult<
             .map(|i| i.to_string())
             .collect())
     })
+}
+
+/// Preserved sync conflicts for one record (INV-109) -- the losing side(s)
+/// of a genuine concurrent edit, kept rather than silently discarded. The
+/// live value returned by `secret_reveal`/`secret_list` already reflects
+/// whichever side won the original tiebreak.
+#[tauri::command]
+pub fn secret_conflicts(
+    state: State<'_, VaultState>,
+    id: String,
+) -> IpcResult<Vec<envryn_core::vault::ConflictSummary>> {
+    let id = SecretId::parse(&id)?;
+    state.with(|v| v.list_conflicts(id))
+}
+
+/// Total preserved conflicts across the vault, for a summary badge.
+#[tauri::command]
+pub fn conflict_count(state: State<'_, VaultState>) -> IpcResult<i64> {
+    state.with(|v| v.count_conflicts())
+}
+
+/// Keep a preserved conflict as a brand-new record.
+#[tauri::command]
+pub fn conflict_recover(
+    state: State<'_, VaultState>,
+    conflict_id: String,
+) -> IpcResult<SecretSummary> {
+    state.with(|v| v.recover_conflict(&conflict_id))
+}
+
+/// Discard a preserved conflict -- the user reviewed it and does not want to
+/// keep the losing side.
+#[tauri::command]
+pub fn conflict_discard(state: State<'_, VaultState>, conflict_id: String) -> IpcResult<()> {
+    state.with(|v| v.discard_conflict(&conflict_id))
 }
 
 /// Copy a value to the clipboard, tagged to skip clipboard history and cloud

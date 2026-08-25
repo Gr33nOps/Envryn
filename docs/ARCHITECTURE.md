@@ -138,18 +138,20 @@ the form.
 ### Hybrid logical clocks
 
 **Implemented and tested** — `storage::Hlc` (`crates/envryn-core/src/storage/hlc.rs`). Every
-mutable row carries `(wall_ms, counter, device_id)`. Sync resolves last-writer-wins by HLC
-with device id as a deterministic tiebreak. Wall-clock alone is unusable — phone and desktop
-clocks disagree, and a clock that jumps backwards would silently lose edits; `Hlc::tick`
-guarantees monotonicity even when the wall clock itself moves backwards.
+mutable row carries `(wall_ms, counter, device_id)`. Wall-clock alone is unusable — phone and
+desktop clocks disagree, and a clock that jumps backwards would silently lose edits; `Hlc::tick`
+guarantees monotonicity even when the wall clock itself moves backwards. Conflict *detection*
+(as opposed to the deterministic-winner tiebreak) is decided by a per-record `VersionVector`
+(`storage::version_vector`), not the scalar Hlc alone — see `CRYPTOGRAPHY.md` section 8 for why a
+scalar comparison cannot tell "the peer was simply behind" apart from "a genuine fork," and for
+how `record_conflicts` now preserves the losing side instead of discarding it (`THREAT_MODEL.md`
+S-09, `SECURITY_INVARIANTS.md` INV-109 — both now implemented).
 
 Deletions are tombstones (a `deleted` flag; content cleared, row kept), not immediate row
 removal — a deletion racing a sync cannot be resurrected by a concurrent edit, since the
-delete's HLC is compared like any other write. **No retention window is implemented**:
-tombstone rows persist indefinitely rather than being purged after a bounded period. See
-`CRYPTOGRAPHY.md` section 8 for the full picture, including the honestly-unresolved gap this
-scheme has today: pure LWW discards the losing side of a genuine concurrent edit rather than
-preserving it (`THREAT_MODEL.md` S-09, `SECURITY_INVARIANTS.md` INV-109).
+delete's HLC (and its version vector) advance like any other write. **No retention window is
+implemented**: tombstone rows persist indefinitely rather than being purged after a bounded
+period.
 
 ---
 

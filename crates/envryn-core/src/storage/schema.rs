@@ -22,7 +22,7 @@ use crate::error::{Error, Result};
 /// Bump only alongside a migration. A vault whose schema is newer than the
 /// running build is refused rather than opened optimistically -- see
 /// docs/CRYPTOGRAPHY.md section 10.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Record format version, embedded in each record's AAD so a ciphertext
 /// cannot be rolled back to an earlier format undetected.
@@ -50,6 +50,9 @@ pub fn initialise(conn: &Connection) -> Result<()> {
     }
     if current < 2 {
         migrate_to_v2(conn)?;
+    }
+    if current < 3 {
+        migrate_to_v3(conn)?;
     }
 
     Ok(())
@@ -120,6 +123,46 @@ fn migrate_to_v2(conn: &Connection) -> Result<()> {
              ON trusted_devices(fingerprint);
 
          PRAGMA user_version = 2;
+         COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn migrate_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "BEGIN;
+
+         -- Per-record causal history (storage::version_vector::VersionVector,
+         -- JSON-encoded), used only to tell a genuine concurrent edit apart
+         -- from a peer that was simply behind -- see
+         -- storage::Store::upsert_from_sync. Not a secret: it reveals exactly
+         -- the same shape of information hlc_counter/hlc_device/updated_ms
+         -- already do in plaintext (which devices touched this record, and
+         -- when), just per contributing device instead of only the latest.
+         ALTER TABLE secrets ADD COLUMN version_vector TEXT NOT NULL DEFAULT '{}';
+
+         -- The losing side of a genuine concurrent edit (INV-109). Opaque
+         -- like `secrets`: nothing human-meaningful outside `sealed`.
+         -- Populated only when `upsert_from_sync` detects two branches that
+         -- neither vector dominates; the winner (by Hlc tiebreak) becomes the
+         -- live `secrets` row, and the loser lands here instead of being
+         -- silently discarded.
+         CREATE TABLE record_conflicts (
+             id             TEXT PRIMARY KEY NOT NULL,
+             secret_id      TEXT NOT NULL,
+             record_version INTEGER NOT NULL,
+             sealed         BLOB NOT NULL,
+             fingerprint    BLOB,
+             hlc_wall_ms    INTEGER NOT NULL,
+             hlc_counter    INTEGER NOT NULL,
+             hlc_device     TEXT NOT NULL,
+             deleted        INTEGER NOT NULL DEFAULT 0,
+             created_ms     INTEGER NOT NULL
+         );
+
+         CREATE INDEX idx_record_conflicts_secret ON record_conflicts(secret_id);
+
+         PRAGMA user_version = 3;
          COMMIT;",
     )?;
     Ok(())
@@ -204,6 +247,7 @@ mod tests {
             "hlc_counter",
             "hlc_device",
             "deleted",
+            "version_vector",
         ];
         for col in &cols {
             assert!(
@@ -211,6 +255,69 @@ mod tests {
                 "unexpected column `{col}` in secrets -- metadata belongs inside the sealed blob"
             );
         }
+    }
+
+    /// Same rule as `secrets`: the losing side of a conflict is opaque too.
+    #[test]
+    fn record_conflicts_exposes_no_plaintext_metadata() {
+        let c = conn();
+        let mut stmt = c.prepare("PRAGMA table_info(record_conflicts)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let permitted = [
+            "id",
+            "secret_id",
+            "record_version",
+            "sealed",
+            "fingerprint",
+            "hlc_wall_ms",
+            "hlc_counter",
+            "hlc_device",
+            "deleted",
+            "created_ms",
+        ];
+        for col in &cols {
+            assert!(
+                permitted.contains(&col.as_str()),
+                "unexpected column `{col}` in record_conflicts -- metadata belongs inside the sealed blob"
+            );
+        }
+    }
+
+    /// A v2 database (pre-conflict-tracking) must migrate forward cleanly,
+    /// not just a fresh-created one -- the actual upgrade path a real user's
+    /// existing vault would go through.
+    #[test]
+    fn a_v2_database_migrates_to_v3_cleanly() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("PRAGMA journal_mode = WAL;").unwrap();
+        migrate_to_v1(&c).unwrap();
+        migrate_to_v2(&c).unwrap();
+        initialise(&c).unwrap();
+
+        let v: i64 = c
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+
+        c.execute(
+            "INSERT INTO secrets (id, record_version, sealed, created_ms, updated_ms) \
+             VALUES ('x', 1, X'00', 0, 0)",
+            [],
+        )
+        .unwrap();
+        let vector: String = c
+            .query_row(
+                "SELECT version_vector FROM secrets WHERE id = 'x'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(vector, "{}");
     }
 
     /// `trusted_devices` may expose `fingerprint` (not a secret -- see the

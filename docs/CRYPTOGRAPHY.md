@@ -300,20 +300,32 @@ rather than by CI.
 ciphertext wins when two devices disagree, which is why it lives in this document rather than
 `ARCHITECTURE.md`.
 
-Every write is stamped with a **hybrid logical clock**: `(wall_ms, counter, device_id)`. Two
-peers exchange a manifest of `(id, hlc, deleted)` for every record, request only the ids where
-the peer's HLC is strictly newer than their own (or the record is unknown locally), and apply
-the transferred records with a plain `Ord` comparison on the HLC tuple — last-writer-wins,
-with `device_id` as a deterministic tiebreak on an exact `(wall_ms, counter)` tie so every peer
-resolves a tie the same way rather than by connection order.
+Every write is stamped with a **hybrid logical clock**: `(wall_ms, counter, device_id)`, used as
+the deterministic tiebreak once a conflict is already known to exist. But the actual "is this a
+conflict at all" decision (as of the sync-hardening pass that closed this gap) is made by a
+per-record **[`storage::VersionVector`]** — a small map of `device_id -> the newest Hlc that
+device has contributed to this record` — not the scalar Hlc alone. Two peers exchange a manifest
+of `(id, hlc, version_vector, deleted)` for every record, request an id whenever their own vector
+does not already dominate the peer's (i.e. the peer might know something they don't — either
+because they are strictly ahead, or because of a genuine fork), and apply an incoming record by
+comparing vectors:
 
-**Known gap, stated plainly.** This is *pure* LWW: the losing write is discarded, not
-retained anywhere. A plain HLC comparison cannot tell "the peer was simply behind" apart from
-"both devices genuinely edited this record since they last synced" without extra version
-bookkeeping (keeping prior sealed blobs, or a three-way merge base) — that bookkeeping was not
-built in this pass. See `THREAT_MODEL.md` S-09 and `SECURITY_INVARIANTS.md` INV-109, which is
-marked **not implemented** rather than claimed satisfied. Records travel still encrypted
-throughout: `sync::protocol`'s wire types carry only the opaque `sealed` blob, never plaintext.
+- **Peer's vector is dominated by ours:** stale, discarded (`SyncOutcome::Stale`).
+- **Peer's vector dominates ours:** a clean fast-forward, applied directly (`SyncOutcome::FastForward`
+  or `SyncOutcome::New`).
+- **Neither dominates:** a genuine concurrent edit. The scalar Hlc picks the deterministic
+  winner (this is the *only* thing the scalar clock still decides), which becomes the live row —
+  but the losing side is inserted into a new `record_conflicts` table rather than discarded
+  (`SyncOutcome::Conflict`). `Vault::list_conflicts`/`recover_conflict`/`discard_conflict` let the
+  user review, keep as a new record, or drop it.
+
+This closes the gap `THREAT_MODEL.md` S-09 and `SECURITY_INVARIANTS.md` INV-109 previously
+tracked as **not implemented** -- both are now marked implemented, with a real end-to-end test
+(`sync::protocol::tests::two_devices_editing_the_same_record_offline_produce_a_recoverable_conflict`)
+that edits the same record on two real, previously-paired vaults while genuinely disconnected,
+syncs them over real loopback mutual TLS, and confirms the fork is detected and the losing edit
+survives. Records still travel encrypted throughout: `sync::protocol`'s wire types carry only the
+opaque `sealed` blob (plus the small, non-secret vector-clock metadata), never plaintext.
 
 Deletions are tombstones (a `deleted` flag; the sealed content is cleared but the row stays)
 rather than row removal, and a delete's HLC is compared like any other write — so a concurrent

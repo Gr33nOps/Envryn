@@ -68,6 +68,20 @@ fn load_identity(app: &AppHandle) -> IpcResult<DeviceIdentity> {
     Ok(DeviceIdentity::load_or_create(&path)?)
 }
 
+/// The numeric id this installation stamps its own writes with, for HLC
+/// tie-breaking (`storage::Hlc::device_id_from_fingerprint_bytes`, derived
+/// from the same certificate fingerprint sync already uses to identify this
+/// device to peers). Called once, right after every unlock -- see
+/// `ipc::vault_create`/`vault_unlock`/`vault_unlock_with_platform` -- so a
+/// vault that has never synced still gets a real, stable, non-zero device id
+/// rather than defaulting to the same id every install would otherwise share.
+pub(crate) fn local_device_id(app: &AppHandle) -> IpcResult<u64> {
+    let identity = load_identity(app)?;
+    Ok(envryn_core::storage::Hlc::device_id_from_fingerprint_bytes(
+        identity.fingerprint().as_bytes(),
+    ))
+}
+
 /// Best-effort local LAN address, via the classic zero-traffic trick: a UDP
 /// "connect" only asks the OS to pick a route and does not send a packet, so
 /// this learns the interface address the OS would use without depending on
@@ -182,6 +196,10 @@ pub async fn discovery_browse(app: AppHandle) -> IpcResult<Vec<DiscoveredPeerDto
 #[derive(Serialize)]
 pub struct SyncSummary {
     pub records_applied: usize,
+    /// Genuine concurrent edits detected during this sync (INV-109) -- the
+    /// losing side of each was preserved, not discarded, but the frontend
+    /// should surface a non-zero count rather than let it pass silently.
+    pub conflicts: usize,
 }
 
 /// Connect out to a peer and run one sync session as the TLS client. The
@@ -213,9 +231,10 @@ pub async fn sync_now(
         let mut tls = rustls::Stream::new(&mut conn, &mut stream);
 
         let store = Store::open(&path).map_err(IpcError::from)?;
-        let applied = run_sync_session(&mut tls, &store).map_err(IpcError::from)?;
+        let result = run_sync_session(&mut tls, &store).map_err(IpcError::from)?;
         Ok(SyncSummary {
-            records_applied: applied,
+            records_applied: result.applied,
+            conflicts: result.conflicts,
         })
     })
     .await

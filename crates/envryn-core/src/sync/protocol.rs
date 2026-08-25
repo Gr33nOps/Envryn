@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::model::SecretId;
-use crate::storage::{Hlc, ManifestEntry, Store, StoredRecord};
+use crate::storage::{Hlc, ManifestEntry, Store, StoredRecord, VersionVector};
 
 pub(crate) const MAX_MESSAGE_LEN: u32 = 64 * 1024 * 1024; // generous; a hostile peer sending more is refused, not allocated for
 
@@ -31,6 +31,11 @@ struct WireManifestEntry {
     wall_ms: i64,
     counter: u32,
     device_id: u64,
+    /// JSON-encoded `VersionVector` -- carried so `ids_to_request` can detect
+    /// "might be a conflict, request it" rather than the coarse (and, for a
+    /// genuine fork, wrong -- see `ManifestEntry`'s doc comment)
+    /// scalar-`Hlc`-only comparison this replaced.
+    version_vector: String,
     deleted: bool,
 }
 
@@ -41,6 +46,7 @@ impl From<&ManifestEntry> for WireManifestEntry {
             wall_ms: e.hlc.wall_ms,
             counter: e.hlc.counter,
             device_id: e.hlc.device_id,
+            version_vector: e.version_vector.to_json(),
             deleted: e.deleted,
         }
     }
@@ -56,6 +62,7 @@ impl TryFrom<WireManifestEntry> for ManifestEntry {
                 counter: w.counter,
                 device_id: w.device_id,
             },
+            version_vector: VersionVector::from_json(&w.version_vector),
             deleted: w.deleted,
         })
     }
@@ -72,6 +79,7 @@ struct WireRecord {
     counter: u32,
     device_id: u64,
     deleted: bool,
+    version_vector: String,
 }
 
 impl TryFrom<&StoredRecord> for WireRecord {
@@ -87,6 +95,7 @@ impl TryFrom<&StoredRecord> for WireRecord {
             counter: r.hlc.counter,
             device_id: r.hlc.device_id,
             deleted: r.deleted,
+            version_vector: r.version_vector.to_json(),
         })
     }
 }
@@ -110,6 +119,7 @@ impl TryFrom<WireRecord> for StoredRecord {
                 device_id: w.device_id,
             },
             deleted: w.deleted,
+            version_vector: VersionVector::from_json(&w.version_vector),
         })
     }
 }
@@ -156,32 +166,49 @@ pub(crate) fn read_json<R: Read, T: for<'de> Deserialize<'de>>(stream: &mut R) -
 
 /// Given the local manifest and a peer's manifest, decide which ids the peer
 /// should send *to us* -- pure function, no I/O, fully testable without a
-/// network. We request an id if we do not have it at all, or if the peer's
-/// HLC for it is strictly newer than ours; anything else (peer is behind,
-/// or the two sides tie) we do not request, since `upsert_from_sync`'s own
-/// rule would discard it anyway -- deciding it here just avoids the transfer.
+/// network. We request an id if we do not have it at all, or if our vector
+/// does not already dominate the peer's (i.e. the peer might know something
+/// we don't -- either because they are ahead, or because of a genuine
+/// concurrent edit). A scalar-`Hlc`-only comparison would miss the second
+/// case: a concurrent edit can have an *older* wall clock than our own and
+/// still carry information `upsert_from_sync` needs to see to detect the
+/// conflict (INV-109) -- if we never request it, the conflict is invisible,
+/// not merely unresolved.
 pub fn ids_to_request(local: &[ManifestEntry], remote: &[ManifestEntry]) -> Vec<SecretId> {
     use std::collections::HashMap;
-    let local_by_id: HashMap<SecretId, Hlc> = local.iter().map(|e| (e.id, e.hlc)).collect();
+    let local_by_id: HashMap<SecretId, &crate::storage::VersionVector> =
+        local.iter().map(|e| (e.id, &e.version_vector)).collect();
 
     remote
         .iter()
         .filter(|r| {
             local_by_id
                 .get(&r.id)
-                .is_none_or(|local_hlc| r.hlc > *local_hlc)
+                .is_none_or(|local_vector| !local_vector.dominates(&r.version_vector))
         })
         .map(|r| r.id)
         .collect()
+}
+
+/// The result of one sync exchange: how many incoming records were applied
+/// (fast-forwarded or newly inserted), and how many turned out to be genuine
+/// concurrent edits (INV-109) -- the caller (`src-tauri/src/sync.rs`) surfaces
+/// `conflicts` to the user rather than letting it pass silently, since a
+/// non-zero count means something needs a look, not just "sync succeeded."
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncSessionResult {
+    pub applied: usize,
+    pub conflicts: usize,
 }
 
 /// Run one sync exchange over an already-authenticated, already-open stream.
 /// Symmetric: both peers run this same function, each acting as both sender
 /// and receiver, so there is no separate "server routine" to keep in sync
 /// with a "client routine."
-///
-/// Returns how many records were received and applied locally.
-pub fn run_sync_session<S: Read + Write>(stream: &mut S, store: &Store) -> Result<usize> {
+pub fn run_sync_session<S: Read + Write>(
+    stream: &mut S,
+    store: &Store,
+) -> Result<SyncSessionResult> {
     // 1. Exchange manifests.
     let local_manifest = store.list_manifest()?;
     write_json(
@@ -223,16 +250,23 @@ pub fn run_sync_session<S: Read + Write>(stream: &mut S, store: &Store) -> Resul
 
     // 4. Receive what we asked for, and apply it.
     let incoming: RecordsMessage = read_json(stream)?;
-    let mut applied = 0;
+    let mut result = SyncSessionResult::default();
     for wire in incoming.records {
         let record = StoredRecord::try_from(wire)?;
-        if store.upsert_from_sync(&record)? {
-            applied += 1;
+        match store.upsert_from_sync(&record)? {
+            crate::storage::SyncOutcome::New | crate::storage::SyncOutcome::FastForward => {
+                result.applied += 1;
+            }
+            crate::storage::SyncOutcome::Conflict => {
+                result.applied += 1;
+                result.conflicts += 1;
+            }
+            crate::storage::SyncOutcome::Stale => {}
         }
     }
 
     let _ = they_need; // informational; the peer decides its own requests independently
-    Ok(applied)
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -250,45 +284,55 @@ mod tests {
         let id_b = SecretId::new();
         let id_c = SecretId::new();
 
+        let local_a_hlc = Hlc {
+            wall_ms: 100,
+            counter: 0,
+            device_id: 1,
+        };
+        let local_b_hlc = Hlc {
+            wall_ms: 100,
+            counter: 0,
+            device_id: 1,
+        };
         let local = vec![
             ManifestEntry {
                 id: id_a,
-                hlc: Hlc {
-                    wall_ms: 100,
-                    counter: 0,
-                    device_id: 1,
-                },
+                hlc: local_a_hlc,
+                version_vector: VersionVector::single(local_a_hlc),
                 deleted: false,
             },
             ManifestEntry {
                 id: id_b,
-                hlc: Hlc {
-                    wall_ms: 100,
-                    counter: 0,
-                    device_id: 1,
-                },
+                hlc: local_b_hlc,
+                version_vector: VersionVector::single(local_b_hlc),
                 deleted: false,
             },
         ];
+        // a: remote's vector dominates local's (it has seen local_a_hlc plus
+        // its own newer tick) -> request.
+        let remote_a_hlc = Hlc {
+            wall_ms: 200,
+            counter: 0,
+            device_id: 2,
+        };
+        // b: remote's vector is dominated by local's (an ancestor) -> do not
+        // request.
+        let remote_b_hlc = Hlc {
+            wall_ms: 50,
+            counter: 0,
+            device_id: 1,
+        };
         let remote = vec![
-            // a: remote is newer -> request
             ManifestEntry {
                 id: id_a,
-                hlc: Hlc {
-                    wall_ms: 200,
-                    counter: 0,
-                    device_id: 2,
-                },
+                hlc: remote_a_hlc,
+                version_vector: VersionVector::single(local_a_hlc).advanced_by(remote_a_hlc),
                 deleted: false,
             },
-            // b: remote is older -> do not request
             ManifestEntry {
                 id: id_b,
-                hlc: Hlc {
-                    wall_ms: 50,
-                    counter: 0,
-                    device_id: 2,
-                },
+                hlc: remote_b_hlc,
+                version_vector: VersionVector::single(remote_b_hlc),
                 deleted: false,
             },
             // c: we don't have it at all -> request
@@ -299,6 +343,11 @@ mod tests {
                     counter: 0,
                     device_id: 2,
                 },
+                version_vector: VersionVector::single(Hlc {
+                    wall_ms: 1,
+                    counter: 0,
+                    device_id: 2,
+                }),
                 deleted: false,
             },
         ];
@@ -399,8 +448,16 @@ mod tests {
         let applied_by_b = run_sync_session(&mut tls, &store_b).unwrap();
         let applied_by_a = server_thread.join().unwrap();
 
-        assert_eq!(applied_by_a, 1, "A should have received exactly B's record");
-        assert_eq!(applied_by_b, 1, "B should have received exactly A's record");
+        assert_eq!(
+            applied_by_a.applied, 1,
+            "A should have received exactly B's record"
+        );
+        assert_eq!(
+            applied_by_b.applied, 1,
+            "B should have received exactly A's record"
+        );
+        assert_eq!(applied_by_a.conflicts, 0);
+        assert_eq!(applied_by_b.conflicts, 0);
 
         // Reload both vaults from disk and confirm both records are present
         // on both sides.
@@ -425,6 +482,129 @@ mod tests {
             .collect();
         assert!(names_b.contains(&"ONLY_ON_A".to_string()));
         assert!(names_b.contains(&"ONLY_ON_B".to_string()));
+    }
+
+    /// INV-109, end to end: two real, previously-paired vaults each edit the
+    /// *same* record while genuinely disconnected from each other, then sync
+    /// over real loopback mutual TLS. Neither device's edit was built on the
+    /// other's, so this must land as `SyncOutcome::Conflict` on both sides --
+    /// a real deterministic winner becomes the live value, and the losing
+    /// edit is recoverable, not discarded. Nothing here is simulated at the
+    /// `Store` level; every write goes through the same `Vault::update_secret`
+    /// and `run_sync_session` a real two-device conflict would.
+    #[test]
+    fn two_devices_editing_the_same_record_offline_produce_a_recoverable_conflict() {
+        use crate::sync::identity::DeviceIdentity;
+
+        let dir = tempfile::tempdir().unwrap();
+        let id_a = DeviceIdentity::load_or_create(&dir.path().join("id_a.json")).unwrap();
+        let id_b = DeviceIdentity::load_or_create(&dir.path().join("id_b.json")).unwrap();
+        let path_a = dir.path().join("a.db");
+        let path_b = dir.path().join("b.db");
+
+        let mut vault_a = Vault::create(&path_a, &pw("pw-a"), fast_kdf()).unwrap();
+        vault_a.set_local_device_id(1).unwrap();
+        let created = vault_a
+            .create_secret(NewSecret {
+                name: "SHARED".into(),
+                project: "P".into(),
+                environment: Environment::Production,
+                payload: SecretPayload::ApiKey {
+                    value: "original".into(),
+                },
+                notes: None,
+                tags: vec![],
+                provider: None,
+            })
+            .unwrap();
+        let shared_id = created.id;
+
+        let shared_vmk = vault_a.export_vmk_for_pairing(&pw("pw-a")).unwrap();
+        let mut vault_b =
+            Vault::create_with_vmk(&path_b, &pw("pw-b"), fast_kdf(), shared_vmk).unwrap();
+        vault_b.set_local_device_id(2).unwrap();
+        drop(vault_a);
+        drop(vault_b);
+
+        // First sync: B learns A's record, establishing a common ancestor.
+        let (first_a, first_b) = sync_once(&id_a, &id_b, &path_a, &path_b);
+        assert_eq!(first_a.applied, 0);
+        assert_eq!(first_b.applied, 1);
+        assert_eq!(first_a.conflicts, 0);
+        assert_eq!(first_b.conflicts, 0);
+
+        // Now both devices edit the SAME record independently, with no
+        // further sync between the edits -- a genuine fork.
+        let mut vault_a = Vault::open(&path_a).unwrap();
+        vault_a.unlock(&pw("pw-a")).unwrap();
+        vault_a.set_local_device_id(1).unwrap();
+        vault_a
+            .update_secret(
+                shared_id,
+                crate::model::SecretUpdate {
+                    payload: Some(SecretPayload::ApiKey {
+                        value: "edited-on-a".into(),
+                    }),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        drop(vault_a);
+
+        // Ensure B's edit gets a later wall-clock tick than A's, so the
+        // conflict's deterministic winner is predictable in this test.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let mut vault_b = Vault::open(&path_b).unwrap();
+        vault_b.unlock(&pw("pw-b")).unwrap();
+        vault_b.set_local_device_id(2).unwrap();
+        vault_b
+            .update_secret(
+                shared_id,
+                crate::model::SecretUpdate {
+                    payload: Some(SecretPayload::ApiKey {
+                        value: "edited-on-b".into(),
+                    }),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        drop(vault_b);
+
+        // Second sync: the two divergent edits meet.
+        let (second_a, second_b) = sync_once(&id_a, &id_b, &path_a, &path_b);
+        assert_eq!(second_a.conflicts, 1, "A must detect the fork");
+        assert_eq!(second_b.conflicts, 1, "B must detect the fork");
+
+        // B's edit has the later wall clock, so it wins the deterministic
+        // tiebreak and becomes the live value on both sides.
+        let mut vault_a = Vault::open(&path_a).unwrap();
+        vault_a.unlock(&pw("pw-a")).unwrap();
+        vault_a.set_local_device_id(1).unwrap();
+        let live = vault_a.reveal(shared_id).unwrap();
+        assert_eq!(
+            live.payload,
+            SecretPayload::ApiKey {
+                value: "edited-on-b".into()
+            }
+        );
+
+        // A's own edit was not thrown away -- it is recoverable.
+        let conflicts = vault_a.list_conflicts(shared_id).unwrap();
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(
+            conflicts[0].record.payload,
+            SecretPayload::ApiKey {
+                value: "edited-on-a".into()
+            }
+        );
+
+        let recovered = vault_a.recover_conflict(&conflicts[0].conflict_id).unwrap();
+        assert_ne!(
+            recovered.id, shared_id,
+            "recovering a conflict must not collide with the live record's id"
+        );
+        assert_eq!(vault_a.list_conflicts(shared_id).unwrap().len(), 0);
     }
 
     /// A second sync with nothing new to exchange must apply zero records --
@@ -458,8 +638,12 @@ mod tests {
         sync_once(&id_a, &id_b, &path_a, &path_b);
 
         // Second sync: nothing has changed on either side.
-        let applied = sync_once(&id_a, &id_b, &path_a, &path_b);
-        assert_eq!(applied, (0, 0), "an idle second sync must transfer nothing");
+        let (applied_a, applied_b) = sync_once(&id_a, &id_b, &path_a, &path_b);
+        assert_eq!(
+            (applied_a.applied, applied_b.applied),
+            (0, 0),
+            "an idle second sync must transfer nothing"
+        );
     }
 
     fn fast_kdf() -> crate::crypto::kdf::KdfParams {
@@ -485,7 +669,7 @@ mod tests {
         id_b: &crate::sync::identity::DeviceIdentity,
         path_a: &std::path::Path,
         path_b: &std::path::Path,
-    ) -> (usize, usize) {
+    ) -> (SyncSessionResult, SyncSessionResult) {
         use crate::sync::transport;
 
         let trusted_by_a = transport::TrustedFingerprints::new([id_b.fingerprint()]);
