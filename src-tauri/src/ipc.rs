@@ -384,6 +384,15 @@ pub fn conflict_count(state: State<'_, VaultState>) -> IpcResult<i64> {
     state.with(|v| v.count_conflicts())
 }
 
+/// Every preserved conflict across the vault, for a review screen -- unlike
+/// `secret_conflicts`, not scoped to a caller-supplied id.
+#[tauri::command]
+pub fn conflict_list_all(
+    state: State<'_, VaultState>,
+) -> IpcResult<Vec<envryn_core::vault::ConflictSummary>> {
+    state.with(|v| v.list_all_conflicts())
+}
+
 /// Keep a preserved conflict as a brand-new record.
 #[tauri::command]
 pub fn conflict_recover(

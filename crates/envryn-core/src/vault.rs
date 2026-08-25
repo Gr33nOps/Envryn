@@ -339,6 +339,23 @@ impl Vault {
         self.store.count_conflicts()
     }
 
+    /// Every preserved conflict across the whole vault, decrypted for a
+    /// review screen that does not already know which record ids have one
+    /// (unlike `list_conflicts`, scoped to a caller-supplied id).
+    pub fn list_all_conflicts(&self) -> Result<Vec<ConflictSummary>> {
+        let state = self.state()?;
+        self.store
+            .list_all_conflicts()?
+            .into_iter()
+            .map(|c| {
+                Ok(ConflictSummary {
+                    conflict_id: c.conflict_id,
+                    record: open_record(&c.record, &state.keys.record)?,
+                })
+            })
+            .collect()
+    }
+
     /// Keep a preserved conflict as a brand-new record -- its own id, its own
     /// HLC -- rather than merging it back into the record that won the
     /// original conflict. Once a user decides "I want to keep both edits,"

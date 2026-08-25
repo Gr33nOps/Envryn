@@ -459,6 +459,23 @@ impl Store {
         Ok(out)
     }
 
+    /// Every preserved conflict across the whole vault, most recent first --
+    /// for a review screen that does not already know which record ids have
+    /// one (unlike `list_conflicts`, scoped to a caller-supplied id).
+    pub fn list_all_conflicts(&self) -> Result<Vec<ConflictRecord>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, secret_id, record_version, sealed, fingerprint,
+                    hlc_wall_ms, hlc_counter, hlc_device, deleted, created_ms
+               FROM record_conflicts ORDER BY created_ms DESC",
+        )?;
+        let rows = stmt.query_map([], row_to_conflict)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row??);
+        }
+        Ok(out)
+    }
+
     /// One preserved conflict by its own row id -- the lookup
     /// `Vault::recover_conflict`/`discard_conflict` need before they can act
     /// on a specific conflict without the caller also supplying the secret id.

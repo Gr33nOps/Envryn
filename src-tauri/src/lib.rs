@@ -56,6 +56,7 @@ pub fn run() {
             ipc::secret_duplicates,
             ipc::secret_conflicts,
             ipc::conflict_count,
+            ipc::conflict_list_all,
             ipc::conflict_recover,
             ipc::conflict_discard,
             ipc::clipboard_copy,

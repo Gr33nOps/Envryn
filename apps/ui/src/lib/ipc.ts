@@ -129,6 +129,15 @@ export interface DiscoveredPeer {
 
 export interface SyncSummary {
   records_applied: number;
+  /** Genuine concurrent edits detected this sync (INV-109) -- the losing
+   * side of each was preserved, not discarded; see conflictListAll. */
+  conflicts: number;
+}
+
+/** The decrypted losing side of a genuine concurrent edit (INV-109). */
+export interface ConflictSummary {
+  conflict_id: string;
+  record: SecretRecord;
 }
 
 export interface PairingHostStarted {
@@ -271,6 +280,20 @@ export const syncNow = (address: string, port: number) =>
   call<SyncSummary>("sync_now", { address, port });
 export const syncListenStart = () => call<number>("sync_listen_start");
 export const syncListenStop = () => call<void>("sync_listen_stop");
+
+// --- Sync conflicts (INV-109) ------------------------------------------------
+//
+// A genuine concurrent edit is never silently discarded: the Hlc-newer side
+// wins and becomes the live value (what secretList/secretReveal show), but
+// the losing side is preserved here until the user reviews it.
+
+export const conflictCount = () => call<number>("conflict_count");
+export const conflictListAll = () => call<ConflictSummary[]>("conflict_list_all");
+export const secretConflicts = (id: string) => call<ConflictSummary[]>("secret_conflicts", { id });
+export const conflictRecover = (conflictId: string) =>
+  call<SecretSummary>("conflict_recover", { conflictId });
+export const conflictDiscard = (conflictId: string) =>
+  call<void>("conflict_discard", { conflictId });
 
 // --- AI -----------------------------------------------------------------------
 //
