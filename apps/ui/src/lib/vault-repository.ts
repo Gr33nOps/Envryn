@@ -1,7 +1,10 @@
 import type { Device, Environment, Secret, SecretType } from "./envryn-data";
 import * as ipc from "./ipc";
 
-export type CreateSecretInput = Omit<Secret, "id" | "created" | "updated">;
+export type CreateSecretInput = Omit<Secret, "id" | "created" | "updated"> & {
+  /** Only meaningful when `type` is "Custom" -- see `toPayload`. */
+  customFields?: { label: string; value: string }[];
+};
 export type UpdateSecretInput = Partial<CreateSecretInput>;
 
 /**
@@ -62,19 +65,32 @@ const toRustEnvironment = (env: Environment): ipc.RustEnvironment =>
 /**
  * Build a payload from the UI's single `value` string.
  *
- * Multi-field kinds (Database, SSH, OAuth) genuinely need separate inputs, and
- * the form does not collect them yet. Rather than guess at parsing a URL into
- * host/port/user/password -- which would silently mis-file credentials -- those
- * kinds are stored as a Note payload until the form is extended, so nothing is
- * lost and nothing is fabricated.
+ * Multi-field kinds Database, SSH, and OAuth genuinely need separate inputs,
+ * and the form does not collect them yet. Rather than guess at parsing a URL
+ * into host/port/user/password -- which would silently mis-file credentials --
+ * those kinds are stored as a Note payload until the form is extended, so
+ * nothing is lost and nothing is fabricated.
  *
  * `EnvVar`'s `key` (the variable name itself, e.g. `DATABASE_URL`) is distinct
  * from the vault's display `name` in principle, but the form collects only one
  * name field -- so it doubles as both, which is exactly right for a `.env`
  * import (`EnvImportModal.tsx`), where the variable name *is* the only name
  * there is.
+ *
+ * `Custom` is genuinely multi-field (`SecretPayload`'s `fields: {label,
+ * value}[]`) -- `customFields` carries that when the caller already has
+ * labeled pairs (`StructuredExtractModal.tsx`). The plain create/edit form
+ * only ever collects one value, so without `customFields` a Custom secret
+ * becomes one field named "Value" -- a real fix, not a new gap: `TYPE_TO_KIND`
+ * already mapped "Custom" to the `Custom` kind, but this function had no
+ * `case "Custom"` arm at all, so it silently fell through to `Note` instead.
  */
-function toPayload(type: SecretType, value: string, name: string): ipc.SecretPayload {
+function toPayload(
+  type: SecretType,
+  value: string,
+  name: string,
+  customFields?: { label: string; value: string }[],
+): ipc.SecretPayload {
   const kind = TYPE_TO_KIND[type];
   switch (kind) {
     case "ApiKey":
@@ -83,6 +99,12 @@ function toPayload(type: SecretType, value: string, name: string): ipc.SecretPay
       return { kind: "Token", value };
     case "EnvVar":
       return { kind: "EnvVar", key: name, value };
+    case "Custom":
+      return {
+        kind: "Custom",
+        fields:
+          customFields && customFields.length > 0 ? customFields : [{ label: "Value", value }],
+      };
     case "Note":
       return { kind: "Note", body: value };
     default:
@@ -235,7 +257,7 @@ export const tauriVaultRepository: VaultRepository = {
       name: input.name,
       project: input.project,
       environment: toRustEnvironment(input.environment),
-      payload: toPayload(input.type, input.value, input.name),
+      payload: toPayload(input.type, input.value, input.name, input.customFields),
       notes: input.notes ?? null,
       tags: input.tags ?? [],
       provider: input.provider ?? null,
@@ -252,7 +274,7 @@ export const tauriVaultRepository: VaultRepository = {
       update.environment = toRustEnvironment(input.environment);
     }
     if (input.value !== undefined && input.type !== undefined) {
-      update.payload = toPayload(input.type, input.value, input.name ?? "");
+      update.payload = toPayload(input.type, input.value, input.name ?? "", input.customFields);
     }
     if (input.notes !== undefined) update.notes = input.notes;
     if (input.tags !== undefined) update.tags = input.tags;

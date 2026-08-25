@@ -56,9 +56,13 @@ once plain substring search finds nothing. `.env` import
 parser (never the model), classifies each variable's *value* deterministically first, and only
 sends the bare **names** `classify_deterministic` couldn't place to `ai_classify_env_names` --
 one batch call for the whole file, exactly matching the Level 1 / names-only row in the table
-above. Structured extraction (`ai_extract_structured_fields`) has a real, tested backend command
-but is **not yet wired into its own frontend flow** -- there is no structured-extraction UI yet.
-Recorded here as real, scoped-out remaining work, not silently left undone.
+above. Structured extraction (`apps/ui/src/components/envryn/StructuredExtractModal.tsx`) is
+also wired now: unlike the Level 0/1 features above, this is a genuine Level 3 operation with no
+deterministic path, so the UI shows an explicit notice naming what is about to happen ("This
+text is sent to your local AI model...") before every call -- the data-access indicator this
+section calls for -- and the extracted fields are reviewed and editable before anything saves,
+landing as a real multi-field `SecretPayload::Custom` record. Every Tier 1 feature now has a
+frontend flow.
 
 ### Tier 2 (post-MVP)
 
@@ -98,13 +102,16 @@ model, the user sees what will be analysed and that it stays on the device. Leve
 operations show **no** such warning — warning on every metadata operation would train users to
 click through, which makes the Level 2 warning worthless.
 
-**Not yet implemented in the UI.** The one Level 2 flow that is wired up today (`SecretForm.tsx`'s
-"Suggest type") falls back to `ai_classify_pasted_value` with no visible indicator that the
-pasted value is about to be handed to the local model -- it happens silently after deterministic
-matching finds nothing. The backend-level guarantees this paragraph describes elsewhere in this
-document (bounded, on-device, nothing persisted) all hold regardless; what is missing is
-specifically the human-visible "this is about to see your value" moment the spec calls for.
-Recorded as real remaining frontend work, not implemented as done.
+**Partly implemented in the UI.** The Level 3 flow (structured extraction,
+`StructuredExtractModal.tsx`) shows the indicator this paragraph describes -- an explicit notice
+naming what is about to happen, shown before every call, never remembered/dismissed permanently.
+The one Level 2 flow that is wired up (`SecretForm.tsx`'s "Suggest type") still has no equivalent:
+it falls back to `ai_classify_pasted_value` silently after deterministic matching finds nothing,
+with no visible indicator that the pasted value is about to be handed to the local model. The
+backend-level guarantees this paragraph describes elsewhere in this document (bounded, on-device,
+nothing persisted) hold regardless in both cases; what is missing for Level 2 specifically is the
+human-visible "this is about to see your value" moment the spec calls for. Recorded as real
+remaining frontend work, not implemented as done.
 
 **Nothing is persisted.** No AI operation writes prompt content, model input, or model output to
 disk. AI *suggestions the user accepted* become ordinary vault data and are stored and synced

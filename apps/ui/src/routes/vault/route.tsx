@@ -8,6 +8,7 @@ import { SecretPanel } from "@/components/envryn/SecretPanel";
 import { SecretFormModal } from "@/components/envryn/SecretForm";
 import { SearchPalette } from "@/components/envryn/SearchPalette";
 import { EnvImportModal } from "@/components/envryn/EnvImportModal";
+import { StructuredExtractModal } from "@/components/envryn/StructuredExtractModal";
 import { VaultUIContext } from "@/components/envryn/vault-context";
 import { type Secret } from "@/lib/envryn-data";
 import { useClearVaultCache, useRevealSecret, useSecretList } from "@/lib/use-vault";
@@ -45,6 +46,7 @@ function VaultLayout() {
   const [preset, setPreset] = React.useState<Partial<Secret> | undefined>();
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [extractOpen, setExtractOpen] = React.useState(false);
 
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();
@@ -102,6 +104,7 @@ function VaultLayout() {
       },
       openSearch: () => setSearchOpen(true),
       openImport: () => setImportOpen(true),
+      openExtract: () => setExtractOpen(true),
     }),
     [selected],
   );
@@ -164,6 +167,7 @@ function VaultLayout() {
       />
       <SearchPalette open={searchOpen} onOpenChange={setSearchOpen} onSelect={setSelected} />
       <EnvImportModal open={importOpen} onOpenChange={setImportOpen} />
+      <StructuredExtractModal open={extractOpen} onOpenChange={setExtractOpen} />
     </VaultUIContext.Provider>
   );
 }
