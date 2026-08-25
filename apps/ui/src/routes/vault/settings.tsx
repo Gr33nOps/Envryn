@@ -573,8 +573,8 @@ function Settings() {
                 <div>
                   <p className="text-[12px] font-medium">A note about sync</p>
                   <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-                    Devices sync directly over your local network after you pair them -- there is
-                    no account and no cloud in between.
+                    Devices sync directly over your local network after you pair them -- there is no
+                    account and no cloud in between.
                   </p>
                   <Link
                     to="/vault/devices"

@@ -240,8 +240,10 @@ export function SecretFormModal({
                   {suggesting ? "Checking..." : "Suggest type"}
                 </button>
               </span>
+            ) : type === "Note" ? (
+              "Note"
             ) : (
-              type === "Note" ? "Note" : "Value"
+              "Value"
             )
           }
           hint={

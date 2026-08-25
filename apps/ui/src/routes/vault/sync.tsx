@@ -122,8 +122,8 @@ function Sync() {
         <div className="mb-3 flex items-center justify-between">
           <span className="text-[12.5px] font-medium">Trusted devices</span>
           <span className="text-[11px] text-subtle-foreground">
-            {devices.length} device{devices.length === 1 ? "" : "s"} ·{" "}
-            {peers.length} seen on this network
+            {devices.length} device{devices.length === 1 ? "" : "s"} · {peers.length} seen on this
+            network
           </span>
         </div>
 

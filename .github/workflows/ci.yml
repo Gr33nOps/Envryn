@@ -1,0 +1,85 @@
+name: CI
+
+# The checks below were, until now, run manually before each phase's commit
+# (see docs/ARCHITECTURE.md section 9 and every phase commit's own
+# "Verified" paragraph). This workflow is the first time any of them run
+# automatically. It intentionally mirrors those manual commands exactly
+# rather than inventing a different CI-only check, so "passes locally" and
+# "passes in CI" mean the same thing.
+#
+# Rust jobs run on windows-latest deliberately, not ubuntu-latest: Envryn is
+# a Windows-only build (docs/ARCHITECTURE.md section 7), and most of what
+# changed in the sync/AI/hardening passes lives behind `#[cfg(windows)]`
+# (DPAPI, clipboard exclusion, screen-capture exclusion, the Job Object AI
+# worker isolation, the WTS_SESSION_LOCK hook, Windows Hello). Building on
+# Linux would silently compile the `stub` fallbacks instead and test none of
+# that real platform code.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test, deny, audit)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - run: pip install semgrep
+
+      - run: semgrep --config .semgrep/ crates/ src-tauri/ apps/ui/src --error
+
+  frontend:
+    name: Frontend (lint, typecheck, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm run build
