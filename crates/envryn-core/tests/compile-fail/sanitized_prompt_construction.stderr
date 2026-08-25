@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/compile-fail/sanitized_prompt_construction.rs:8:22
+  |
+8 |     let _forbidden = SanitizedPrompt("attacker-controlled text".to_string());
+  |                      ^^^^^^^^^^^^^^^
+  |
+note: constructor is not visible here due to private fields
+ --> src/ai/gateway.rs
+  |
+  | pub struct SanitizedPrompt(String);
+  |                            ^^^^^^ private field

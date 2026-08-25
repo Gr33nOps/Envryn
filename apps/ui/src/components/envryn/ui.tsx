@@ -112,7 +112,7 @@ export function Field({
   children,
   className,
 }: {
-  label: string;
+  label: React.ReactNode;
   hint?: string | undefined;
   error?: string | undefined;
   children: React.ReactNode;

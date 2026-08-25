@@ -4,12 +4,14 @@
 //! surface; every security decision lives in `envryn-core`, which has no
 //! dependency on Tauri and can therefore be tested without a windowing system.
 
+mod ai;
 mod autolock;
 mod capture_protection;
 mod ipc;
 mod settings;
 mod sync;
 
+use ai::AiState;
 use ipc::VaultState;
 use sync::{PairingState, SyncListenState};
 
@@ -26,6 +28,7 @@ pub fn run() {
         .manage(VaultState::default())
         .manage(PairingState::default())
         .manage(SyncListenState::default())
+        .manage(AiState::default())
         .setup(|app| {
             let handle = app.handle().clone();
             capture_protection::apply(&handle);
@@ -65,6 +68,16 @@ pub fn run() {
             sync::pairing_join_start,
             sync::pairing_confirm,
             sync::pairing_cancel,
+            ai::classify_deterministic,
+            ai::ai_status,
+            ai::ai_download_model,
+            ai::ai_start,
+            ai::ai_stop,
+            ai::ai_classify_pasted_value,
+            ai::ai_suggest_name,
+            ai::ai_classify_env_names,
+            ai::ai_extract_structured_fields,
+            ai::ai_parse_search_intent,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Envryn");

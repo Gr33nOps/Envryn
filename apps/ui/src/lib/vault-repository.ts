@@ -29,7 +29,7 @@ export interface VaultRepository {
 // The UI uses human-readable labels ("API Key"); Rust uses variant names
 // ("ApiKey"). Both mappings live here so the boundary is one file.
 
-const KIND_TO_TYPE: Record<ipc.SecretKind, SecretType> = {
+export const KIND_TO_TYPE: Record<ipc.SecretKind, SecretType> = {
   ApiKey: "API Key",
   Token: "Token",
   EnvVar: "Environment",

@@ -1,8 +1,11 @@
 import * as React from "react";
+import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Field, Input, Modal, Select } from "@/components/envryn/ui";
 import { secretTypes, typeFields, type Environment, type Secret } from "@/lib/envryn-data";
 import { useCreateSecret, useProjects, useUpdateSecret } from "@/lib/use-vault";
+import { KIND_TO_TYPE } from "@/lib/vault-repository";
+import * as ipc from "@/lib/ipc";
 import { IpcError } from "@/lib/ipc";
 
 const ENVIRONMENTS: Environment[] = ["Development", "Staging", "Production", "—"];
@@ -32,6 +35,7 @@ export function SecretFormModal({
   const [tags, setTags] = React.useState("");
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [suggesting, setSuggesting] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -50,6 +54,47 @@ export function SecretFormModal({
   }, [open, secret, preset]);
 
   const extra = typeFields[type] ?? [];
+
+  /**
+   * Deterministic classification first -- known-prefix/shape matching that
+   * works with no model installed (`docs/AI_DATA_ACCESS.md` section 3: "the
+   * AI is the fallback for values the rules do not recognise"). Only if
+   * that finds nothing does this fall back to the local model, and only if
+   * the user has turned it on -- a failed or declined AI call here just
+   * means no suggestion, never a blocked save.
+   */
+  async function suggestType() {
+    if (!value.trim()) return;
+    setSuggesting(true);
+    try {
+      const deterministic = await ipc.classifyDeterministic(value);
+      if (deterministic) {
+        setType(KIND_TO_TYPE[deterministic.kind]);
+        toast(
+          deterministic.provider
+            ? `Looks like a ${deterministic.provider} credential`
+            : "Type detected",
+        );
+        return;
+      }
+      const status = await ipc.aiStatus().catch(() => null);
+      if (!status?.enabled_in_settings || !status.engine_running) {
+        toast("Couldn't recognize this value automatically. Enable local AI in Settings for more.");
+        return;
+      }
+      const result = await ipc.aiClassifyPastedValue(value);
+      setType(KIND_TO_TYPE[result.kind]);
+      toast(
+        result.provider
+          ? `Local AI: looks like a ${result.provider} credential`
+          : "Local AI suggested a type",
+      );
+    } catch (err) {
+      toast(err instanceof IpcError ? err.message : "Could not suggest a type for this value.");
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   async function save() {
     if (!name.trim()) {
@@ -181,7 +226,24 @@ export function SecretFormModal({
         </div>
 
         <Field
-          label={type === "Note" ? "Note" : "Value"}
+          label={
+            !editing && type !== "Note" && value.trim() ? (
+              <span className="flex items-center justify-between">
+                <span>Value</span>
+                <button
+                  type="button"
+                  onClick={() => void suggestType()}
+                  disabled={suggesting}
+                  className="inline-flex items-center gap-1 text-[10.5px] font-normal text-primary hover:text-foreground disabled:opacity-50"
+                >
+                  <Sparkles className="size-3" />
+                  {suggesting ? "Checking..." : "Suggest type"}
+                </button>
+              </span>
+            ) : (
+              type === "Note" ? "Note" : "Value"
+            )
+          }
           hint={
             editing
               ? "Leave blank to keep the value you already stored."

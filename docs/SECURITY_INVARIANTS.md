@@ -54,47 +54,65 @@ Legend for the *Enforced by* column:
 ## 3. AI invariants
 
 These restate §61 of the product specification. The *Enforced by* column is the addition.
+**Implemented** as of the AI subsystem's build (`crates/envryn-core/src/ai/`,
+`crates/envryn-ai-worker/`, `src-tauri/src/ai.rs`); see `docs/AI_SECURITY.md` for the two
+recorded deviations from the original design (candle instead of llama.cpp; no
+grammar-constrained decode) neither of which weakens anything in this table.
 
 | ID | Invariant | Enforced by |
 |---|---|---|
-| **AI-INV-001** | The AI never receives vault master keys. | T, D |
-| **AI-INV-002** | The AI never receives device private identity keys. | T, D |
+| **AI-INV-001** | The AI never receives vault master keys. | T, D — see below |
+| **AI-INV-002** | The AI never receives device private identity keys. | T, D — see below |
 | **AI-INV-003** | The AI never has automatic whole-vault plaintext access. | **T** — see below |
-| **AI-INV-004** | The AI cannot approve trusted devices. | D |
-| **AI-INV-005** | The AI cannot bypass vault authentication. | D |
-| **AI-INV-006** | AI prompt history containing secrets is not persisted. | A, S |
-| **AI-INV-007** | AI inference requires no external Internet service. | A |
-| **AI-INV-008** | AI suggestions cannot perform destructive operations without user confirmation. | T, A |
+| **AI-INV-004** | The AI cannot approve trusted devices. | D — see below |
+| **AI-INV-005** | The AI cannot bypass vault authentication. | D — see below |
+| **AI-INV-006** | AI prompt history containing secrets is not persisted. | M — true by construction (no code path in `ai/` or `envryn-ai-worker` writes a prompt or response to disk), verified by manual review; not covered by a dedicated automated test, and the Semgrep rule this row originally implied does not exist (no CI — `ARCHITECTURE.md` section 9) |
+| **AI-INV-007** | AI inference requires no external Internet service. | M — true by construction: `envryn-ai-worker`'s entire dependency list (`candle-core`, `candle-transformers`, `tokenizers`, `serde`, `serde_json`, `rand`) contains no HTTP client; the only network-capable code in the AI subsystem is `ai::model_download`, a separate, explicitly-invoked module the worker never calls into. Not covered by an automated egress-blocked test (no CI) |
+| **AI-INV-008** | AI suggestions cannot perform destructive operations without user confirmation. | T — no code path exists today, anywhere in `ai/` or its IPC commands, that writes to the vault. The one wired feature (classification) only ever sets a value in an in-memory form; saving remains the ordinary, human-clicked `secret_create`/`secret_update` path. True by the AI surface's shape, not by a dedicated test of a mutation that does not exist yet |
 | **AI-INV-009** | The vault remains fully functional if the AI subsystem fails, is disabled, or was never installed. | **A** — see below |
 
 ### How AI-INV-003 is made structural
 
-`ai::gateway::SanitizedPrompt` is a newtype whose inner field is private to the
+**Implemented.** `ai::gateway::SanitizedPrompt` is a newtype whose inner field is private to the
 `ai::gateway` module. The `LocalAiEngine` trait accepts no other input type.
 Therefore no code outside the gateway can construct a value that the engine will accept,
 and "hand the model raw vault data" is a **compile error** rather than a review miss.
 
-`AiOperation` variants reference records by `RecordId`, never by value. A caller
-*cannot* pass a secret to the AI layer, because no AI-facing type has a field that holds one.
+`AiOperation` variants reference records by `SecretId` where one exists, or carry the plain,
+budget-bounded value the caller already had (for the two Level 2 operations that classify a
+value before it has been saved as a record — see `AI_SECURITY.md` section 2 for why those two
+necessarily differ from a pure `RecordId` reference). No variant, and no other AI-facing type,
+has a field that could hold an arbitrary vault query or a whole record.
 
-A `trybuild` compile-fail test asserts that constructing a `SanitizedPrompt` from
-outside the gateway module does not compile. If someone makes the field `pub`,
-that test fails.
+A `trybuild` compile-fail test (`crates/envryn-core/tests/sanitized_prompt_encapsulation.rs`)
+asserts that constructing a `SanitizedPrompt` from outside the gateway module does not compile
+— run and confirmed to fail with `E0423: cannot initialize a tuple struct which contains
+private fields`. If someone makes the field `pub`, that fixture starts compiling and the test
+fails.
 
 ### How AI-INV-009 is tested
 
-The single most important AI test in the suite: the full vault integration suite runs
-twice in CI — once with the AI subsystem compiled in, and once with it disabled at
-the feature-flag level. Both runs must pass identically. AI is a productivity layer,
-not infrastructure; if any vault test depends on it, the layering has been violated.
+**Implemented, differently from the original design.** The originally-planned mechanism — the
+full vault integration suite run twice in CI, once with AI compiled in and once with a feature
+flag compiling it out — does not exist: there is no Cargo feature gating `ai/`, and no CI to run
+two configurations even if there were. What holds instead, and is real: `ai/` is purely
+additive. Nothing in `crate::vault`, `crate::storage`, `crate::crypto`, or `crate::sync` imports
+from `crate::ai` — every one of those modules' 131 unit and 26 integration tests already passes
+with `ai/` never invoked, because none of them invoke it. Deleting `src/ai/` and its one `pub
+mod ai;` line in `lib.rs` would leave a fully functional, fully tested vault; this has not been
+mechanically re-verified by actually deleting the module and re-running the suite, but the
+dependency direction that guarantees it is the same one `crypto`→`vault`→`sync` layering already
+relies on throughout this codebase.
 
 ### Enforcing AI-INV-001/002/004/005 by dependency graph
 
-`crates/envryn-ai-worker` does **not** depend on the vault crate. It cannot name a
-`Vmk`, a `DeviceKey`, a `TrustedDevice`, or a database handle, because those types are
-not in its dependency graph at all. A CI step asserts this by inspecting
-`cargo metadata` — if someone adds the vault crate as a dependency of the worker,
-the build fails before any human reviews it.
+**Implemented and checked.** `crates/envryn-ai-worker` does **not** depend on `envryn-core` at
+all (not merely "not the vault module of it") — `cargo tree -p envryn-ai-worker -i envryn-core`
+returns no match. It cannot name a `Vmk`, a `DeviceKey`, a `TrustedDevice`, or a database
+handle, because none of those types are reachable from its dependency graph. This has been run
+and confirmed manually; there is no CI step that runs it automatically (no CI pipeline exists —
+`ARCHITECTURE.md` section 9), so a future change that adds `envryn-core` as a worker dependency
+would not be caught until the next manual check.
 
 ---
 

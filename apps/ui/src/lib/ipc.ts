@@ -99,6 +99,7 @@ export interface VaultStatus {
 export interface AppSettings {
   auto_lock_minutes: number;
   clipboard_clear_seconds: number;
+  ai_enabled: boolean;
 }
 
 export interface RestoreSummary {
@@ -164,6 +165,7 @@ export type IpcErrorCode =
   | "unsupported_version"
   | "decryption_failed"
   | "platform_unavailable"
+  | "ai_unavailable"
   | "internal";
 
 export class IpcError extends Error {
@@ -269,6 +271,83 @@ export const syncNow = (address: string, port: number) =>
   call<SyncSummary>("sync_now", { address, port });
 export const syncListenStart = () => call<number>("sync_listen_start");
 export const syncListenStop = () => call<void>("sync_listen_stop");
+
+// --- AI -----------------------------------------------------------------------
+//
+// Off by default (`AppSettings.ai_enabled`). Every command below fails with
+// `ai_unavailable` if the setting is off or the local worker isn't running --
+// see src-tauri/src/ai.rs. Nothing here is on the path of any vault
+// operation: unlock, create, edit, sync, and backup all work with AI
+// disabled or never started.
+
+export interface AiStatus {
+  enabled_in_settings: boolean;
+  model_downloaded: boolean;
+  model_name: string;
+  engine_running: boolean;
+}
+
+export interface ClassificationOutput {
+  kind: SecretKind;
+  provider: string | null;
+  confidence: number;
+}
+
+export interface NameSuggestionOutput {
+  name: string;
+}
+
+export interface EnvNameEntry {
+  name: string;
+  kind: SecretKind;
+}
+
+export interface EnvNameClassificationOutput {
+  names: EnvNameEntry[];
+}
+
+export interface ExtractedField {
+  label: string;
+  value: string;
+}
+
+export interface ExtractedFieldsOutput {
+  fields: ExtractedField[];
+}
+
+export interface SearchFilterOutput {
+  project: string | null;
+  environment: RustEnvironment | null;
+  kind: SecretKind | null;
+  tags: string[];
+  text: string | null;
+}
+
+// Not AI -- plain known-prefix/shape matching that works with no model
+// installed. See src-tauri/src/ai.rs's module doc for why this one command
+// is not gated by `ai_enabled`.
+export interface DeterministicMatch {
+  kind: SecretKind;
+  provider: string | null;
+}
+export const classifyDeterministic = (value: string) =>
+  call<DeterministicMatch | null>("classify_deterministic", { value });
+
+export const aiStatus = () => call<AiStatus>("ai_status");
+export const aiDownloadModel = () => call<void>("ai_download_model");
+export const aiStart = () => call<void>("ai_start");
+export const aiStop = () => call<void>("ai_stop");
+
+export const aiClassifyPastedValue = (value: string) =>
+  call<ClassificationOutput>("ai_classify_pasted_value", { value });
+export const aiSuggestName = (value: string, provider: string | null) =>
+  call<NameSuggestionOutput>("ai_suggest_name", { value, provider });
+export const aiClassifyEnvNames = (names: string[]) =>
+  call<EnvNameClassificationOutput>("ai_classify_env_names", { names });
+export const aiExtractStructuredFields = (block: string) =>
+  call<ExtractedFieldsOutput>("ai_extract_structured_fields", { block });
+export const aiParseSearchIntent = (query: string) =>
+  call<SearchFilterOutput>("ai_parse_search_intent", { query });
 
 // --- Pairing ------------------------------------------------------------------
 //

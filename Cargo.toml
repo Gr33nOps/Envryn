@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/envryn-core", "src-tauri"]
+members = ["crates/envryn-core", "crates/envryn-ai-worker", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"

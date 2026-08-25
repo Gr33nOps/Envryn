@@ -29,6 +29,13 @@ Every row is a contract. Changing any cell requires updating `THREAT_MODEL.md` a
 
 ### Tier 1 (MVP)
 
+**All five implemented and tested** (`crates/envryn-core/src/ai/gateway.rs`'s five typed
+methods; `src-tauri/src/ai.rs`'s matching commands; `crates/envryn-core/tests/ai_real_model.rs`
+proves three of the five against real local inference -- classification, naming, and search-
+intent parsing -- with a real Qwen2-0.5B-Instruct model, including the honest finding recorded
+in `AI_SECURITY.md` section 5 about that model's reliability on the five-field search schema
+specifically).
+
 | Feature | Level | Input required | Why that input | Plaintext secret? | Persistence | Confirmation |
 |---|---|---|---|---|---|---|
 | **Secret classification** | 2 | The single pasted value | Prefix and shape determine the type; metadata alone cannot identify an unknown credential | **Yes** | None. Cleared after response. | Suggestion only — user accepts the type |
@@ -36,6 +43,18 @@ Every row is a contract. Changing any cell requires updating `THREAT_MODEL.md` a
 | **`.env` import** | 1 | Variable **names** only, from the deterministic parser | Classification of `DATABASE_URL` follows from the name; the value adds nothing | **No** | None | Preview shown; nothing saved before Import |
 | **Structured extraction** | 3 | The pasted block the user explicitly submitted | The block *is* the input; fields must be read out of it | **Yes** | None | Full field preview before save |
 | **Natural-language search** | 0 | The search query string | Only the query is parsed into filters | **No** | None | None — read-only; vault engine runs the query |
+
+**Frontend wiring, honestly scoped.** Classification is wired into the create-secret form (a
+"Suggest type" action next to the value field, `apps/ui/src/components/envryn/SecretForm.tsx`)
+and tries `classify_deterministic` first, falling back to the AI command only if that finds
+nothing and local AI is enabled and running -- exactly the "deterministic first" rule in
+section 3 below, expressed in the UI's own call order, not only in the backend. Smart naming,
+`.env` import, structured extraction, and natural-language search have real, tested backend
+commands (`ai_suggest_name`, `ai_classify_env_names`, `ai_extract_structured_fields`,
+`ai_parse_search_intent`) but are **not yet wired into their own frontend flows** -- there is no
+`.env` import screen, no structured-extraction UI, and the existing search box still does plain
+substring filtering rather than calling `ai_parse_search_intent`. Recorded here as real,
+scoped-out remaining work, not silently left undone.
 
 ### Tier 2 (post-MVP)
 
@@ -75,19 +94,32 @@ model, the user sees what will be analysed and that it stays on the device. Leve
 operations show **no** such warning — warning on every metadata operation would train users to
 click through, which makes the Level 2 warning worthless.
 
+**Not yet implemented in the UI.** The one Level 2 flow that is wired up today (`SecretForm.tsx`'s
+"Suggest type") falls back to `ai_classify_pasted_value` with no visible indicator that the
+pasted value is about to be handed to the local model -- it happens silently after deterministic
+matching finds nothing. The backend-level guarantees this paragraph describes elsewhere in this
+document (bounded, on-device, nothing persisted) all hold regardless; what is missing is
+specifically the human-visible "this is about to see your value" moment the spec calls for.
+Recorded as real remaining frontend work, not implemented as done.
+
 **Nothing is persisted.** No AI operation writes prompt content, model input, or model output to
 disk. AI *suggestions the user accepted* become ordinary vault data and are stored and synced
 as such (spec section 53) — but as vault records, not as AI history.
 
-**Budgets are enforced by the gateway, not by the model (spec section 48).**
+**Budgets are enforced by the gateway, not by the model (spec section 48).** Implemented in
+`crates/envryn-core/src/ai/budgets.rs`, checked before anything reaches
+[`SanitizedPrompt`](AI_SECURITY.md), and tested
+(`gateway::tests::a_value_over_budget_never_reaches_the_engine` asserts the engine is never even
+called once a budget is exceeded, not just that the caller sees an error).
 
-| Limit | Value |
-|---|---|
-| Max records per Level 3 operation | 25 |
-| Max note size submitted | 32 KiB |
-| Max `.env` import size | 256 KiB |
-| Max prompt length | 8,192 tokens |
-| Max model response | 1,024 tokens |
+| Limit | Value | Status |
+|---|---|---|
+| Max pasted value (classification, naming) | 4 KiB | Implemented (`MAX_VALUE_BYTES`) |
+| Max submitted block (structured extraction) | 32 KiB | Implemented (`MAX_BLOCK_BYTES`) |
+| Max `.env` names per import | 512 names, 256 bytes each | Implemented (`MAX_ENV_NAMES`, `MAX_ENV_NAME_BYTES`) -- no separate "256 KiB total import size" budget exists; the per-name-count and per-name-length limits bound it instead |
+| Max search query | 512 bytes | Implemented (`MAX_QUERY_BYTES`) -- narrower than "records per Level 3 operation" since there is no `OrganizeSelection`-style multi-record operation in the five built |
+| Max prompt length | ~8,192 tokens, approximated as a byte budget (`MAX_PROMPT_BYTES`) | Implemented as an approximation, not an exact count -- this crate holds no tokenizer until a model is loaded; see `budgets.rs`'s own doc comment for why the approximation is deliberately conservative (never permits *more* than the documented token count) |
+| Max model response | 1,024 tokens | Implemented (`MAX_RESPONSE_TOKENS`), enforced both as the `max_tokens` passed to the engine and as a hard cap the caller does not exceed regardless of what a misbehaving worker claims to have generated |
 
 Exceeding a budget is a clean refusal with an explanation, never a silent truncation — a silently
 truncated `.env` import would drop credentials without telling anyone.

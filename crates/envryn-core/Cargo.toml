@@ -6,6 +6,14 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[[bin]]
+# Test-only fixture for src/ai/worker_client.rs -- see the fixture's own doc
+# comment. Built for every `cargo build`, same as any bin target; the cost is
+# a few KB and a std-only compile, which is cheap enough not to warrant the
+# complexity of excluding it from non-test builds.
+name = "fake-ai-worker-fixture"
+path = "tests/fixtures/fake_worker_main.rs"
+
 [dependencies]
 argon2.workspace = true
 chacha20poly1305.workspace = true
@@ -48,6 +56,12 @@ x509-parser = "0.18"
 tokio = { version = "1", features = ["net", "rt", "io-util", "time", "sync"] }
 mdns-sd = "0.13"
 
+# ai/model_download.rs: the one other deliberate exception to "no network"
+# INV-010 permits (explicit user-initiated model download). Blocking, and on
+# rustls (already a dependency above) rather than pulling in a second TLS
+# stack via native-tls/openssl.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
 [target.'cfg(windows)'.dependencies]
 # Version left unpinned to the patch: Tauri itself depends on `windows = "0.61"`
 # with an overlapping feature set, and Cargo unifies both to one crate instance
@@ -65,6 +79,10 @@ windows = { version = "0.61", features = [
 
 [dev-dependencies]
 tempfile = "3.14"
+# Compile-fail test proving `ai::gateway::SanitizedPrompt` cannot be
+# constructed outside its own module -- see tests/sanitized_prompt_encapsulation.rs
+# and docs/AI_SECURITY.md section 2.
+trybuild = "1"
 
 [lints.rust]
 # Win32 FFI in platform::windows_impl is the one place in this crate that

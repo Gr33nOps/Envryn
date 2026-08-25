@@ -119,23 +119,39 @@ peers finding each other for an ongoing sync session, never for establishing ini
 
 ## 8. AI threats
 
-These are specification section 60, with enforcement made explicit.
+These are specification section 60. Enforcement below reflects what is actually built
+(`crates/envryn-core/src/ai/`, `crates/envryn-ai-worker/`, `src-tauri/src/ai.rs`), not the
+original aspiration — see `AI_SECURITY.md` for the two recorded deviations (candle instead of
+llama.cpp; no grammar-constrained decode) this table's citations already account for.
 
 | ID | Threat | Mitigation | Enforced by |
 |---|---|---|---|
-| **AI-01** | A bug sends the whole decrypted vault to the model | Central gateway; `SanitizedPrompt` constructible only inside `ai::gateway`; operations reference records by id, never by value | **Compile error** + `trybuild` test |
-| **AI-02** | A secret appears in a log | No prompt logging; `SanitizedPrompt` implements neither `Display` nor `Debug`; Semgrep rule | Compile error + static analysis + sentinel grep test |
-| **AI-03** | A secret persists in cached model context | Sessions are temporary; **vault lock kills the worker process** rather than clearing context | Test: lock during inference, assert process death |
-| **AI-04** | A stored note manipulates the assistant | Model has no tools; output schema cannot express a privileged action; all mutations confirmed | Schema + absence of capability |
-| **AI-05** | A tampered model file is loaded | Pinned checksum, size, source, version verified before load | Test with a corrupted file |
-| **AI-06** | The AI runtime is compromised | Separate process; no DB path, no keys; vault crate absent from its dependency graph | **`cargo metadata` CI check** |
-| **AI-07** | The AI requests more data than needed | The application decides, not the model; per-operation level policy; budgets in the gateway | Gateway tests incl. refusals |
-| **AI-08** | Hallucinated security advice is trusted | Output labelled as suggestion; hedged language ("looks like"); security decisions stay deterministic | Review + copy standards |
+| **AI-01** | A bug sends the whole decrypted vault to the model | Central gateway; `SanitizedPrompt` constructible only inside `ai::gateway`; operations reference records by id or carry a plain, budget-bounded value the caller already had — never a vault handle | **Compile error** + `trybuild` test (`tests/sanitized_prompt_encapsulation.rs`) |
+| **AI-02** | A secret appears in a log | `SanitizedPrompt` implements neither `Display` nor `Debug` (compiles-away the obvious mistake); no code path in this codebase today logs a prompt or model output | Compile error, **manually reviewed** — the Semgrep rule and CI sentinel-grep test this row originally named do not exist (no CI pipeline; see `ARCHITECTURE.md` section 9) |
+| **AI-03** | A secret persists in cached model context | Sessions are temporary; **vault lock kills the worker process** rather than clearing context, called synchronously from `ipc::vault_lock` and the idle auto-lock tick | Test with a real spawned child process, proving actual process exit (`worker_client::tests::shutdown_actually_terminates_the_child_process`) — not yet a test that kills mid-*inference* specifically, only mid-idle; the kill path is identical either way (`Child::kill`), but that exact scenario is unexercised |
+| **AI-04** | A stored note manipulates the assistant | Model has no tools; output schema cannot express a privileged action; all mutations confirmed | Schema + absence of capability. `#[serde(deny_unknown_fields)]` proven against a real model's actual output, including a spurious extra field, in `tests/ai_real_model.rs` |
+| **AI-05** | A tampered model file is loaded | Pinned checksum and size verified before load; source is pinned by construction (no public function accepts a caller-supplied URL) | Tests with a size-mismatched and a checksum-mismatched file (`model_download::tests::verify_file_rejects_*`). "Version" is a label on the pinned `ModelSpec`, not independently verified — redundant with the checksum, since a matching checksum already implies the exact expected bytes |
+| **AI-06** | The AI runtime is compromised | Separate process; no DB path, no keys; `envryn-core` (not just "the vault module of it") absent from the worker's dependency graph entirely | `cargo tree -p envryn-ai-worker -i envryn-core` returns no match — **run manually**, not a CI check (no CI pipeline exists yet) |
+| **AI-07** | The AI requests more data than needed | The application decides, not the model; per-operation level policy; budgets in the gateway | Gateway tests incl. refusals (`gateway::tests::a_value_over_budget_never_reaches_the_engine`, `env_names_over_the_count_budget_are_refused`) |
+| **AI-08** | Hallucinated security advice is trusted | Security decisions stay entirely deterministic (classification/naming are the only wired-up features, and neither makes a claim about a credential's validity); the one wired suggestion surface uses hedged language ("Looks like a Stripe credential") | Copy review only — no broader "every AI-sourced string is hedged" system exists; this is a one-string implementation, not a pattern enforced anywhere |
 
 **On AI-08.** Envryn does not contact providers, so it cannot know whether a credential is
 currently valid or compromised. It must say "consider reviewing this credential — last rotated
 14 months ago," never "this key is compromised" (spec section 26). Overstating confidence in a
-security tool is itself a security problem: it trains users to act on guesses.
+security tool is itself a security problem: it trains users to act on guesses. No feature that
+makes a validity claim has been built yet, so this risk has not materialised in what exists
+today — it is a rule for whatever is built next, not a currently-tested guarantee.
+
+**Verification scope for AI (AI-01 through AI-08).** `envryn-core`'s AI tests are real: a real
+spawned worker process, a real loopback socket, real length-prefixed JSON framing
+(`worker_client`'s tests), and — separately, not run by default — real candle inference against
+a real downloaded model proving genuinely correct classification and naming results
+(`tests/ai_real_model.rs`; see that file's doc comment for why it is `#[ignore]`d and how to run
+it). What is **not** exercised: the interactive Settings flow (enable → download → start → use)
+end-to-end inside the actual native Tauri window — this development environment has no way to
+screenshot or drive a native GUI window, only a browser-based preview of the frontend build,
+which was used to confirm the Settings UI renders correctly and degrades gracefully with no
+Tauri IPC available, but never exercised real IPC calls into `ai.rs`.
 
 ---
 
@@ -143,9 +159,9 @@ security tool is itself a security problem: it trains users to act on guesses.
 
 | Threat | Mitigation |
 |---|---|
-| Malicious crate update | Lockfile committed; `cargo-deny` and `cargo-audit` in CI; dependency additions reviewed |
+| Malicious crate update | Lockfile committed; dependency additions reviewed manually. `cargo-deny`/`cargo-audit` are not installed or run in this environment and there is no CI to run them automatically — a real, open gap, not merely undocumented |
 | Malicious npm package | Lockfile committed; UI dependencies cannot reach keys (they are in Rust) |
-| Compromised inference runtime | Pinned version, checksum-verified, isolated process |
+| Compromised inference runtime | `candle`/`candle-transformers`/`tokenizers` are widely-used, actively-maintained crates reviewed at the version pinned in `Cargo.lock`, same as every other dependency; the model file itself is checksum-verified and the worker process is isolated (see AI-06) |
 | Typosquatting | Additions require justification per `DEPENDENCY_POLICY.md` |
 
 Special scrutiny applies to the inference runtime, tokenizer, model loader, native and GPU
@@ -160,9 +176,9 @@ Each of these is testable, and each has a test:
 
 - Secrets are encrypted on your devices. — *Crypto suite; disk inspection*
 - Devices synchronise directly after explicit pairing. — *Two-vault integration test over real loopback TLS (`sync::protocol::two_vaults_converge_over_real_tls`); not yet verified against two physical devices — see section 7's verification-scope note*
-- No cloud vault, no account, no telemetry. — *Egress test; dependency audit*
-- AI processing happens locally. — *Offline AI test*
-- The AI has restricted vault access and is not part of encryption or authentication. — *Gateway tests; AI-disabled run*
+- No cloud vault, no account, no telemetry. — *No automated egress test exists (no CI); manually true today since the only network-capable code paths are `sync` (LAN-only, mutually authenticated) and `ai::model_download` (one pinned HTTPS source, invoked only from an explicit Settings button)*
+- AI processing happens locally. — *`tests/ai_real_model.rs` runs real inference against a real local model with no network call in the inference path itself; not backed by an automated "assert no egress occurred" test*
+- The AI has restricted vault access and is not part of encryption or authentication. — *Gateway tests (`ai::gateway::tests::*`); "AI-disabled run" is not a separate CI configuration (none exists) but is true by construction — nothing in `vault`, `storage`, `crypto`, or `sync` imports from `ai`*
 
 Envryn does **not** claim: protection against malware on an unlocked device, immunity to
 hibernation-file exposure, or any knowledge of whether a stored credential is still valid.

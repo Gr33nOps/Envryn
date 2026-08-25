@@ -27,6 +27,13 @@ const MAX_CLIPBOARD_SECONDS: u32 = 300;
 pub struct AppSettings {
     pub auto_lock_minutes: u32,
     pub clipboard_clear_seconds: u32,
+    /// Whether the local AI subsystem may run at all. Defaults to `false` --
+    /// AI is opt-in, never a silent default, matching specification section
+    /// 2's "Local AI = OFF must leave every vault feature working." Turning
+    /// this off does not just hide the UI; `ai.rs` refuses every AI command
+    /// while it is false, so a stale cached frontend state can't route
+    /// around the setting.
+    pub ai_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -34,6 +41,7 @@ impl Default for AppSettings {
         Self {
             auto_lock_minutes: 5,
             clipboard_clear_seconds: 30,
+            ai_enabled: false,
         }
     }
 }

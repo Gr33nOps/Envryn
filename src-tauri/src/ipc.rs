@@ -213,13 +213,17 @@ pub fn vault_unlock_with_platform(
 /// Lock the vault. Infallible from the UI's point of view: a lock request must
 /// never leave the vault open because bookkeeping failed.
 #[tauri::command]
-pub fn vault_lock(state: State<'_, VaultState>) {
+pub fn vault_lock(state: State<'_, VaultState>, ai_state: State<'_, crate::ai::AiState>) {
     if let Ok(mut guard) = state.0.lock() {
         if let Some(vault) = guard.as_mut() {
             vault.lock();
         }
         *guard = None;
     }
+    // Killing the AI worker on lock, not just clearing its context, is the
+    // only thing docs/AI_SECURITY.md section 3 trusts to remove whatever
+    // plaintext was in its inference buffers.
+    crate::ai::stop(&ai_state);
 }
 
 /// Enable the platform slot: unlock without the master password, tied to the

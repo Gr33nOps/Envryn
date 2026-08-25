@@ -13,6 +13,7 @@ import {
   SettingsRow,
   Switch,
 } from "@/components/envryn/ui";
+import * as ipc from "@/lib/ipc";
 import {
   IpcError,
   settingsGet,
@@ -209,6 +210,113 @@ function ChangePasswordModal({
   );
 }
 
+/** Local AI: off by default, runs entirely on this device. Every control
+ * here mirrors src-tauri/src/ai.rs's own fail-closed behaviour -- turning
+ * the switch off is a real "no," not just a UI hint. */
+function AiSettingsGroup({
+  settings,
+  updateSettings,
+}: {
+  settings: AppSettings | null;
+  updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
+}) {
+  const [status, setStatus] = React.useState<ipc.AiStatus | null>(null);
+  const [downloading, setDownloading] = React.useState(false);
+  const [starting, setStarting] = React.useState(false);
+
+  const refreshStatus = React.useCallback(() => {
+    ipc
+      .aiStatus()
+      .then(setStatus)
+      .catch(() => {
+        // AI status just stays unknown; every other setting on this page
+        // still works.
+      });
+  }, []);
+
+  React.useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
+
+  async function downloadModel() {
+    setDownloading(true);
+    try {
+      await ipc.aiDownloadModel();
+      toast("Local AI model downloaded");
+    } catch (err) {
+      toast(err instanceof IpcError ? err.message : "Could not download the model.");
+    } finally {
+      setDownloading(false);
+      refreshStatus();
+    }
+  }
+
+  async function toggleAi(enable: boolean) {
+    await updateSettings({ ai_enabled: enable });
+    if (enable) {
+      setStarting(true);
+      try {
+        await ipc.aiStart();
+        toast("Local AI is running");
+      } catch (err) {
+        toast(err instanceof IpcError ? err.message : "Could not start local AI.");
+      } finally {
+        setStarting(false);
+        refreshStatus();
+      }
+    } else {
+      await ipc.aiStop().catch(() => {});
+      refreshStatus();
+    }
+  }
+
+  return (
+    <Group
+      label="Local AI"
+      description="Optional. Runs entirely on this device -- the only network access is the one-time model download below, never during normal use."
+    >
+      <SettingsRow
+        label="Enable local AI"
+        description="Credential classification, naming suggestions, and natural-language search. Off by default."
+        control={
+          <Switch
+            checked={settings?.ai_enabled ?? false}
+            onCheckedChange={(checked) => !starting && void toggleAi(checked)}
+          />
+        }
+      />
+      <SettingsRow
+        label="Model"
+        description={
+          status?.model_downloaded
+            ? status.model_name
+            : "Not downloaded yet (about 350 MB, one-time)"
+        }
+        control={
+          status?.model_downloaded ? (
+            <span className="text-[11.5px] text-success">Ready</span>
+          ) : (
+            <Button size="sm" loading={downloading} onClick={() => void downloadModel()}>
+              <Download />
+              Download
+            </Button>
+          )
+        }
+      />
+      {settings?.ai_enabled && (
+        <SettingsRow
+          label="Status"
+          control={
+            <span className="text-[11.5px] text-muted-foreground">
+              {status?.engine_running ? "Running" : "Not running"}
+            </span>
+          }
+        />
+      )}
+    </Group>
+  );
+}
+
 const AUTO_LOCK_OPTIONS = [1, 5, 15, 30, 60];
 const CLIPBOARD_OPTIONS = [10, 30, 60, 120];
 
@@ -339,8 +447,19 @@ function Settings() {
 
             <Group
               label="Devices and sync"
-              description="Direct device-to-device sync is not available yet."
+              description="Pair a device and sync directly over your local network -- no account, no cloud."
             >
+              <SettingsRow
+                label="Trusted devices"
+                description="Pair a new device, or rename and revoke existing ones."
+                control={
+                  <Link to="/vault/devices">
+                    <Button size="sm">
+                      Manage devices <ArrowRight />
+                    </Button>
+                  </Link>
+                }
+              />
               <SettingsRow
                 label="Sync details"
                 description="See connected devices, activity, and conflicts."
@@ -353,6 +472,8 @@ function Settings() {
                 }
               />
             </Group>
+
+            <AiSettingsGroup settings={settings} updateSettings={updateSettings} />
 
             <Group
               label="Backup"
@@ -450,10 +571,10 @@ function Settings() {
               <div className="flex items-start gap-2.5">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
                 <div>
-                  <p className="text-[12px] font-medium">A note about local sync</p>
+                  <p className="text-[12px] font-medium">A note about sync</p>
                   <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-                    Direct device-to-device pairing and sync are not built yet. Only this PC can
-                    open this vault for now.
+                    Devices sync directly over your local network after you pair them -- there is
+                    no account and no cloud in between.
                   </p>
                   <Link
                     to="/vault/devices"

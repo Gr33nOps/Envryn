@@ -178,19 +178,42 @@ polling was chosen over the `WTS_SESSION_LOCK` window message.
 
 ## 6. AI subsystem
 
-Detailed in `AI_SECURITY.md`. Structurally:
+**Implemented** (`crates/envryn-core/src/ai/`, `crates/envryn-ai-worker/`,
+`src-tauri/src/ai.rs`). Full detail, including two recorded deviations from the design below
+(candle instead of llama.cpp, no grammar-constrained decode), is in `AI_SECURITY.md`.
+Structurally, as built:
 
 ```
-User intent
+User intent (a plain value from a form, or a SecretId)
    -> ai::gateway          resolves ids, applies level policy, redacts, budgets
    -> SanitizedPrompt      constructible only inside the gateway module
-   -> LocalAiEngine        trait; llama.cpp sidecar is one implementation
-   -> grammar-constrained decode
-   -> strict deserialisation
-   -> UI shows a suggestion
+   -> LocalAiEngine        trait; envryn-ai-worker (candle, not llama.cpp -- see below) is the
+                           one implementation; envryn-core also owns spawning it
+                           (worker_client.rs), not src-tauri, so it stays testable as a
+                           plain library the same way sync/'s TCP/TLS code already is
+   -> strict deserialisation   deny_unknown_fields; no grammar-constrained decode layer
+                                exists ahead of this -- see AI_SECURITY.md section 5
+   -> UI shows a suggestion  (wired for classification only today -- AI_DATA_ACCESS.md)
    -> user confirms
    -> vault applies the change
 ```
+
+Like `sync`, `ai` lives inside `envryn-core` rather than directly in `src-tauri` as the box
+diagram in section 1 originally sketched -- the same reasoning applies: it can be tested as a
+plain library, with no windowing system and (via a lightweight test fixture standing in for the
+real worker's wire protocol) no multi-hundred-megabyte model file required for most of its
+tests to run. `src-tauri/src/ai.rs` stays thin: resolving the worker binary's path, resolving
+the models directory, and reading the `ai_enabled` setting are its entire job.
+
+**Why candle instead of llama.cpp.** The original design named llama.cpp specifically. This
+build uses `candle`/`candle-transformers` (a pure-Rust ML framework) instead, discovered as the
+better fit for this development environment: llama.cpp's C++ build requires a C++ toolchain
+(cmake plus MSVC or an ABI-compatible compiler) that was not reliably available, while candle's
+CPU backend compiles as pure Rust with no C/C++ dependency at all. This also means the
+`LocalAiEngine` trait's real implementation gains nothing by being Tauri-specific, which is why
+it lives in `envryn-core` per the paragraph above. The cost: llama.cpp's GBNF grammar-constrained
+decoding has no equivalent implemented here -- `AI_SECURITY.md` section 5 records exactly what
+that gap means and what still holds without it.
 
 The `LocalAiEngine` trait exists so the model and runtime can change without touching feature
 code (spec section 7). Raw model calls appear in exactly one place.
@@ -210,7 +233,7 @@ is ordinary code, which is faster, more private, and works with no model install
 | Screen capture | **Implemented:** `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, applied unconditionally at startup | Not yet. `FLAG_SECURE` via a custom Kotlin plugin, planned |
 | Clipboard | **Implemented:** native write + `ExcludeClipboardContentFromMonitorProcessing` tag + Rust-side timed clear, configurable in Settings | Not yet. `ClipDescription.EXTRA_IS_SENSITIVE`, planned |
 | Lock trigger | **Implemented:** system-wide idle poll (`GetLastInputInfo`, every 5s). **Not implemented:** `WTS_SESSION_LOCK` -- see below | Not yet. Lifecycle background trigger, planned |
-| Local AI | Bundled llama.cpp sidecar -- Phase 3, not started | **Not in v1** (spec section 52) |
+| Local AI | **Implemented:** bundled `candle`-based sidecar (`envryn-ai-worker`), spawned via `std::process::Command`. **Not implemented:** packaging the sidecar via Tauri's `bundle.externalBin` so a released installer includes it -- development builds resolve the binary as a sibling of the running executable | **Not in v1** (spec section 52) |
 | Min version | Windows 10 1809+ | API 26+ (StrongBox 28+) |
 
 **Why idle-poll rather than `WTS_SESSION_LOCK` for now.** A native session-lock hook needs a
@@ -242,10 +265,11 @@ src-tauri/            Tauri shell: window creation, vault IPC (ipc.rs), sync/
                        app settings (settings.rs), idle auto-lock (autolock.rs),
                        capture protection (capture_protection.rs)
 crates/
-  envryn-core/        crypto, model, storage, vault, backup, platform --
+  envryn-core/        crypto, model, storage, vault, backup, platform, sync, ai --
                        no Tauri dependency
-  envryn-ai-worker/   sidecar; not yet started (Phase 3). Will not depend on
-                       envryn-core, per AI-INV-001/002/004/005
+  envryn-ai-worker/   local inference sidecar (candle-based). Does not depend on
+                       envryn-core -- verified with `cargo tree -p envryn-ai-worker
+                       -i envryn-core` (no match), per AI-INV-001/002/004/005
 packages/contract/    generated TS types -- not yet started; the IPC contract
                        is hand-maintained today in apps/ui/src/lib/ipc.ts
 docs/                 this directory
@@ -253,8 +277,11 @@ docs/                 this directory
 
 `envryn-core` is free of Tauri so the security-critical code can be tested as a plain library,
 without a windowing system -- including `platform::windows_impl`, whose tests exercise real
-DPAPI and the real OS clipboard, not mocks. That is also what makes the "AI disabled" CI run
-cheap, once Phase 3 makes that distinction meaningful.
+DPAPI and the real OS clipboard, not mocks. That distinction is now meaningful for AI too: the
+entire `ai` module is additive (`AI_SECURITY.md` section 1), so `cargo test -p envryn-core`
+already *is* the "AI disabled" run in the sense that matters -- every other module's tests pass
+with `ai/` deleted, they just aren't run that way today since there is no Cargo feature flag
+gating `ai/` in or out of the build, and (per below) no CI to run two configurations anyway.
 
 `envryn-core::platform` is the one place in the vault core permitted to contain `unsafe` (the
 crate-level lint is `deny`, not `forbid`, specifically so this one module can carry a scoped
@@ -265,7 +292,18 @@ unsafe-free.
 
 ## 9. Build and release
 
-CI on every commit: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`,
+**No CI pipeline exists in this repository yet** (no `.github/workflows` or equivalent). The
+list below is the target M1 was meant to set up; today, every item on it is run manually,
+locally, before each phase is considered complete -- `cargo fmt --check`, `cargo clippy -D
+warnings`, and `cargo test --workspace` genuinely do run this way every session (see this
+repo's commit history for the verification paragraph on each phase's commit), but `cargo test
+--no-default-features`, `cargo deny check`, `cargo audit`, Semgrep, and the egress test named
+below have never been run at all -- `cargo-deny`/`cargo-audit`/Semgrep are not installed in
+this development environment, and no feature flag currently separates "AI compiled in" from
+"AI compiled out" (see the paragraph above). Wiring an actual CI pipeline that runs all of this
+automatically is real, unstarted work.
+
+Once it exists: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`,
 `cargo test --no-default-features` (the AI-disabled run), `cargo deny check`, `cargo audit`,
 Semgrep, `eslint`, `tsc --noEmit`.
 

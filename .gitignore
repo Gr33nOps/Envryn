@@ -38,3 +38,6 @@ vault-data/
 *.njsproj
 *.sln
 *.sw?
+
+# Dev-only model files for manual AI testing (see crates/envryn-core/tests/ai_real_model.rs)
+/.dev-models/

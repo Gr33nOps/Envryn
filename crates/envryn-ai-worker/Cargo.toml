@@ -1,0 +1,27 @@
+[package]
+name = "envryn-ai-worker"
+description = "Envryn's local AI inference process. A separate binary with no dependency on envryn-core -- it cannot name a vault type, a key, or a database handle, because they are not in its dependency graph (AI-INV-001/002/004/005)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "envryn-ai-worker"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+rand = "0.8"
+
+candle-core = "0.9"
+candle-transformers = "0.9"
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
