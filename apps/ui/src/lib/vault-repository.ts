@@ -67,8 +67,14 @@ const toRustEnvironment = (env: Environment): ipc.RustEnvironment =>
  * host/port/user/password -- which would silently mis-file credentials -- those
  * kinds are stored as a Note payload until the form is extended, so nothing is
  * lost and nothing is fabricated.
+ *
+ * `EnvVar`'s `key` (the variable name itself, e.g. `DATABASE_URL`) is distinct
+ * from the vault's display `name` in principle, but the form collects only one
+ * name field -- so it doubles as both, which is exactly right for a `.env`
+ * import (`EnvImportModal.tsx`), where the variable name *is* the only name
+ * there is.
  */
-function toPayload(type: SecretType, value: string): ipc.SecretPayload {
+function toPayload(type: SecretType, value: string, name: string): ipc.SecretPayload {
   const kind = TYPE_TO_KIND[type];
   switch (kind) {
     case "ApiKey":
@@ -76,7 +82,7 @@ function toPayload(type: SecretType, value: string): ipc.SecretPayload {
     case "Token":
       return { kind: "Token", value };
     case "EnvVar":
-      return { kind: "EnvVar", key: "", value };
+      return { kind: "EnvVar", key: name, value };
     case "Note":
       return { kind: "Note", body: value };
     default:
@@ -229,7 +235,7 @@ export const tauriVaultRepository: VaultRepository = {
       name: input.name,
       project: input.project,
       environment: toRustEnvironment(input.environment),
-      payload: toPayload(input.type, input.value),
+      payload: toPayload(input.type, input.value, input.name),
       notes: input.notes ?? null,
       tags: input.tags ?? [],
       provider: input.provider ?? null,
@@ -246,7 +252,7 @@ export const tauriVaultRepository: VaultRepository = {
       update.environment = toRustEnvironment(input.environment);
     }
     if (input.value !== undefined && input.type !== undefined) {
-      update.payload = toPayload(input.type, input.value);
+      update.payload = toPayload(input.type, input.value, input.name ?? "");
     }
     if (input.notes !== undefined) update.notes = input.notes;
     if (input.tags !== undefined) update.tags = input.tags;

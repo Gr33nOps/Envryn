@@ -1,7 +1,6 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ArrowDownUp, ChevronDown, Plus } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowDownUp, ChevronDown, Plus, Upload } from "lucide-react";
 import { useSecretList } from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
@@ -20,7 +19,7 @@ const filters = [
 ];
 
 function AllSecrets() {
-  const { openAdd } = useVaultUI();
+  const { openAdd, openImport } = useVaultUI();
   const secrets = useSecretList();
   const [filter, setFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
@@ -136,10 +135,11 @@ function AllSecrets() {
             <span>Encrypted values stay on this device.</span>
             <button
               type="button"
-              className="text-primary transition-colors hover:text-foreground"
-              onClick={() => toast("Import and export are next in the vault build")}
+              className="inline-flex items-center gap-1 text-primary transition-colors hover:text-foreground"
+              onClick={() => openImport()}
             >
-              Import or export
+              <Upload className="size-3" />
+              Import .env
             </button>
           </div>
         </Panel>

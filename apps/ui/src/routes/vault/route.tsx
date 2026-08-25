@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/envryn/Sidebar";
 import { SecretPanel } from "@/components/envryn/SecretPanel";
 import { SecretFormModal } from "@/components/envryn/SecretForm";
 import { SearchPalette } from "@/components/envryn/SearchPalette";
+import { EnvImportModal } from "@/components/envryn/EnvImportModal";
 import { VaultUIContext } from "@/components/envryn/vault-context";
 import { type Secret } from "@/lib/envryn-data";
 import { useClearVaultCache, useRevealSecret, useSecretList } from "@/lib/use-vault";
@@ -43,6 +44,7 @@ function VaultLayout() {
   const [editing, setEditing] = React.useState<Secret | null>(null);
   const [preset, setPreset] = React.useState<Partial<Secret> | undefined>();
   const [searchOpen, setSearchOpen] = React.useState(false);
+  const [importOpen, setImportOpen] = React.useState(false);
 
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();
@@ -99,6 +101,7 @@ function VaultLayout() {
         setFormOpen(true);
       },
       openSearch: () => setSearchOpen(true),
+      openImport: () => setImportOpen(true),
     }),
     [selected],
   );
@@ -160,6 +163,7 @@ function VaultLayout() {
         preset={preset}
       />
       <SearchPalette open={searchOpen} onOpenChange={setSearchOpen} onSelect={setSelected} />
+      <EnvImportModal open={importOpen} onOpenChange={setImportOpen} />
     </VaultUIContext.Provider>
   );
 }

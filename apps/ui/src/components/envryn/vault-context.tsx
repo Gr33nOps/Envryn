@@ -7,6 +7,7 @@ interface VaultUI {
   openAdd: (preset?: Partial<Secret>) => void;
   openEdit: (s: Secret) => void;
   openSearch: () => void;
+  openImport: () => void;
 }
 
 export const VaultUIContext = React.createContext<VaultUI>({
@@ -15,6 +16,7 @@ export const VaultUIContext = React.createContext<VaultUI>({
   openAdd: () => {},
   openEdit: () => {},
   openSearch: () => {},
+  openImport: () => {},
 });
 
 export const useVaultUI = () => React.useContext(VaultUIContext);

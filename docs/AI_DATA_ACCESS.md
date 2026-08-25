@@ -48,13 +48,17 @@ specifically).
 "Suggest type" action next to the value field, `apps/ui/src/components/envryn/SecretForm.tsx`)
 and tries `classify_deterministic` first, falling back to the AI command only if that finds
 nothing and local AI is enabled and running -- exactly the "deterministic first" rule in
-section 3 below, expressed in the UI's own call order, not only in the backend. Smart naming,
-`.env` import, structured extraction, and natural-language search have real, tested backend
-commands (`ai_suggest_name`, `ai_classify_env_names`, `ai_extract_structured_fields`,
-`ai_parse_search_intent`) but are **not yet wired into their own frontend flows** -- there is no
-`.env` import screen, no structured-extraction UI, and the existing search box still does plain
-substring filtering rather than calling `ai_parse_search_intent`. Recorded here as real,
-scoped-out remaining work, not silently left undone.
+section 3 below, expressed in the UI's own call order, not only in the backend. Smart naming is
+wired the same way ("Suggest name," same file). Natural-language search
+(`apps/ui/src/components/envryn/SearchPalette.tsx`) falls back to `ai_parse_search_intent` only
+once plain substring search finds nothing. `.env` import
+(`apps/ui/src/components/envryn/EnvImportModal.tsx`) parses pasted text with a real client-side
+parser (never the model), classifies each variable's *value* deterministically first, and only
+sends the bare **names** `classify_deterministic` couldn't place to `ai_classify_env_names` --
+one batch call for the whole file, exactly matching the Level 1 / names-only row in the table
+above. Structured extraction (`ai_extract_structured_fields`) has a real, tested backend command
+but is **not yet wired into its own frontend flow** -- there is no structured-extraction UI yet.
+Recorded here as real, scoped-out remaining work, not silently left undone.
 
 ### Tier 2 (post-MVP)
 
