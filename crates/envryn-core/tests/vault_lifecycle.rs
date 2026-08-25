@@ -486,6 +486,49 @@ fn disabling_platform_protection_preserves_password_unlock() {
     ));
 }
 
+/// The Windows Hello gate cannot be turned on without a platform slot for it
+/// to gate -- gating an unlock path that does not exist is a dangling
+/// setting, not a meaningful one.
+#[test]
+fn enabling_the_hello_gate_requires_platform_protection_first() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("master-password"), FAST).unwrap();
+    assert!(!vault.hello_gate_enabled().unwrap());
+    assert!(matches!(
+        vault.enable_hello_gate(),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(!vault.hello_gate_enabled().unwrap());
+}
+
+/// Disabling the platform slot must clear a Hello gate along with it, not
+/// leave a gate pointing at an unlock path that no longer exists. Sets the
+/// flag directly via `Store` rather than `enable_hello_gate` -- this
+/// environment has no enrolled Windows Hello credential for
+/// `platform::hello_enroll` to succeed against, and this test is about the
+/// bookkeeping in `disable_platform_protection`, not about exercising real
+/// Windows Hello hardware (see `platform::hello`'s own `#[ignore]`d test for
+/// that).
+#[test]
+fn disabling_platform_protection_also_clears_the_hello_gate_flag() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("master-password"), FAST).unwrap();
+    vault
+        .enable_platform_protection(&pw("master-password"))
+        .unwrap();
+
+    let store = envryn_core::storage::Store::open(&t.path).unwrap();
+    store
+        .set_meta(envryn_core::storage::meta_keys::HELLO_GATE_ENABLED, &[1u8])
+        .unwrap();
+    drop(store);
+    assert!(vault.hello_gate_enabled().unwrap());
+
+    vault.disable_platform_protection().unwrap();
+    assert!(!vault.hello_gate_enabled().unwrap());
+    assert!(!vault.platform_protection_enabled().unwrap());
+}
+
 #[test]
 fn enabling_platform_protection_requires_the_correct_password() {
     let t = temp();

@@ -16,6 +16,11 @@ mod windows_impl;
 #[cfg(windows)]
 pub use windows_impl::*;
 
+#[cfg(windows)]
+mod hello;
+#[cfg(windows)]
+pub use hello::{hello_enroll, hello_forget, hello_supported, hello_verify};
+
 #[cfg(not(windows))]
 mod stub;
 #[cfg(not(windows))]

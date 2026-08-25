@@ -68,13 +68,16 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 # with an overlapping feature set, and Cargo unifies both to one crate instance
 # so that the HWND we receive from Tauri and the HWND type here are identical.
 windows = { version = "0.61", features = [
+    # WinRT (not Win32) -- Windows Hello for Apps, platform::hello.
+    "Security_Credentials",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Cryptography",
     "Win32_System_DataExchange",
     "Win32_System_JobObjects",
-    "Win32_System_Memory",
     "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_System_RemoteDesktop",
     "Win32_System_SystemInformation",

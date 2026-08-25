@@ -621,6 +621,53 @@ impl Vault {
         self.state()?;
         self.store.delete_meta(meta_keys::PLATFORM_KEY_BLOB)?;
         self.store.delete_meta(&wrapped_key(KeySlot::Platform))?;
+        // A Hello gate with no platform slot behind it to gate is a
+        // dangling setting, not a stronger one -- clear it along with the
+        // slot it was protecting.
+        self.store.delete_meta(meta_keys::HELLO_GATE_ENABLED)?;
+        Ok(())
+    }
+
+    /// Whether unlocking via the platform slot requires the Windows Hello
+    /// gate first (`platform::hello_verify`). Callable while locked, like
+    /// [`Vault::platform_protection_enabled`] -- the UI needs this to decide
+    /// what unlock button to show before anything is unlocked.
+    pub fn hello_gate_enabled(&self) -> Result<bool> {
+        Ok(self
+            .store
+            .get_meta(meta_keys::HELLO_GATE_ENABLED)?
+            .is_some())
+    }
+
+    /// Turn on the Windows Hello gate. Requires the platform slot to already
+    /// be enabled -- gating an unlock path that doesn't exist is not a
+    /// meaningful setting -- and enrolls a fresh Windows Hello credential via
+    /// `platform::hello_enroll` (triggers the OS enrollment/consent UI).
+    /// This does not change how the VMK is wrapped or unwrapped in any way;
+    /// see `platform::hello`'s module doc for why not.
+    pub fn enable_hello_gate(&mut self) -> Result<()> {
+        self.state()?;
+        if !self.platform_protection_enabled()? {
+            return Err(Error::InvalidInput(
+                "enable platform protection before adding the Windows Hello gate",
+            ));
+        }
+        platform::hello_enroll()?;
+        self.store.set_meta(meta_keys::HELLO_GATE_ENABLED, &[1u8])?;
+        Ok(())
+    }
+
+    /// Turn off the Windows Hello gate. The platform slot itself is
+    /// untouched -- unlocking via DPAPI alone still works, exactly as if the
+    /// gate had never been enabled.
+    pub fn disable_hello_gate(&mut self) -> Result<()> {
+        self.state()?;
+        // Best-effort: the setting is what actually gates unlock, so a
+        // failure to remove the underlying OS credential (e.g. it was
+        // already removed by the user through Windows' own settings) must
+        // not block turning this vault's requirement off.
+        let _ = platform::hello_forget();
+        self.store.delete_meta(meta_keys::HELLO_GATE_ENABLED)?;
         Ok(())
     }
 

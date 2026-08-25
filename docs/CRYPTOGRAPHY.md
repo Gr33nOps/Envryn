@@ -86,7 +86,11 @@ under a password-derived key:
 | Slot | Wrapping key | Present when |
 |---|---|---|
 | `password` | Argon2id(master password) | always |
-| `platform` | DPAPI / Windows Hello / Android Keystore | user enabled platform auth |
+| `platform` | DPAPI (Windows) / Android Keystore (planned) | user enabled platform auth |
+
+An optional Windows Hello *gate* can additionally sit in front of the `platform` slot's unwrap
+(a biometric/PIN prompt that must succeed first) without being a third slot itself -- it wraps
+nothing; see "Platform key details" below and `platform::hello`.
 
 Both slots wrap the **same** VMK. Adding or removing a slot never re-encrypts records, and
 never invalidates the other slot — hence INV-007: losing your fingerprint sensor does not
@@ -104,10 +108,16 @@ Android row below is not.
   produce a different code path for unwrapping the VMK itself.
 
   DPAPI alone is not a user-presence check — it protects against another Windows user account
-  on the machine, not against malware running as this one. The UI accordingly says "Unlock
-  with this Windows account," never "Windows Hello": true Windows Hello (`KeyCredentialManager`,
-  a biometric-gated NCrypt/CNG key) is a different, larger API surface and remains unimplemented.
-  See `docs/ARCHITECTURE.md` section 7.
+  on the machine, not against malware running as this one. An optional Windows Hello *gate*
+  (`platform::hello`, real `KeyCredentialManager`) can require a fresh biometric/PIN gesture
+  before this same DPAPI unwrap is attempted — a genuine OS-enforced presence check — but the
+  unwrap itself is unchanged: `KeyCredentialManager` only exposes signing, and standard ECDSA
+  signatures are not deterministic, so there is no way to derive a stable unwrap key from a
+  signature the way DPAPI's recovered bytes work. A cryptographically stronger binding (the VMK
+  itself gated by a hardware key, not just an authentication check in front of it) would need raw
+  CNG against the Microsoft Passport key storage provider — materially larger scope, not built.
+  The UI must not claim the vault key is bound to the biometric; only the gate is real Windows
+  Hello. See `docs/ARCHITECTURE.md` section 7 and `platform::hello`'s module doc.
 
 - *Android, not implemented*: planned as an AES key in the Android Keystore created with
   `setUserAuthenticationRequired(true)`, and `setIsStrongBoxBacked(true)` where StrongBox

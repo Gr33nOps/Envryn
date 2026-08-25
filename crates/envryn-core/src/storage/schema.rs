@@ -181,6 +181,13 @@ pub mod meta_keys {
     /// touches the VMK directly and the AEAD wrap path stays the only thing
     /// that ever handles it.
     pub const PLATFORM_KEY_BLOB: &str = "platform_key_blob";
+    /// Whether unlocking via the platform slot must first pass the Windows
+    /// Hello gate (`platform::hello_verify`) -- a UX/authentication
+    /// requirement layered in front of the DPAPI unwrap, not a different key
+    /// derivation. Presence of this key (any value) means "on"; absence
+    /// means "off," matching `PLATFORM_KEY_BLOB`'s own presence-as-boolean
+    /// convention.
+    pub const HELLO_GATE_ENABLED: &str = "hello_gate_enabled";
 }
 
 #[cfg(test)]

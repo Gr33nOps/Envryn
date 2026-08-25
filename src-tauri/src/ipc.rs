@@ -134,6 +134,16 @@ pub struct VaultStatus {
     /// while locked, since it decides whether the unlock screen should offer
     /// "unlock with this Windows account" before anything has been typed.
     pub platform_protection_enabled: bool,
+    /// Whether Windows Hello for Apps is available on this machine
+    /// (hardware plus an enrolled biometric/PIN) -- used to decide whether
+    /// Settings offers the Hello-gate option at all. Not the same question
+    /// as `platform_protection_available`: a machine can have DPAPI (every
+    /// Windows install does) without having Windows Hello enrolled.
+    pub hello_gate_available: bool,
+    /// Whether *this* vault currently requires the Windows Hello gate before
+    /// its platform-slot unlock. See `platform::hello`'s module doc for what
+    /// this does and does not cryptographically guarantee.
+    pub hello_gate_enabled: bool,
 }
 
 #[tauri::command]
@@ -150,12 +160,18 @@ pub fn vault_status(app: tauri::AppHandle, state: State<'_, VaultState>) -> IpcR
         && Vault::open(&path)
             .and_then(|v| v.platform_protection_enabled())
             .unwrap_or(false);
+    let hello_gate_enabled = exists
+        && Vault::open(&path)
+            .and_then(|v| v.hello_gate_enabled())
+            .unwrap_or(false);
 
     Ok(VaultStatus {
         exists,
         unlocked,
         platform_protection_available: envryn_core::platform::dpapi_available(),
         platform_protection_enabled,
+        hello_gate_available: envryn_core::platform::hello_supported(),
+        hello_gate_enabled,
     })
 }
 
@@ -201,6 +217,11 @@ pub fn vault_unlock(
 
 /// Unlock using the platform slot instead of the master password. Only
 /// reachable when `vault_status` already reported the slot enabled.
+///
+/// If this vault has the Windows Hello gate enabled, `platform::hello_verify`
+/// runs first and must succeed (a real OS biometric/PIN prompt) before the
+/// DPAPI unwrap is even attempted -- see `platform::hello`'s module doc for
+/// what that gate does and does not guarantee.
 #[tauri::command]
 pub fn vault_unlock_with_platform(
     app: tauri::AppHandle,
@@ -208,6 +229,9 @@ pub fn vault_unlock_with_platform(
 ) -> IpcResult<()> {
     let path = vault_path(&app)?;
     let mut vault = Vault::open(&path)?;
+    if vault.hello_gate_enabled()? {
+        envryn_core::platform::hello_verify()?;
+    }
     vault.unlock_with_platform()?;
     vault.set_local_device_id(crate::sync::local_device_id(&app)?)?;
     state.install(vault)
@@ -247,6 +271,22 @@ pub fn vault_enable_platform_protection(
 #[tauri::command]
 pub fn vault_disable_platform_protection(state: State<'_, VaultState>) -> IpcResult<()> {
     state.with(Vault::disable_platform_protection)
+}
+
+/// Turn on the Windows Hello gate in front of the platform slot. Requires
+/// the platform slot to already be enabled, and triggers the OS Windows
+/// Hello enrollment/consent UI (`platform::hello_enroll`). See
+/// `platform::hello`'s module doc for exactly what this does and does not
+/// guarantee -- it is a UX/authentication gate, not a stronger key wrap.
+#[tauri::command]
+pub fn vault_enable_hello_gate(state: State<'_, VaultState>) -> IpcResult<()> {
+    state.with(Vault::enable_hello_gate)
+}
+
+/// Turn off the Windows Hello gate. The platform slot itself is untouched.
+#[tauri::command]
+pub fn vault_disable_hello_gate(state: State<'_, VaultState>) -> IpcResult<()> {
+    state.with(Vault::disable_hello_gate)
 }
 
 /// Change the master password. Requires the current one; see

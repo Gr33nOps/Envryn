@@ -44,6 +44,8 @@ pub fn run() {
             ipc::vault_lock,
             ipc::vault_enable_platform_protection,
             ipc::vault_disable_platform_protection,
+            ipc::vault_enable_hello_gate,
+            ipc::vault_disable_hello_gate,
             ipc::vault_change_password,
             ipc::secret_list,
             ipc::secret_search,

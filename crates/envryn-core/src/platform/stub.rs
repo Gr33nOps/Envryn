@@ -45,6 +45,24 @@ pub fn watch_session_lock(_hwnd: isize, _on_lock: impl Fn() + Send + Sync + 'sta
 
 pub fn unwatch_session_lock(_hwnd: isize) {}
 
+/// Non-Windows placeholder for `hello::hello_supported` -- Windows Hello for
+/// Apps is a Windows-only WinRT API.
+pub fn hello_supported() -> bool {
+    false
+}
+
+pub fn hello_enroll() -> Result<()> {
+    Err(Error::PlatformUnavailable)
+}
+
+pub fn hello_forget() -> Result<()> {
+    Err(Error::PlatformUnavailable)
+}
+
+pub fn hello_verify() -> Result<()> {
+    Err(Error::PlatformUnavailable)
+}
+
 /// Non-Windows placeholder for `windows_impl::KillOnCloseJob` -- there is
 /// no equivalent primitive implemented for this platform yet. Callers
 /// (`crate::ai::worker_client::WorkerClient`) already treat this as a

@@ -255,15 +255,21 @@ this app shipped with before. This closes the item that stayed open through the 
 (M22-M28) hardening pass, which had focused on the AI attack surface, the network-privacy proof,
 and supply-chain policy enforcement instead (see `AI_SECURITY.md` section 10 and
 `DEPENDENCY_POLICY.md` section 6) rather than platform-trigger coverage.
-pass closed.
 
-**What "Unlock with this Windows account" actually is.** It is DPAPI (`CryptProtectData`), tied to
-the current Windows user account -- not `KeyCredentialManager`, and not a biometric gesture. The
-UI is worded to match: "Unlock with this Windows account," never "Windows Hello." DPAPI may
-itself be backed by a TPM or a Hello-protected profile depending on the machine's configuration,
-but Envryn does not invoke that layer directly, so it does not claim to. See
-`docs/CRYPTOGRAPHY.md` section 2 for how the platform slot's key hierarchy stays independent of
-this distinction (DPAPI protects a random platform key, never the VMK directly).
+**What "Unlock with this Windows account" actually is, and what the optional Hello gate adds.**
+The unlock itself is still DPAPI (`CryptProtectData`), tied to the current Windows user account --
+DPAPI may itself be backed by a TPM or a Hello-protected profile depending on the machine's
+configuration, but Envryn does not invoke that layer directly for the unwrap itself. What changed:
+`platform::hello` now uses `KeyCredentialManager` for real, but as an authentication *gate* placed
+in front of that same DPAPI unwrap, not a replacement for it -- `KeyCredentialManager` only exposes
+signing, and standard ECDSA signatures are not deterministic, so there is no way to derive a stable
+unwrap key from a signature the way DPAPI's recovered bytes work. When a vault has the Hello gate
+enabled, `vault_unlock_with_platform` calls `platform::hello_verify` (a real biometric/PIN prompt)
+first, and only proceeds to the unchanged DPAPI unwrap if that succeeds. The UI must still not
+claim the vault key is bound to the biometric itself -- it is not; only the *gate* is real Windows
+Hello. See `docs/CRYPTOGRAPHY.md` section 2 for how the platform slot's key hierarchy stays
+independent of this distinction (DPAPI protects a random platform key, never the VMK directly),
+and `platform::hello`'s own module doc for the full reasoning.
 
 Android receives AI-generated metadata through sync once confirmed on Windows (spec section 53),
 so shipping without on-device inference costs organisation, not correctness.
