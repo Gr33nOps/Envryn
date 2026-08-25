@@ -152,13 +152,19 @@ it). As of M22, that same real-model suite includes
 process's own `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` at a closed local port and confirms real
 inference still succeeds unaffected — the closest thing this environment can safely do to "cut
 the network and confirm AI still works" without touching the real OS firewall on a machine used
-for other things. What is **not** exercised: the interactive Settings flow (enable → download →
-start → use) end-to-end inside the actual native Tauri window — this development environment has
-no way to screenshot or drive a native GUI window, only a browser-based preview of the frontend
-build, which was used to confirm the Settings UI renders correctly and degrades gracefully with
-no Tauri IPC available, but never exercised real IPC calls into `ai.rs`. Also not exercised: a
-real deny-all-egress firewall rule (see `AI_SECURITY.md` section 10 for why, and what stands in
-for it instead).
+for other things.
+
+As of the WebDriver work described in `ARCHITECTURE.md` section 9, "this environment cannot
+drive a native GUI window" is no longer true: `.dev-tools/webdriver-smoke.mjs` genuinely launches
+the release binary, types into real form fields, clicks through real Radix/shadcn buttons via the
+W3C Actions API, creates a real vault, navigates to Settings, and screenshots the real "Local AI"
+section (enable toggle, model status, download button) rendering correctly — not a browser-only
+preview. That script is a manual smoke test, not an automated CI suite, and does not yet drive
+the AI enable → download → start → use flow specifically (it stops at confirming Settings
+renders) — the interactive Settings-to-inference flow remains unexercised end-to-end, but for a
+smaller reason now (nobody has extended the script that far yet) rather than the tooling gap this
+row used to describe. Also not exercised: a real deny-all-egress firewall rule (see
+`AI_SECURITY.md` section 10 for why, and what stands in for it instead).
 
 ---
 

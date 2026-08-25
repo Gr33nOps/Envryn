@@ -312,26 +312,40 @@ unsafe-free.
 
 ## 9. Build and release
 
-**No CI pipeline exists in this repository yet** (no `.github/workflows` or equivalent). The
-list below is the target M1 was meant to set up; today, every item on it is run manually,
-locally, before each phase is considered complete -- `cargo fmt --check`, `cargo clippy -D
-warnings`, and `cargo test --workspace` genuinely do run this way every session (see this
-repo's commit history for the verification paragraph on each phase's commit). As of Phase 4
-(M22), `cargo-deny` and `cargo-audit` are installed in this development environment and
-genuinely run (`deny.toml` at the repo root, `cargo deny check` exits 0), and two real Semgrep
-rule sets exist and run clean against the codebase (`.semgrep/network-egress.yml`,
-`.semgrep/ai-no-content-logging.yml`). `cargo test --no-default-features` and the live
-deny-all-egress firewall test remain not run -- no feature flag currently separates "AI compiled
-in" from "AI compiled out" (see the paragraph above), and a real firewall rule was judged too
-disruptive to configure against this development machine (see `AI_SECURITY.md` section 10 for
-what stands in for it instead: a structural dependency-graph check plus a real-model test run
-under a poisoned proxy environment). Wiring an actual CI pipeline that runs all of this
-automatically on every push is still real, unstarted work -- every check above is a pre-release
-manual step, not a merge gate.
+**A real CI pipeline now exists**: `.github/workflows/ci.yml`, GitHub Actions. It mirrors the
+exact manual commands this repo's commit history already verified by hand for every phase rather
+than inventing a separate CI-only check -- `cargo fmt --check`, `cargo clippy --workspace
+--all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`
+(`EmbarkStudios/cargo-deny-action`), and `cargo audit` on `windows-latest` (deliberately not
+`ubuntu-latest`: most of the sync/AI/hardening work lives behind `#[cfg(windows)]`, and building
+on Linux would silently compile the `stub` fallbacks and test none of it); Semgrep and the
+frontend job (`eslint`, `tsc --noEmit`, `vite build`) run on `ubuntu-latest` instead, since
+neither is platform-specific and both are faster there. `cargo test --no-default-features` and a
+live deny-all-egress firewall test remain not run in CI -- no feature flag currently separates
+"AI compiled in" from "AI compiled out" (see the paragraph above), and a real firewall rule was
+judged too disruptive to configure against a real development machine (see `AI_SECURITY.md`
+section 10 for what stands in for it instead). The workflow triggers on push/PR to `main`; it has
+not yet been extended to gate merges (no branch protection rule requiring it to pass configured).
 
-Once it exists: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --workspace`,
-`cargo test --no-default-features` (the AI-disabled run), `cargo deny check`, `cargo audit`,
-Semgrep, `eslint`, `tsc --noEmit`.
+**Native GUI verification, real as of this pass.** `.dev-tools/webdriver-smoke.mjs` drives the
+actual compiled Tauri window through the W3C WebDriver protocol via `tauri-driver` (wrapping
+`msedgedriver.exe`) -- not a browser-only preview of the Vite dev server, which is what every
+earlier phase's docs correctly said was the limit of this environment. It launches the real
+release binary, types into real form fields, submits via the W3C Actions API (the legacy
+WebDriver `Element Click` command did not reliably trigger this app's Radix/shadcn-styled
+buttons -- a real, previously-undiscovered quirk, not a workaround invented to dodge a problem),
+creates a real vault, and navigates to and screenshots the real Settings page. Building and
+running it for the first time also surfaced a real, previously-undiscovered production bug: a
+plain `cargo build --release` (not through the Tauri CLI) served the webview from `devUrl`
+(`localhost:1420`) instead of the embedded frontend, because `src-tauri/Cargo.toml` was missing
+the `default = ["custom-protocol"]` feature every Tauri scaffold has -- fixed there. Without that
+fix, any real release build handed to a user would have shipped a blank "can't reach this page"
+window. This is a manual script, not wired into CI (WebView2/Edge automation needs a real
+Windows desktop session, which GitHub-hosted `windows-latest` runners do provide but this pass
+did not attempt to wire up) -- run it by hand per its own header comment.
+
+Once CI is a merge gate: same list, plus `cargo test --no-default-features` (the AI-disabled
+run).
 
 Release additionally requires: signed Windows and Android binaries, no development AI endpoints,
 no remote inference configuration, no debug unlock path, no test secrets in the bundle, and a

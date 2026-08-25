@@ -41,3 +41,11 @@ vault-data/
 
 # Dev-only model files for manual AI testing (see crates/envryn-core/tests/ai_real_model.rs)
 /.dev-models/
+
+# Dev-only native-window WebDriver tooling (see .dev-tools/webdriver-smoke.mjs)
+# -- the driver binary is machine-specific (must match the installed Edge
+# version) and Microsoft's to distribute, not ours; screenshots/page-source
+# are throwaway run output. The script itself is tracked.
+/.dev-tools/edgedriver*
+/.dev-tools/*.png
+/.dev-tools/page-source.html
