@@ -328,9 +328,10 @@ survives. Records still travel encrypted throughout: `sync::protocol`'s wire typ
 opaque `sealed` blob (plus the small, non-secret vector-clock metadata), never plaintext.
 
 Deletions are tombstones (a `deleted` flag; the sealed content is cleared but the row stays)
-rather than row removal, and a delete's HLC is compared like any other write — so a concurrent
-edit with an older HLC cannot resurrect a deleted record. No retention window (scheduled purge
-of old tombstones) is implemented; see `THREAT_MODEL.md` S-10.
+rather than row removal, and a delete's HLC (and version vector) advance like any other write —
+so a concurrent edit with an older HLC cannot resurrect a deleted record. Old tombstones are
+purged once past `storage::TOMBSTONE_RETENTION_MS` (90 days), run opportunistically on unlock
+rather than a background timer; see `THREAT_MODEL.md` S-10.
 
 ---
 

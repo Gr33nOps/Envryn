@@ -187,6 +187,7 @@ impl Vault {
         let vmk = VaultMasterKey::unwrap_from(&kek, &wrapped, KeySlot::Password)?;
         let keys = VaultKeys::derive_from(&vmk)?;
 
+        self.purge_expired_tombstones()?;
         let index = load_index(&self.store, &keys.record)?;
         self.state = Some(UnlockedState {
             keys,
@@ -784,6 +785,7 @@ impl Vault {
         let vmk = VaultMasterKey::unwrap_from(&platform_kek, &wrapped, KeySlot::Platform)?;
 
         let keys = VaultKeys::derive_from(&vmk)?;
+        self.purge_expired_tombstones()?;
         let index = load_index(&self.store, &keys.record)?;
         self.state = Some(UnlockedState {
             keys,
@@ -791,6 +793,16 @@ impl Vault {
             local_device_id: 0,
             last_hlc: Hlc::ZERO,
         });
+        Ok(())
+    }
+
+    /// See `storage::TOMBSTONE_RETENTION_MS`. A plain `DELETE` against
+    /// already-validated tables, so a failure here is a real storage error
+    /// (the same class `load_index` right after this would hit too) rather
+    /// than something worth swallowing to let unlock limp on regardless.
+    fn purge_expired_tombstones(&self) -> Result<()> {
+        let cutoff = now_ms().saturating_sub(crate::storage::TOMBSTONE_RETENTION_MS);
+        self.store.purge_expired_tombstones(cutoff)?;
         Ok(())
     }
 }

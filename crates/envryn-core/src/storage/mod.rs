@@ -19,6 +19,17 @@ pub use hlc::Hlc;
 pub use schema::{meta_keys, RECORD_VERSION, SCHEMA_VERSION};
 pub use version_vector::VersionVector;
 
+/// How long a tombstone is kept before `Store::purge_expired_tombstones` may
+/// remove the row entirely. Long enough that a device which has not synced
+/// in a while still gets to see (and thus propagate) a deletion before it is
+/// purged -- a device offline for longer than this could resurrect a record
+/// its peers already purged, which is the tradeoff a retention window always
+/// makes, not a bug specific to this one. 90 days matches a generous "this
+/// laptop was in a drawer for a season" scenario without keeping tombstones
+/// forever (INV-110's original wording, restored: a *bounded* window, not
+/// indefinite retention).
+pub const TOMBSTONE_RETENTION_MS: i64 = 90 * 24 * 60 * 60 * 1000;
+
 /// A stored row, still sealed.
 ///
 /// There is deliberately no separate `updated_ms` field: `hlc.wall_ms` *is*
@@ -527,6 +538,41 @@ impl Store {
         Ok(())
     }
 
+    /// Remove tombstones older than `older_than_ms` (an absolute timestamp,
+    /// not a duration) entirely, along with any preserved conflicts for the
+    /// same id -- once the tombstone itself is gone, a conflict referencing
+    /// it has nothing left to be recovered against. Called opportunistically
+    /// on unlock (`Vault::unlock`/`unlock_with_platform`), not on a
+    /// background timer -- a vault that is never opened doesn't need one,
+    /// and one that is opened regularly purges on the cadence it is actually
+    /// used, which is the only cadence that matters.
+    ///
+    /// Returns how many tombstones were purged.
+    pub fn purge_expired_tombstones(&self, older_than_ms: i64) -> Result<usize> {
+        let ids: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id FROM secrets WHERE deleted = 1 AND updated_ms < ?1")?;
+            let rows = stmt.query_map(params![older_than_ms], |r| r.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            out
+        };
+        for id in &ids {
+            self.conn.execute(
+                "DELETE FROM record_conflicts WHERE secret_id = ?1",
+                params![id],
+            )?;
+        }
+        let purged = self.conn.execute(
+            "DELETE FROM secrets WHERE deleted = 1 AND updated_ms < ?1",
+            params![older_than_ms],
+        )?;
+        Ok(purged)
+    }
+
     /// Ids of live records sharing a fingerprint. Exact duplicate detection is
     /// deterministic and never involves the AI (docs/CRYPTOGRAPHY.md section 5).
     pub fn find_by_fingerprint(&self, fp: &Fingerprint) -> Result<Vec<SecretId>> {
@@ -835,6 +881,104 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM secrets", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 1);
+    }
+
+    /// A tombstone older than the cutoff is removed entirely; one that is
+    /// still within the retention window is left alone -- the whole point of
+    /// a *bounded* window rather than either immediate removal (INV-110's
+    /// resurrection risk) or indefinite retention (unbounded growth).
+    #[test]
+    fn purge_removes_only_tombstones_past_the_cutoff() {
+        let store = Store::open_in_memory().unwrap();
+
+        let old = record(b"old");
+        let old_id = old.id;
+        store.insert(&old).unwrap();
+        store
+            .soft_delete(
+                old_id,
+                Hlc {
+                    wall_ms: 1_000,
+                    counter: 0,
+                    device_id: 1,
+                },
+            )
+            .unwrap();
+
+        let recent = record(b"recent");
+        let recent_id = recent.id;
+        store.insert(&recent).unwrap();
+        store
+            .soft_delete(
+                recent_id,
+                Hlc {
+                    wall_ms: 1_000_000,
+                    counter: 0,
+                    device_id: 1,
+                },
+            )
+            .unwrap();
+
+        let purged = store.purge_expired_tombstones(500_000).unwrap();
+        assert_eq!(purged, 1);
+
+        let remaining_rows: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM secrets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining_rows, 1, "only the old tombstone should be gone");
+
+        let still_there: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM secrets WHERE id = ?1",
+                params![recent_id.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 1, "the recent tombstone must survive");
+    }
+
+    /// Purging a tombstone must not leave an orphaned conflict pointing at a
+    /// row that no longer exists.
+    #[test]
+    fn purging_a_tombstone_also_purges_its_preserved_conflicts() {
+        let store = Store::open_in_memory().unwrap();
+
+        let mut from_device_1 = record(b"edited-on-device-1");
+        from_device_1.hlc = Hlc {
+            wall_ms: 100,
+            counter: 0,
+            device_id: 1,
+        };
+        store.insert(&from_device_1).unwrap();
+
+        let device_2_hlc = Hlc {
+            wall_ms: 200,
+            counter: 0,
+            device_id: 2,
+        };
+        let mut from_device_2 = record(b"edited-on-device-2");
+        from_device_2.id = from_device_1.id;
+        from_device_2.hlc = device_2_hlc;
+        from_device_2.version_vector = VersionVector::single(device_2_hlc);
+        store.upsert_from_sync(&from_device_2).unwrap();
+        assert_eq!(store.count_conflicts().unwrap(), 1);
+
+        store
+            .soft_delete(
+                from_device_1.id,
+                Hlc {
+                    wall_ms: 1_000_000,
+                    counter: 0,
+                    device_id: 1,
+                },
+            )
+            .unwrap();
+
+        let purged = store.purge_expired_tombstones(2_000_000).unwrap();
+        assert_eq!(purged, 1);
+        assert_eq!(store.count_conflicts().unwrap(), 0);
     }
 
     #[test]

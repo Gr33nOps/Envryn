@@ -149,9 +149,9 @@ S-09, `SECURITY_INVARIANTS.md` INV-109 — both now implemented).
 
 Deletions are tombstones (a `deleted` flag; content cleared, row kept), not immediate row
 removal — a deletion racing a sync cannot be resurrected by a concurrent edit, since the
-delete's HLC (and its version vector) advance like any other write. **No retention window is
-implemented**: tombstone rows persist indefinitely rather than being purged after a bounded
-period.
+delete's HLC (and its version vector) advance like any other write. Tombstones are purged once
+past a 90-day retention window (`storage::TOMBSTONE_RETENTION_MS`), opportunistically on unlock
+rather than a background timer.
 
 ---
 
