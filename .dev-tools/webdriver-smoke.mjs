@@ -109,9 +109,7 @@ async function findAllByCss(sessionId, selector) {
 }
 
 async function getText(sessionId, elementId) {
-  const res = await fetch(
-    `${driverUrl}/session/${sessionId}/element/${elementId}/text`,
-  );
+  const res = await fetch(`${driverUrl}/session/${sessionId}/element/${elementId}/text`);
   const body = await res.json();
   return body.value;
 }
@@ -148,10 +146,7 @@ async function dispatchReactInputEvent(sessionId, elementId) {
 }
 
 async function click(sessionId, elementId) {
-  await fetch(
-    `${driverUrl}/session/${sessionId}/element/${elementId}/click`,
-    { method: "POST" },
-  );
+  await fetch(`${driverUrl}/session/${sessionId}/element/${elementId}/click`, { method: "POST" });
 }
 
 /**
@@ -171,7 +166,13 @@ async function actionClick(sessionId, elementId) {
           id: "mouse1",
           parameters: { pointerType: "mouse" },
           actions: [
-            { type: "pointerMove", duration: 0, origin: { "element-6066-11e4-a52e-4f735466cecf": elementId }, x: 0, y: 0 },
+            {
+              type: "pointerMove",
+              duration: 0,
+              origin: { "element-6066-11e4-a52e-4f735466cecf": elementId },
+              x: 0,
+              y: 0,
+            },
             { type: "pointerDown", button: 0 },
             { type: "pause", duration: 50 },
             { type: "pointerUp", button: 0 },
@@ -271,7 +272,9 @@ async function main() {
       // (and a manual look at shot-04-settings.png) show the "Local AI"
       // section -- enable toggle, model status, download button -- exactly
       // as expected. Look at the PNG, not just this console output.
-      console.log("Settings screenshot saved -- inspect shot-04-settings.png for the Local AI section.");
+      console.log(
+        "Settings screenshot saved -- inspect shot-04-settings.png for the Local AI section.",
+      );
     } else {
       console.log(
         "Could not find a direct link to /vault/settings -- screenshots still show real app state.",
