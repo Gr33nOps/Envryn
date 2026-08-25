@@ -44,7 +44,15 @@ jobs:
         run: cargo test --workspace
 
       - name: cargo deny check
-        uses: EmbarkStudios/cargo-deny-action@v2
+        # Not the EmbarkStudios/cargo-deny-action marketplace action: it is
+        # a Docker container action, and GitHub Actions only supports
+        # container actions on Linux runners -- it fails outright here with
+        # "Container action is only supported on Linux", discovered by
+        # actually running this workflow rather than assumed to work.
+        # Installing the native binary works identically cross-platform.
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check
 
       - name: cargo audit
         run: |
