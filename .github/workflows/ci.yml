@@ -49,6 +49,16 @@ jobs:
   rust:
     name: Rust (fmt, clippy, test, deny, audit)
     runs-on: [self-hosted, envryn-self-hosted]
+    # This runner is the maintainer's own desktop, not a dedicated CI box --
+    # it also runs an ordinary desktop workload (browser, editors, etc.),
+    # so free memory at any given moment is not what a GitHub-hosted
+    # runner would guarantee. `cargo clippy --workspace --all-targets`
+    # compiling this workspace's heavier crates (tauri-utils, candle) at
+    # full default parallelism hit a genuine `rustc-LLVM ERROR: out of
+    # memory` here. Capping build parallelism paces the same compile
+    # rather than skipping or weakening anything it checks.
+    env:
+      CARGO_BUILD_JOBS: "4"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -133,19 +143,21 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # Pinned to a specific release, not the floating "3.x", after the
-      # self-hosted runner failed here: "3.x" resolved to the newest
-      # available Python (3.14.7) at the moment this ran, and that
-      # release's Windows installer asset was incomplete upstream
-      # (actions/setup-python downloaded a .zip but then tried to run a
-      # "...-amd64.exe" installer that was never fetched) -- not a
-      # self-hosted-runner-specific problem, reproducible against any
-      # runner hitting that release the same week. A pinned, already-
-      # stable version sidesteps it and is also more reproducible.
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
-        with:
-          python-version: "3.12"
-
+      # No actions/setup-python here, deliberately, after it failed twice
+      # against this self-hosted runner (both a floating "3.x" and a
+      # pinned "3.12" hit the same error): its Windows install path shells
+      # out to a bare "python-<ver>-amd64.exe", relying on the working
+      # directory being searched the way cmd.exe does -- but this runner's
+      # default shell is PowerShell 7, which (correctly, per PowerShell's
+      # own security model) does not resolve bare executable names from
+      # the current directory, so the call fails with "is not recognized
+      # as an internal or external command" before Python is ever
+      # installed. This reproduces on any self-hosted Windows runner using
+      # pwsh as its default shell, independent of which Python version is
+      # requested -- not something a version pin can fix. A system Python
+      # is already present on this runner's own PATH, so the action is
+      # skipped rather than fought; `pip install semgrep` and the scan
+      # itself are unchanged.
       - run: pip install semgrep
 
       - run: semgrep --config .semgrep/ crates/ src-tauri/ apps/ui/src --error
