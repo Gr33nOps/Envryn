@@ -11,13 +11,6 @@
 
 use tauri::Manager;
 
-/// Envryn's `--background` design token (`apps/ui/src/styles.css`),
-/// `oklch(0.135 0.004 155)` converted to sRGB -- computed independently
-/// with the standard CSS Color 4 OKLab matrices, not eyeballed, so this
-/// border matches the real rendered background rather than an approximation
-/// of it.
-const BACKGROUND_RGB_HEX: u32 = 0x07_09_08;
-
 pub fn apply(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -25,6 +18,15 @@ pub fn apply(app: &tauri::AppHandle) {
 
     #[cfg(windows)]
     {
+        /// Envryn's `--background` design token (`apps/ui/src/styles.css`),
+        /// `oklch(0.135 0.004 155)` converted to sRGB -- computed
+        /// independently with the standard CSS Color 4 OKLab matrices, not
+        /// eyeballed, so this border matches the real rendered background
+        /// rather than an approximation of it. Declared inside this `#[cfg]`
+        /// block, not at module scope, because it is meaningless on any
+        /// platform other than Windows (this file also builds for Android).
+        const BACKGROUND_RGB_HEX: u32 = 0x07_09_08;
+
         let Ok(hwnd) = window.hwnd() else {
             return;
         };
