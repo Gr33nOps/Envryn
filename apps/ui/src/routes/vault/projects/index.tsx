@@ -1,8 +1,9 @@
+import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChevronRight, FolderClosed, Plus } from "lucide-react";
-import { toast } from "sonner";
 import { useProjects } from "@/lib/use-vault";
-import { Button } from "@/components/envryn/ui";
+import { useVaultUI } from "@/components/envryn/vault-context";
+import { Button, Field, Input, Modal } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/projects/")({
   component: Projects,
@@ -14,8 +15,67 @@ function environmentDotClass(name: string): string {
   return "environment-dot";
 }
 
+/**
+ * There is no `project_create` command -- `useProjects` derives the list
+ * entirely from secrets' own `project` field (see that hook's doc comment).
+ * "New project" therefore means: name it here, then land on the normal Add
+ * Secret form with that name already filled in, so the project exists the
+ * same way every other project does -- by holding a secret.
+ */
+function NewProjectModal({
+  open,
+  onOpenChange,
+  onNamed,
+}: Readonly<{
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onNamed: (name: string) => void;
+}>) {
+  const [name, setName] = React.useState("");
+
+  React.useEffect(() => {
+    if (open) setName("");
+  }, [open]);
+
+  function submit() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onOpenChange(false);
+    onNamed(trimmed);
+  }
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title="New project"
+      description="Give it a name, then add its first secret."
+      footer={
+        <>
+          <Button onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="primary" disabled={!name.trim()} onClick={submit}>
+            Continue
+          </Button>
+        </>
+      }
+    >
+      <Field label="Project name" hint="You'll add its first secret next.">
+        <Input
+          autoFocus
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => event.key === "Enter" && submit()}
+          placeholder="e.g. Rescripto"
+        />
+      </Field>
+    </Modal>
+  );
+}
+
 function Projects() {
   const projects = useProjects();
+  const { openAdd } = useVaultUI();
+  const [newProjectOpen, setNewProjectOpen] = React.useState(false);
   return (
     <div className="min-h-full bg-background">
       <div className="content-wrap content-wrap--narrow">
@@ -29,15 +89,17 @@ function Projects() {
               Keep credentials together by app and environment.
             </p>
           </div>
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={() => toast("New project setup is ready to connect")}
-          >
+          <Button variant="primary" size="lg" onClick={() => setNewProjectOpen(true)}>
             <Plus />
             New project
           </Button>
         </header>
+
+        <NewProjectModal
+          open={newProjectOpen}
+          onOpenChange={setNewProjectOpen}
+          onNamed={(name) => openAdd({ project: name })}
+        />
 
         <div className="mb-3 flex items-center justify-between border-y border-border/70 py-2.5 text-[11.5px] text-muted-foreground">
           <span>{projects.length} projects</span>

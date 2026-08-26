@@ -109,7 +109,7 @@ function JoinVaultView({ onCancel }: Readonly<{ onCancel: () => void }>) {
   const confirmingOrJoining = joinStage === "confirming" || joinStage === "joining";
 
   return (
-    <main className="unlock-page flex min-h-screen items-center justify-center bg-background px-5 py-10">
+    <main className="unlock-page flex min-h-full items-center justify-center bg-background px-5 py-10">
       <div className="w-full max-w-[420px]">
         <div className="flex items-center gap-3 px-1">
           <LogoMark size={34} />
@@ -331,7 +331,7 @@ function Unlock() {
   }
 
   return (
-    <main className="unlock-page flex min-h-screen items-center justify-center bg-background px-5 py-10">
+    <main className="unlock-page flex min-h-full items-center justify-center bg-background px-5 py-10">
       <form onSubmit={submit} className="w-full max-w-[420px]">
         <div className="flex items-center gap-3 px-1">
           <LogoMark size={34} />

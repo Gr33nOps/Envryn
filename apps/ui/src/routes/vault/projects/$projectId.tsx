@@ -1,11 +1,22 @@
 import * as React from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { Plus, ChevronLeft } from "lucide-react";
-import { type Environment } from "@/lib/envryn-data";
-import { useProjects, useSecretList } from "@/lib/use-vault";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { Plus, ChevronLeft, Pencil, Check, X as XIcon } from "lucide-react";
+import { toast } from "sonner";
+import { type Environment, type Project, type Secret } from "@/lib/envryn-data";
+import * as ipc from "@/lib/ipc";
+import { useProjects, useSecretList, useUpdateSecret } from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
-import { Button, EmptyState, PageHeader, SearchField, Select, Tabs } from "@/components/envryn/ui";
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  Input,
+  PageHeader,
+  SearchField,
+  Select,
+  Tabs,
+} from "@/components/envryn/ui";
 
 function NotFound({ projectId }: Readonly<{ projectId: string }>) {
   return (
@@ -29,6 +40,97 @@ export const Route = createFileRoute("/vault/projects/$projectId")({
   }),
   component: ProjectDetails,
 });
+
+/**
+ * Renaming a project means bulk-updating the `project` field on every
+ * secret filed under it -- there is no project row to rename, per
+ * `useProjects`'s own doc comment. The URL's `$projectId` is a slug of the
+ * name, so a successful rename also navigates to the new slug.
+ */
+function ProjectTitle({ project, secrets }: Readonly<{ project: Project; secrets: Secret[] }>) {
+  const updateSecret = useUpdateSecret();
+  const navigate = useNavigate();
+  const [renaming, setRenaming] = React.useState(false);
+  const [name, setName] = React.useState(project.name);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!renaming) setName(project.name);
+  }, [project.name, renaming]);
+
+  function cancel() {
+    setRenaming(false);
+    setName(project.name);
+  }
+
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === project.name) {
+      cancel();
+      return;
+    }
+    setSaving(true);
+    try {
+      const inProject = secrets.filter((s) => s.project === project.name);
+      await Promise.all(
+        inProject.map((s) => updateSecret.mutateAsync({ id: s.id, input: { project: trimmed } })),
+      );
+      setRenaming(false);
+      toast(`Renamed to "${trimmed}"`);
+      const newId = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      void navigate({
+        to: "/vault/projects/$projectId",
+        params: { projectId: newId },
+        search: { env: undefined },
+      });
+    } catch (err) {
+      toast(
+        err instanceof ipc.IpcError
+          ? err.message
+          : "Could not rename every secret in this project.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (renaming) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <Input
+          autoFocus
+          value={name}
+          disabled={saving}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void save();
+            if (event.key === "Escape") cancel();
+          }}
+          className="h-7 w-[220px] text-[13px]"
+        />
+        <IconButton label="Save name" onClick={() => void save()}>
+          <Check />
+        </IconButton>
+        <IconButton label="Cancel rename" onClick={cancel}>
+          <XIcon />
+        </IconButton>
+      </span>
+    );
+  }
+
+  return (
+    <span className="group inline-flex items-center gap-1.5">
+      {project.name}
+      <IconButton
+        label="Rename project"
+        className="opacity-0 transition-opacity group-hover:opacity-100"
+        onClick={() => setRenaming(true)}
+      >
+        <Pencil />
+      </IconButton>
+    </span>
+  );
+}
 
 function ProjectDetails() {
   const secrets = useSecretList();
@@ -67,7 +169,7 @@ function ProjectDetails() {
   return (
     <>
       <PageHeader
-        title={project.name}
+        title={<ProjectTitle project={project} secrets={secrets} />}
         back={
           <Link
             to="/vault/projects"

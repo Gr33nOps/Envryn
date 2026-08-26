@@ -147,7 +147,7 @@ function VaultLayout() {
 
   return (
     <VaultUIContext.Provider value={ctx}>
-      <div className="app-frame flex h-screen flex-col overflow-hidden bg-background">
+      <div className="app-frame flex h-full flex-col overflow-hidden bg-background">
         <div className="flex min-h-0 flex-1">
           <Sidebar onLock={lockVault} />
           <main className="flex min-w-0 flex-1 flex-col overflow-hidden">

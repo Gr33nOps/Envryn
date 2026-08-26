@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Envryn's main window. Deliberately minimal: the UI needs no filesystem, shell, HTTP, or clipboard plugin permissions, because every such operation is performed by the Rust core behind a named IPC command.",
+  "description": "Envryn's main window. Deliberately minimal: the UI needs no filesystem, shell, HTTP, or clipboard plugin permissions, because every such operation is performed by the Rust core behind a named IPC command. The window-control permissions below are the one addition beyond core:default, needed for the custom frameless title bar (TitleBar.tsx/ResizeBorders.tsx) to drag, resize, minimize, maximize, and close the window itself -- core:default's core:window:default set does not include them.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unminimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging"
+  ]
 }

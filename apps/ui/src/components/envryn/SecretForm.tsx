@@ -1,7 +1,7 @@
 import * as React from "react";
-import { Sparkles } from "lucide-react";
+import { Eye, EyeOff, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { Button, Field, Input, Modal, Select } from "@/components/envryn/ui";
+import { Button, Field, IconButton, Input, Modal, Select } from "@/components/envryn/ui";
 import { secretTypes, typeFields, type Environment, type Secret } from "@/lib/envryn-data";
 import { useCreateSecret, useProjects, useUpdateSecret } from "@/lib/use-vault";
 import { KIND_TO_TYPE } from "@/lib/vault-repository";
@@ -73,6 +73,7 @@ export function SecretFormModal({
   const [error, setError] = React.useState<string | null>(null);
   const [suggesting, setSuggesting] = React.useState(false);
   const [suggestingName, setSuggestingName] = React.useState(false);
+  const [showValue, setShowValue] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -88,6 +89,7 @@ export function SecretFormModal({
     setTags((secret?.tags ?? []).join(", "));
     setSaving(false);
     setError(null);
+    setShowValue(false);
   }, [open, secret, preset]);
 
   const extra = typeFields[type] ?? [];
@@ -327,13 +329,23 @@ export function SecretFormModal({
               placeholder="Write a private note..."
             />
           ) : (
-            <Input
-              mono
-              type="password"
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              placeholder={editing ? "Unchanged" : "Paste secret value"}
-            />
+            <div className="relative">
+              <Input
+                mono
+                type={showValue ? "text" : "password"}
+                className="pr-9"
+                value={value}
+                onChange={(event) => setValue(event.target.value)}
+                placeholder={editing ? "Unchanged" : "Paste secret value"}
+              />
+              <IconButton
+                label={showValue ? "Hide value" : "Show value"}
+                className="absolute right-1 top-1/2 -translate-y-1/2"
+                onClick={() => setShowValue((visible) => !visible)}
+              >
+                {showValue ? <EyeOff /> : <Eye />}
+              </IconButton>
+            </div>
           )}
         </Field>
 
