@@ -148,7 +148,11 @@ jobs:
 
   sonarqube:
     name: SonarQube (crates/, src-tauri/src, apps/ui/src)
-    runs-on: ubuntu-latest
+    # windows-latest, not ubuntu-latest, for the same reason the Rust job
+    # above is: most of envryn-core's platform code is #[cfg(windows)] --
+    # generating coverage on Linux would compile the untested `stub.rs`
+    # fallbacks instead and report a materially wrong (lower) number.
+    runs-on: windows-latest
     # Report-only: this surfaces new findings on the SonarCloud dashboard
     # without blocking merges on Envryn's 100+ pre-existing code-quality
     # findings (see AUDIT_REPORT.md) -- turning it into a hard gate is a
@@ -160,6 +164,44 @@ jobs:
           # blames each line to a real commit/author, which a depth-1
           # checkout cannot provide.
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Real per-file coverage for apps/ui, not a stand-in -- consumed below
+      # via sonar.javascript.lcov.reportPaths (sonar-project.properties).
+      - run: npm run test:coverage --workspace @envryn/ui
+
+      # tauri::generate_context!() reads tauri.conf.json at compile time and
+      # requires frontendDist to physically exist -- same requirement as the
+      # Rust job above; test:coverage runs vitest, not vite build, so dist/
+      # still needs to be produced separately.
+      - run: npm run build --workspace @envryn/ui
+
+      # Same placeholder-sidecar reasoning as the Rust job above: this job
+      # needs `envryn` (src-tauri) to compile for coverage instrumentation,
+      # not to actually run the sidecar.
+      - name: Placeholder AI worker sidecar (never executed by this job)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
+          Set-Content -Path src-tauri/binaries/envryn-ai-worker-x86_64-pc-windows-msvc.exe -Value "placeholder"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo install cargo-llvm-cov --locked
+
+      # Real per-file coverage for crates/ and src-tauri/src -- consumed
+      # below via sonar.rust.lcov.reportPaths.
+      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
 
       - uses: SonarSource/sonarqube-scan-action@v6
         env:

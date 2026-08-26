@@ -1,4 +1,6 @@
-import { defineConfig } from "vite";
+// vitest/config's defineConfig (not plain vite's) merges Vite's and
+// Vitest's config types, so TypeScript recognises the `test` key below.
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
@@ -35,5 +37,24 @@ export default defineConfig({
     // Matches the WebView2 / Android WebView floor from ARCHITECTURE.md.
     target: ["chrome105", "safari13"],
     sourcemap: false,
+  },
+
+  test: {
+    coverage: {
+      provider: "v8",
+      // lcov is what SonarQube's generic JS/TS coverage import reads
+      // (sonar.javascript.lcov.reportPaths in sonar-project.properties);
+      // text is just for a human glancing at local `npm run test:coverage`
+      // output.
+      reporter: ["lcov", "text"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/routeTree.gen.ts",
+        // Generated directly from Rust by ts-rs -- see
+        // packages/contract/index.ts's own doc comment. Nothing here is
+        // hand-written, so coverage on it would not mean anything.
+        "**/*.d.ts",
+      ],
+    },
   },
 });
