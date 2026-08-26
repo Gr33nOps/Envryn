@@ -442,6 +442,82 @@ listener, and its accept loop checks lock state every iteration).
 
 ---
 
+## Addendum (same day, PR #1): local-only re-verification and release-artifact review
+
+GitHub-hosted Actions CI could not run for PR #1 (`security/pre-release-remediation`,
+commit `a74117293d1a2a3ac1d2c2b0b1ffe4c4bd6e0338`) — every job (Rust, Frontend, Semgrep) was
+rejected before starting with `"recent account payments have failed or your spending limit
+needs to be increased"`. Confirmed twice (the original push-triggered run and a manual
+`gh run rerun`), both failing identically. Checked whether this is resolvable via API/CLI:
+GitHub's billing endpoints require a `user`-scoped token this session's token does not have,
+and even with that scope the billing API is read-only usage reporting — there is no API or CLI
+operation that clears a failed payment or raises a spending limit; that is a GitHub billing-UI,
+account-owner-only action. **Recorded as: BLOCKED — GitHub account billing, not a code
+failure.** Everything else below was re-run locally, against this exact commit, in its place.
+
+**Full local gate, re-run against `a74117293d1a2a3ac1d2c2b0b1ffe4c4bd6e0338`:**
+
+| Check | Result |
+|---|---|
+| `cargo fmt --all -- --check` | clean |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | 0 warnings |
+| `cargo test --workspace` | all passing (231-plus incl. the new canary test; 5 intentionally ignored) |
+| `npm run typecheck` | 0 errors |
+| `npm run lint` | 0 errors, 9 pre-existing non-security warnings |
+| `npm run test` (Vitest) | 57 passed, 7 files, 0 failed |
+| `npm run build` | clean |
+| Semgrep (`--config=auto --config=.semgrep/`) | 10 findings (was 8; +2 are Semgrep flagging this report's own quotation of the already-reviewed synthetic JWTs from §2 — not new secrets, just prose citing them) — all false positive, none newly real |
+| Trivy (`vuln,misconfig,secret`) | 0 vuln, 0 misconfig, 4 secret findings — identical set to the first pass, all already-reviewed false positives |
+| `cargo audit` | 0 vulnerabilities, 18 warnings — identical to the first pass |
+| `cargo deny check` | `advisories ok, bans ok, licenses ok, sources ok` |
+| `cargo auditable build --release -p envryn` + `cargo audit bin` | rebuilt; 340 deps embedded; 0 vulnerabilities, 5 pre-reviewed warnings — identical to the first pass |
+| `cargo geiger` × 3 packages | identical to the first pass: `envryn-core` 2/2 fns, 258/258 exprs (confined to `platform/windows_impl.rs`); `envryn` (src-tauri) 0/0; `envryn-ai-worker` 0/0 |
+| `fuzz_aead_open` | 2,583,554 executions / 121s, 0 crashes (re-run under heavier concurrent machine load than the first pass, hence lower exec/s — same zero-crash result) |
+| `fuzz_backup_restore` | 4,823,027 executions / 121s, 0 crashes; corpus organically rediscovered more of the real format's field names (`memory_kib`, `iterations`, `salt`, `kdf`) than the first run |
+
+Working tree confirmed clean (`git status --porcelain`, no output) after every check above.
+Local `HEAD` (`a74117293d1a2a3ac1d2c2b0b1ffe4c4bd6e0338`) confirmed identical to
+`origin/security/pre-release-remediation` via `git ls-remote`. PR #1 confirmed still open,
+unmerged, `MERGEABLE`.
+
+**Installer / release-artifact verification.** Ran a real `cargo tauri build` against this
+commit — not a placeholder, not a dry run. It recompiled the real `envryn-ai-worker` sidecar
+from source (`prepare:sidecar`, ~2 minutes) and produced two real, complete installer artifacts:
+
+| Artifact | Size | SHA-256 |
+|---|---|---|
+| `target/release/envryn.exe` | 9,126,912 bytes | `9eccb8faf2543f85e4f7412518d87a987c2bb7b5fd44d3103fc52d26be221981` |
+| `bundle/msi/Envryn_0.1.2_x64_en-US.msi` (WiX) | 7,786,496 bytes | `810da61fab6d3d56dcd76449822d3b09c002c75005f19957992948348176a879` |
+| `bundle/nsis/Envryn_0.1.2_x64-setup.exe` | 4,800,139 bytes | `4f77dffcc2978c136907109ed4c37857102560f33169e47421a4dd80f71139ad` |
+
+(Note: this `envryn.exe` is a separate build invocation from §7's `cargo auditable`-built one —
+same commit, different build path — `cargo tauri build` patches the binary post-link with
+bundle-type metadata and does not carry `cargo auditable`'s embedded dependency manifest. Both
+were built and verified; they are not the same file.)
+
+**Signing/update configuration review.** `docs/ARCHITECTURE.md` (§"Release additionally
+requires") names *signed Windows and Android binaries* as a hard release gate. Grepped
+`tauri.conf.json`/`tauri.windows.conf.json` for any signing config
+(`certificateThumbprint`/`signCommand`/`digestAlgorithm`/`timestampUrl`) — **none exists.**
+Confirmed directly against the real artifacts above with `Get-AuthenticodeSignature`: all
+three report `NotSigned`. **This is a real, currently-unmet release gate the project's own
+architecture doc requires** — not something this session can fix by fabricating a
+self-signed/test certificate, since a real Authenticode certificate is a purchase and identity-
+verification decision for you, not a code change. No updater plugin or update-check code exists
+anywhere in the tree (reconfirmed: zero `tauri-plugin-*` dependencies), so there is no update
+*configuration* to review beyond its absence — consistent with the network-behavior findings
+in §14.
+
+**Clean-machine testing.** Not performed and not fabricated. This session has one Windows 10
+development machine with the full Rust/Node/WiX/NSIS/Visual Studio toolchain already installed;
+there is no second, genuinely clean machine or VM available to it. What the build log *does*
+confirm: `webviewInstallMode: downloadBootstrapper` is configured (the NSIS/MSI installer will
+fetch the WebView2 runtime on a machine that lacks it, rather than assuming it is present) — a
+structural mitigation for the clean-machine case, not a substitute for actually running the
+installer on one.
+
+---
+
 ## Release recommendation
 
 **What was tested:** the full 15-area brief — Semgrep (fresh full scan, every finding
@@ -469,10 +545,24 @@ canary tests plus the absence-of-any-logging-infrastructure finding); sync wire-
 was reviewed by hand but not fuzzed; and a live network capture was not taken (backed instead by
 exhaustive static enumeration of the one call site that exists).
 
-**Recommendation: yes, this build is safe to release**, with the honest caveats above logged
-rather than hidden. Nothing found this session rises to a real, exploitable vulnerability in
-shipped code; the one genuine bug (a non-functional fuzz harness) is now fixed and has already
+**What is confirmed still outstanding, not a code-security finding but a real release gate**
+(see the addendum above): the actual built installer artifacts are **unsigned**
+(`Get-AuthenticodeSignature` → `NotSigned` on `envryn.exe`, the MSI, and the NSIS installer),
+which `docs/ARCHITECTURE.md` itself names as a release requirement. And **GitHub-hosted CI has
+not yet independently run this commit** — blocked entirely by an account-level billing issue,
+confirmed twice, not a code problem and not something this session can resolve (§ addendum).
+Local re-verification of the complete gate against the exact PR commit is real and passed, but
+it is not a substitute for the GitHub-side run specifically requested.
+
+**Recommendation: the code changes in this PR are safe** — nothing found this session, across
+either pass, rises to a real, exploitable vulnerability in shipped code; the one genuine bug (a
+non-functional fuzz harness) is now fixed and has already
 run millions of real executions with zero findings; every "finding" a scanner raised was
 individually traced to source and proven synthetic, not asserted. The uncertain items are
 scoped, understood, and reasonable to carry forward rather than block on — they are gaps in
 *this session's* coverage, not known or suspected defects.
+
+**PR #1 is not merged, and should not be until GitHub CI actually runs and passes on this
+commit** — that is an explicit, separate requirement from "the code is safe," and it remains
+genuinely unverified on GitHub's side pending the account-level billing fix only the account
+owner can perform.
