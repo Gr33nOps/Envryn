@@ -12,6 +12,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiDownloadProgress,
   AiStatus,
   AppSettings,
   ClassificationOutput,
@@ -38,6 +39,7 @@ import type {
 } from "@envryn/contract";
 
 export type {
+  AiDownloadProgress,
   AiStatus,
   AppSettings,
   ClassificationOutput,
@@ -219,6 +221,23 @@ export const aiStatus = () => call<AiStatus>("ai_status");
 export const aiDownloadModel = () => call<void>("ai_download_model");
 export const aiStart = () => call<void>("ai_start");
 export const aiStop = () => call<void>("ai_stop");
+
+/**
+ * Subscribe to `"ai://download-progress"`, emitted repeatedly while
+ * `ai_download_model` runs. Without this, the model download (~1 GB,
+ * often several minutes on an ordinary connection) looks identical to a
+ * hang -- there is nothing else to distinguish "still downloading" from
+ * "stuck." Returns an unsubscribe function.
+ */
+export async function listenAiDownloadProgress(
+  onProgress: (event: AiDownloadProgress) => void,
+): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  const unlisten = await listen<AiDownloadProgress>("ai://download-progress", (e) =>
+    onProgress(e.payload),
+  );
+  return unlisten;
+}
 
 export const aiClassifyPastedValue = (value: string) =>
   call<ClassificationOutput>("ai_classify_pasted_value", { value });

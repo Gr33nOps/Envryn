@@ -38,23 +38,29 @@ pub struct ModelSpec {
     pub tokenizer_sha256_hex: &'static str,
 }
 
-/// The one Tier-1 model this build knows how to fetch. A small instruct
-/// model was chosen deliberately over a larger one -- specification section
-/// 51 ("usable without a GPU") -- and verified against real inference in
-/// `tests/ai_real_model.rs`, not just downloaded and assumed to work.
-pub const QWEN2_0_5B_INSTRUCT: ModelSpec = ModelSpec {
-    display_name: "Qwen2 0.5B Instruct (Q4_0 GGUF)",
-    version: "qwen2-0.5b-instruct-q4_0-2024-06",
+/// The one Tier-1 model this build knows how to fetch. Stepped up from
+/// Qwen2-0.5B-Instruct to Qwen2.5-1.5B-Instruct (3x the parameters, same
+/// GGUF architecture family so `envryn-ai-worker`'s loader needed no
+/// changes) after real-world use found the 0.5B model's name/classification
+/// suggestions too unreliable to trust -- still small enough to stay CPU-only
+/// per specification section 51 ("usable without a GPU"), and verified
+/// against real inference in `tests/ai_real_model.rs`, not just downloaded
+/// and assumed to work. Size and checksum below were computed independently
+/// from a real downloaded copy of the file, not copied from Hugging Face's
+/// own reported metadata.
+pub const QWEN2_5_1_5B_INSTRUCT: ModelSpec = ModelSpec {
+    display_name: "Qwen2.5 1.5B Instruct (Q4_0 GGUF)",
+    version: "qwen2.5-1.5b-instruct-q4_0-2024-09",
     arch: "qwen2",
     eos_token: "<|im_end|>",
-    model_url: "https://huggingface.co/Qwen/Qwen2-0.5B-Instruct-GGUF/resolve/main/qwen2-0_5b-instruct-q4_0.gguf",
-    model_filename: "qwen2-0_5b-instruct-q4_0.gguf",
-    model_size_bytes: 352_969_408,
-    model_sha256_hex: "aca679832ded61145239ce7f5c5ebddb1c57ada786c9c23733899c3888e0596f",
-    tokenizer_url: "https://huggingface.co/Qwen/Qwen2-0.5B-Instruct/resolve/main/tokenizer.json",
+    model_url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_0.gguf",
+    model_filename: "qwen2.5-1.5b-instruct-q4_0.gguf",
+    model_size_bytes: 1_066_227_232,
+    model_sha256_hex: "dcd819ff094852c38faba6873d8ff0c9d51eadb2844539e52042ae5d647bbfdb",
+    tokenizer_url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/main/tokenizer.json",
     tokenizer_filename: "tokenizer.json",
-    tokenizer_size_bytes: 7_028_015,
-    tokenizer_sha256_hex: "f7c9b2dba4a296b1aa76c16a34b8225c0c118978400d4bb66bff0902d702f5b8",
+    tokenizer_size_bytes: 7_031_645,
+    tokenizer_sha256_hex: "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,11 +119,30 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Bytes fetched so far for one file, and the size expected once complete.
+/// Emitted at most a few dozen times per file (throttled below) -- callers
+/// (the Tauri shell) turn this into a progress bar; this crate has no
+/// knowledge of Tauri or the UI.
+#[derive(Debug, Clone, Copy)]
+pub struct DownloadProgress {
+    pub file_name: &'static str,
+    pub bytes_downloaded: u64,
+    pub total_bytes: u64,
+}
+
+/// Below this many new bytes, `download_one` does not re-invoke the
+/// progress callback -- a 350&nbsp;MB file read in 64&nbsp;KB chunks is
+/// ~5,600 chunks; without throttling that is ~5,600 IPC events for one
+/// download, chatty for no benefit to a percentage display.
+const PROGRESS_STEP_BYTES: u64 = 1024 * 1024;
+
 fn download_one(
     url: &str,
     dest: &Path,
+    file_name: &'static str,
     expected_size: u64,
     expected_sha256_hex: &str,
+    on_progress: &mut dyn FnMut(DownloadProgress),
 ) -> Result<(), DownloadError> {
     let response = ureq::get(url).call().map_err(|_| DownloadError::Network)?;
     let mut reader = response.into_reader();
@@ -130,6 +155,12 @@ fn download_one(
         let mut file = std::fs::File::create(&tmp_path).map_err(|_| DownloadError::Io)?;
         let mut buf = [0u8; 64 * 1024];
         let mut total: u64 = 0;
+        let mut last_reported: u64 = 0;
+        on_progress(DownloadProgress {
+            file_name,
+            bytes_downloaded: 0,
+            total_bytes: expected_size,
+        });
         loop {
             let n = reader.read(&mut buf).map_err(|_| DownloadError::Network)?;
             if n == 0 {
@@ -146,7 +177,20 @@ fn download_one(
             }
             let chunk = buf.get(..n).ok_or(DownloadError::Io)?;
             file.write_all(chunk).map_err(|_| DownloadError::Io)?;
+            if total - last_reported >= PROGRESS_STEP_BYTES {
+                last_reported = total;
+                on_progress(DownloadProgress {
+                    file_name,
+                    bytes_downloaded: total,
+                    total_bytes: expected_size,
+                });
+            }
         }
+        on_progress(DownloadProgress {
+            file_name,
+            bytes_downloaded: total,
+            total_bytes: expected_size,
+        });
     }
 
     if let Err(e) = verify_file(&tmp_path, expected_size, expected_sha256_hex) {
@@ -167,6 +211,18 @@ fn download_one(
 /// If either file already exists at its destination with the correct size
 /// and checksum, it is reused rather than re-downloaded.
 pub fn download_and_verify(spec: &ModelSpec, dest_dir: &Path) -> Result<ModelFiles, DownloadError> {
+    download_and_verify_with_progress(spec, dest_dir, &mut |_| {})
+}
+
+/// Same as [`download_and_verify`], but calls `on_progress` as bytes arrive
+/// so a caller (the Tauri shell) can show real download progress instead of
+/// an indeterminate spinner for what is, for the ~350&nbsp;MB model file, a
+/// multi-minute wait on an ordinary connection.
+pub fn download_and_verify_with_progress(
+    spec: &ModelSpec,
+    dest_dir: &Path,
+    on_progress: &mut dyn FnMut(DownloadProgress),
+) -> Result<ModelFiles, DownloadError> {
     std::fs::create_dir_all(dest_dir).map_err(|_| DownloadError::Io)?;
     let model_path = dest_dir.join(spec.model_filename);
     let tokenizer_path = dest_dir.join(spec.tokenizer_filename);
@@ -175,8 +231,10 @@ pub fn download_and_verify(spec: &ModelSpec, dest_dir: &Path) -> Result<ModelFil
         download_one(
             spec.model_url,
             &model_path,
+            spec.model_filename,
             spec.model_size_bytes,
             spec.model_sha256_hex,
+            on_progress,
         )?;
     }
     if verify_file(
@@ -189,8 +247,10 @@ pub fn download_and_verify(spec: &ModelSpec, dest_dir: &Path) -> Result<ModelFil
         download_one(
             spec.tokenizer_url,
             &tokenizer_path,
+            spec.tokenizer_filename,
             spec.tokenizer_size_bytes,
             spec.tokenizer_sha256_hex,
+            on_progress,
         )?;
     }
 
@@ -320,5 +380,29 @@ mod tests {
         std::fs::write(dir.path().join(spec.model_filename), b"test").unwrap();
         std::fs::write(dir.path().join(spec.tokenizer_filename), b"test").unwrap();
         assert!(already_verified(&spec, dir.path()).is_some());
+    }
+
+    /// The regression this guards: `ai_download_model`'s frontend button
+    /// gave no feedback for the ~170s a real download takes, which is
+    /// indistinguishable from "broken" to a user. `download_and_verify`'s
+    /// network-free fast path (both files already present and valid) must
+    /// also never fire `on_progress` -- there is nothing to report progress
+    /// on, and a stray event here would flash a spurious progress bar for
+    /// an instant, network-free confirm.
+    #[test]
+    fn on_progress_is_never_called_when_both_files_already_verify() {
+        let spec = tiny_spec();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(spec.model_filename), b"test").unwrap();
+        std::fs::write(dir.path().join(spec.tokenizer_filename), b"test").unwrap();
+
+        let mut calls: Vec<DownloadProgress> = Vec::new();
+        let result = download_and_verify_with_progress(&spec, dir.path(), &mut |p| calls.push(p));
+
+        assert!(result.is_ok());
+        assert!(
+            calls.is_empty(),
+            "expected no progress events for already-verified files, got {calls:?}"
+        );
     }
 }

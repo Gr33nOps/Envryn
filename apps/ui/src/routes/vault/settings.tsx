@@ -222,6 +222,9 @@ function AiSettingsGroup({
 }>) {
   const [status, setStatus] = React.useState<ipc.AiStatus | null>(null);
   const [downloading, setDownloading] = React.useState(false);
+  const [downloadProgress, setDownloadProgress] = React.useState<ipc.AiDownloadProgress | null>(
+    null,
+  );
   const [starting, setStarting] = React.useState(false);
 
   const refreshStatus = React.useCallback(() => {
@@ -240,15 +243,29 @@ function AiSettingsGroup({
 
   async function downloadModel() {
     setDownloading(true);
+    setDownloadProgress(null);
+    const unlisten = await ipc.listenAiDownloadProgress(setDownloadProgress);
     try {
       await ipc.aiDownloadModel();
       toast("Local AI model downloaded");
     } catch (err) {
       toast(err instanceof IpcError ? err.message : "Could not download the model.");
     } finally {
+      unlisten();
       setDownloading(false);
+      setDownloadProgress(null);
       refreshStatus();
     }
+  }
+
+  function downloadButtonLabel(): string {
+    if (!downloading) return "Download";
+    if (!downloadProgress || downloadProgress.total_bytes === 0) return "Starting…";
+    const pct = Math.floor(
+      (downloadProgress.bytes_downloaded / downloadProgress.total_bytes) * 100,
+    );
+    const label = downloadProgress.file_name === "tokenizer.json" ? "Tokenizer" : "Model";
+    return `${label} ${pct}%`;
   }
 
   async function toggleAi(enable: boolean) {
@@ -290,7 +307,9 @@ function AiSettingsGroup({
         description={
           status?.model_downloaded
             ? status.model_name
-            : "Not downloaded yet (about 350 MB, one-time)"
+            : downloading
+              ? "Downloading -- about 1 GB, this can take several minutes on an ordinary connection."
+              : "Not downloaded yet (about 1 GB, one-time)"
         }
         control={
           status?.model_downloaded ? (
@@ -298,7 +317,7 @@ function AiSettingsGroup({
           ) : (
             <Button size="sm" loading={downloading} onClick={() => void downloadModel()}>
               <Download />
-              Download
+              {downloadButtonLabel()}
             </Button>
           )
         }

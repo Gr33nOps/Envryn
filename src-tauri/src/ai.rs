@@ -29,14 +29,14 @@ use std::sync::Mutex;
 
 use envryn_core::ai::classify::{self, DeterministicMatch};
 use envryn_core::ai::gateway::{AiError, AiGateway};
-use envryn_core::ai::model_download::{self, ModelFiles, QWEN2_0_5B_INSTRUCT};
+use envryn_core::ai::model_download::{self, DownloadProgress, ModelFiles, QWEN2_5_1_5B_INSTRUCT};
 use envryn_core::ai::schemas::{
     ClassificationOutput, EnvNameClassificationOutput, ExtractedFieldsOutput, NameSuggestionOutput,
     SearchFilterOutput,
 };
 use envryn_core::ai::worker_client::{self, WorkerClient, WorkerSpawnConfig};
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::ipc::{internal, invalid, IpcError, IpcResult};
 use crate::settings;
@@ -153,14 +153,36 @@ pub struct AiStatus {
 #[tauri::command]
 pub fn ai_status(app: AppHandle, state: State<'_, AiState>) -> IpcResult<AiStatus> {
     let dir = models_dir(&app)?;
-    let model_downloaded = model_download::already_verified(&QWEN2_0_5B_INSTRUCT, &dir).is_some();
+    let model_downloaded = model_download::already_verified(&QWEN2_5_1_5B_INSTRUCT, &dir).is_some();
     let engine_running = state.0.lock().map(|g| g.is_some()).unwrap_or(false);
     Ok(AiStatus {
         enabled_in_settings: settings::load(&app).ai_enabled,
         model_downloaded,
-        model_name: QWEN2_0_5B_INSTRUCT.display_name,
+        model_name: QWEN2_5_1_5B_INSTRUCT.display_name,
         engine_running,
     })
+}
+
+/// Emitted repeatedly to `"ai://download-progress"` while [`ai_download_model`]
+/// runs, so the settings screen can show real progress instead of an
+/// indeterminate spinner for what is, on an ordinary connection, a
+/// multi-minute wait for the ~350&nbsp;MB model file.
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export, rename = "AiDownloadProgress")]
+struct AiDownloadProgressEvent {
+    file_name: String,
+    bytes_downloaded: u64,
+    total_bytes: u64,
+}
+
+impl From<DownloadProgress> for AiDownloadProgressEvent {
+    fn from(p: DownloadProgress) -> Self {
+        Self {
+            file_name: p.file_name.to_string(),
+            bytes_downloaded: p.bytes_downloaded,
+            total_bytes: p.total_bytes,
+        }
+    }
 }
 
 /// Download (or confirm already-downloaded) the one pinned Tier-1 model.
@@ -169,10 +191,13 @@ pub fn ai_status(app: AppHandle, state: State<'_, AiState>) -> IpcResult<AiStatu
 #[tauri::command]
 pub async fn ai_download_model(app: AppHandle) -> IpcResult<()> {
     let dir = models_dir(&app)?;
+    let progress_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        model_download::download_and_verify(&QWEN2_0_5B_INSTRUCT, &dir)
-            .map(|_: ModelFiles| ())
-            .map_err(|_| internal("Could not download or verify the local AI model."))
+        model_download::download_and_verify_with_progress(&QWEN2_5_1_5B_INSTRUCT, &dir, &mut |p| {
+            let _ = progress_app.emit("ai://download-progress", AiDownloadProgressEvent::from(p));
+        })
+        .map(|_: ModelFiles| ())
+        .map_err(|_| internal("Could not download or verify the local AI model."))
     })
     .await
     .map_err(|_| internal("model download task failed"))?
@@ -186,7 +211,7 @@ pub async fn ai_download_model(app: AppHandle) -> IpcResult<()> {
 pub async fn ai_start(app: AppHandle, state: State<'_, AiState>) -> IpcResult<()> {
     require_enabled(&app)?;
     let dir = models_dir(&app)?;
-    let files = model_download::already_verified(&QWEN2_0_5B_INSTRUCT, &dir)
+    let files = model_download::already_verified(&QWEN2_5_1_5B_INSTRUCT, &dir)
         .ok_or_else(|| invalid("Download the local AI model in Settings first."))?;
     let worker_binary = worker_binary_path(&app)?;
 
@@ -204,8 +229,8 @@ pub async fn ai_start(app: AppHandle, state: State<'_, AiState>) -> IpcResult<()
         worker_binary,
         model_path: files.model_path,
         tokenizer_path: files.tokenizer_path,
-        arch: QWEN2_0_5B_INSTRUCT.arch.to_string(),
-        eos_token: QWEN2_0_5B_INSTRUCT.eos_token.to_string(),
+        arch: QWEN2_5_1_5B_INSTRUCT.arch.to_string(),
+        eos_token: QWEN2_5_1_5B_INSTRUCT.eos_token.to_string(),
         extra_env: Vec::new(),
     };
 
@@ -238,53 +263,84 @@ pub fn stop(state: &AiState) {
     }
 }
 
+// Every command below is `async fn` + `spawn_blocking`, matching
+// `ai_download_model`/`ai_start` -- each does real blocking socket I/O to
+// the worker subprocess to run inference (`AiGateway::run`, synchronous by
+// construction). A plain sync `#[tauri::command]` runs on Tauri's IPC event
+// loop, so a slow inference call there stalls every other pending IPC
+// message -- the whole webview looks hung (no repaint, no keystroke echo)
+// until it returns. `State<'_, AiState>` cannot be moved into a `'static`
+// blocking closure, so these re-fetch it from the owned `AppHandle` instead
+// (`app.state::<AiState>()`), which is equivalent -- the state lives for
+// the app's lifetime regardless of which handle borrows it.
+
 #[tauri::command]
-pub fn ai_classify_pasted_value(
+pub async fn ai_classify_pasted_value(
     app: AppHandle,
-    state: State<'_, AiState>,
     value: String,
 ) -> IpcResult<ClassificationOutput> {
     require_enabled(&app)?;
-    state.with(|g| g.classify_pasted_value(&value))
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>()
+            .with(|g| g.classify_pasted_value(&value))
+    })
+    .await
+    .map_err(|_| internal("AI task failed"))?
 }
 
 #[tauri::command]
-pub fn ai_suggest_name(
+pub async fn ai_suggest_name(
     app: AppHandle,
-    state: State<'_, AiState>,
     value: String,
     provider: Option<String>,
 ) -> IpcResult<NameSuggestionOutput> {
     require_enabled(&app)?;
-    state.with(|g| g.suggest_name(&value, provider.as_deref()))
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>()
+            .with(|g| g.suggest_name(&value, provider.as_deref()))
+    })
+    .await
+    .map_err(|_| internal("AI task failed"))?
 }
 
 #[tauri::command]
-pub fn ai_classify_env_names(
+pub async fn ai_classify_env_names(
     app: AppHandle,
-    state: State<'_, AiState>,
     names: Vec<String>,
 ) -> IpcResult<EnvNameClassificationOutput> {
     require_enabled(&app)?;
-    state.with(|g| g.classify_env_names(&names))
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>()
+            .with(|g| g.classify_env_names(&names))
+    })
+    .await
+    .map_err(|_| internal("AI task failed"))?
 }
 
 #[tauri::command]
-pub fn ai_extract_structured_fields(
+pub async fn ai_extract_structured_fields(
     app: AppHandle,
-    state: State<'_, AiState>,
     block: String,
 ) -> IpcResult<ExtractedFieldsOutput> {
     require_enabled(&app)?;
-    state.with(|g| g.extract_structured_fields(&block))
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>()
+            .with(|g| g.extract_structured_fields(&block))
+    })
+    .await
+    .map_err(|_| internal("AI task failed"))?
 }
 
 #[tauri::command]
-pub fn ai_parse_search_intent(
+pub async fn ai_parse_search_intent(
     app: AppHandle,
-    state: State<'_, AiState>,
     query: String,
 ) -> IpcResult<SearchFilterOutput> {
     require_enabled(&app)?;
-    state.with(|g| g.parse_search_intent(&query))
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AiState>()
+            .with(|g| g.parse_search_intent(&query))
+    })
+    .await
+    .map_err(|_| internal("AI task failed"))?
 }

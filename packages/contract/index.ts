@@ -46,3 +46,4 @@ export type { PairingSasReady } from "./bindings/PairingSasReady";
 export type { PairingFailed } from "./bindings/PairingFailed";
 export type { PairingComplete } from "./bindings/PairingComplete";
 export type { AiStatus } from "./bindings/AiStatus";
+export type { AiDownloadProgress } from "./bindings/AiDownloadProgress";
