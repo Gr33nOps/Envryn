@@ -37,6 +37,10 @@ pub fn exclude_window_from_capture(_hwnd: isize) -> Result<()> {
     Err(Error::PlatformUnavailable)
 }
 
+pub fn set_window_border_color(_hwnd: isize, _rgb_hex: u32) -> Result<()> {
+    Err(Error::PlatformUnavailable)
+}
+
 /// Non-Windows placeholder for `windows_impl::watch_session_lock` -- there is
 /// no equivalent session-lock notification wired up for this platform yet.
 pub fn watch_session_lock(_hwnd: isize, _on_lock: impl Fn() + Send + Sync + 'static) -> Result<()> {

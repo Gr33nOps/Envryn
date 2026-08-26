@@ -16,6 +16,7 @@ use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, LocalFree, HANDLE, HGLOBAL, HLOCAL, HWND, LPARAM, LRESULT, WPARAM,
 };
+use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
 use windows::Win32::Security::Cryptography::{
     CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
@@ -331,6 +332,42 @@ pub fn exclude_window_from_capture(hwnd: isize) -> Result<()> {
     unsafe {
         SetWindowDisplayAffinity(HWND(hwnd as *mut _), WDA_EXCLUDEFROMCAPTURE)
             .map_err(|_| Error::Internal("could not enable capture protection"))
+    }
+}
+
+/// Set the DWM-drawn 1px border color around `hwnd` to `rgb_hex` (`0xRRGGBB`).
+///
+/// Windows 11 draws this border around every top-level window -- decorated
+/// or not -- in a system/theme colour by default. `src-tauri`'s frameless
+/// window (`decorations: false`, see `TitleBar.tsx`'s doc comment) has no
+/// other way to make that border match Envryn's own near-black background
+/// instead of standing out as a mismatched OS-coloured line around otherwise
+/// custom chrome. Same `isize`-handle contract as
+/// [`exclude_window_from_capture`] just above, for the same reason.
+///
+/// Failure here (e.g. on Windows 10, which has no such border to colour) is
+/// deliberately not escalated to a hard error -- the caller treats this as
+/// cosmetic, not load-bearing.
+pub fn set_window_border_color(hwnd: isize, rgb_hex: u32) -> Result<()> {
+    let r = (rgb_hex >> 16) & 0xFF;
+    let g = (rgb_hex >> 8) & 0xFF;
+    let b = rgb_hex & 0xFF;
+    // COLORREF is 0x00BBGGRR, the reverse byte order of the 0xRRGGBB input.
+    let colorref: u32 = (b << 16) | (g << 8) | r;
+
+    // SAFETY: `hwnd` is expected to be a live window handle supplied by the
+    // caller, matching `exclude_window_from_capture`'s contract above.
+    // `colorref` is a plain `u32` on the stack, passed by pointer with an
+    // exact `cbAttribute` matching its size; DWM reads it synchronously
+    // within this call and retains no pointer afterward.
+    unsafe {
+        DwmSetWindowAttribute(
+            HWND(hwnd as *mut _),
+            DWMWA_BORDER_COLOR,
+            std::ptr::from_ref(&colorref).cast(),
+            std::mem::size_of::<u32>() as u32,
+        )
+        .map_err(|_| Error::Internal("could not set window border color"))
     }
 }
 

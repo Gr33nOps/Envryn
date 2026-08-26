@@ -18,6 +18,7 @@ mod capture_protection;
 pub mod ipc;
 pub mod settings;
 pub mod sync;
+mod window_chrome;
 
 use ai::AiState;
 use ipc::VaultState;
@@ -40,6 +41,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             capture_protection::apply(&handle);
+            window_chrome::apply(&handle);
             autolock::watch_session_lock(handle.clone());
             autolock::spawn(handle);
             Ok(())
