@@ -21,7 +21,7 @@
         "center": true,
         "theme": "Dark",
         "decorations": false,
-        "shadow": true
+        "shadow": false
       }
     ],
     "security": {

@@ -8,6 +8,16 @@
 //! Envryn's background is near-black -- it shows up as a mismatched pale
 //! line around otherwise fully custom chrome. `DwmSetWindowAttribute` is
 //! the only way to tell DWM what colour that border should actually be.
+//!
+//! **`DWMWA_BORDER_COLOR` is a Windows 11 (build 22000+) API and is a
+//! silent no-op on Windows 10** -- confirmed the hard way: this call alone
+//! did nothing on this project's own Windows 10 development machine,
+//! because there is no such colourable border on that OS at all. What
+//! *was* visible there was the older, separate drop-shadow DWM draws
+//! around any window (a soft gradient, not a solid line, and with no
+//! colour-customisation API on Windows 10) -- `tauri.conf.json`'s
+//! `shadow: false` is the real fix for that, not this function. Both fixes
+//! are kept: this one for Windows 11 users, `shadow: false` for everyone.
 
 use tauri::Manager;
 
