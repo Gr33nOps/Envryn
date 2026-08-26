@@ -7,13 +7,27 @@ name: CI
 # rather than inventing a different CI-only check, so "passes locally" and
 # "passes in CI" mean the same thing.
 #
-# Rust jobs run on windows-latest deliberately, not ubuntu-latest: Envryn is
-# a Windows-only build (docs/ARCHITECTURE.md section 7), and most of what
-# changed in the sync/AI/hardening passes lives behind `#[cfg(windows)]`
-# (DPAPI, clipboard exclusion, screen-capture exclusion, the Job Object AI
-# worker isolation, the WTS_SESSION_LOCK hook, Windows Hello). Building on
-# Linux would silently compile the `stub` fallbacks instead and test none of
-# that real platform code.
+# Rust jobs run on Windows deliberately, not Linux: Envryn is a Windows-only
+# build (docs/ARCHITECTURE.md section 7), and most of what changed in the
+# sync/AI/hardening passes lives behind `#[cfg(windows)]` (DPAPI, clipboard
+# exclusion, screen-capture exclusion, the Job Object AI worker isolation,
+# the WTS_SESSION_LOCK hook, Windows Hello). Building on Linux would
+# silently compile the `stub` fallbacks instead and test none of that real
+# platform code.
+#
+# All three jobs below run on a repository-level self-hosted Windows
+# runner (label `envryn-self-hosted`), not GitHub-hosted `windows-latest`/
+# `ubuntu-latest` -- this is a zero-budget project and GitHub-hosted Actions
+# minutes are billed. The runner is registered against this repository
+# only (not an org-wide or shared runner), is not installed as an
+# always-on service, and this workflow's triggers are unchanged
+# (`push`/`pull_request` against `main` only, no `pull_request_target`),
+# so a fork PR still cannot run code on it automatically -- not a concern
+# in practice today since this is a private repo with a single
+# collaborator. The frontend and Semgrep jobs moving from `ubuntu-latest`
+# to the same Windows runner is a side effect of there being exactly one
+# self-hosted runner, not a deliberate platform change -- both jobs' steps
+# are already shell-agnostic (no bash-specific syntax).
 
 on:
   push:
@@ -34,7 +48,7 @@ concurrency:
 jobs:
   rust:
     name: Rust (fmt, clippy, test, deny, audit)
-    runs-on: windows-latest
+    runs-on: [self-hosted, envryn-self-hosted]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -115,7 +129,7 @@ jobs:
 
   semgrep:
     name: Semgrep
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, envryn-self-hosted]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -129,7 +143,7 @@ jobs:
 
   frontend:
     name: Frontend (lint, typecheck, build)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, envryn-self-hosted]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
