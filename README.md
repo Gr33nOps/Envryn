@@ -72,6 +72,46 @@ device-level testing as the Windows build — treat it as early.
 > most people start with lower-stakes or easily-rotated ones while they get
 > a feel for it.
 
+## Uninstalling and removing your data
+
+**Uninstalling Envryn does not delete your vault.** This is deliberate: an uninstall should
+never be a silent, irreversible way to lose your secrets. Both installers only remove the
+program files they placed; your encrypted vault lives in a completely separate, standard Windows
+per-user data folder that neither installer's uninstaller touches.
+
+If you want your data gone too, not just the app, remove it yourself after uninstalling:
+
+1. Press `Win+R`, type `%APPDATA%`, press Enter.
+2. Delete the `dev.envryn.vault` folder you find there. This holds your encrypted vault database
+   (`envryn.db` and its `-wal`/`-shm` files), your device identity, your settings, and — if you
+   ever enabled the local AI feature — the downloaded model files.
+3. Optionally, also check `%LOCALAPPDATA%\dev.envryn.vault` (press `Win+R`, type
+   `%LOCALAPPDATA%`, Enter). If present, this holds the embedded browser engine's own cache and
+   metrics data — never your secrets (Envryn's UI never holds key material; see
+   [`docs/SECURITY_INVARIANTS.md`](docs/SECURITY_INVARIANTS.md)) — but delete it too if you want
+   every trace gone.
+
+Because your vault is encrypted at rest with your master password (see
+[`docs/CRYPTOGRAPHY.md`](docs/CRYPTOGRAPHY.md)), a normal file deletion is enough — there is no
+plaintext copy sitting elsewhere on disk to separately shred. If your threat model specifically
+includes forensic recovery of deleted files from your own drive (a different, much narrower
+concern than losing the master password), that's a general Windows/full-disk-encryption question
+independent of Envryn, not something this app can solve for you after the fact.
+
+## Manual updates (no auto-updater in v0.1.x)
+
+Envryn does not check for or install updates automatically — see
+[`docs/UPDATE_POLICY.md`](docs/UPDATE_POLICY.md) for why that's a deliberate choice for now, not
+a missing feature. To update:
+
+1. Get the new installer **only** from this repository's
+   [Releases page](https://github.com/Gr33nOps/Envryn/releases) — never a link from anywhere
+   else.
+2. Verify its SHA-256 checksum against the value published in that release's notes **before**
+   running it (PowerShell: `Get-FileHash .\the-installer-file -Algorithm SHA256`).
+3. Run the new installer directly over your existing install. It upgrades in place and does not
+   touch your vault, which lives outside the install directory (see "Uninstalling" above).
+
 ## Development
 
 Requires [Node.js](https://nodejs.org) 20+ and the

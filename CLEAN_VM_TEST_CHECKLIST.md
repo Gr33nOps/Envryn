@@ -1,156 +1,204 @@
 # Envryn — Clean-Machine Release Test Checklist
 
-**Purpose:** every check below needs a Windows machine that has never had Envryn, its
-dependencies, or this repo's build tools on it — a fresh VM snapshot, reverted after each run.
-This session's environment cannot perform any of this: it is the developer's own machine, with
-Rust/Node/WebView2/build tools already present, which is exactly what these checks need to be
-*absent* to mean anything. Nothing in this checklist has been run yet.
+**Who this is for:** anyone with a Windows VM, following these steps exactly, in order — no
+Envryn source code, no build tools, and no prior knowledge of the project required. Every command
+below is either a Windows built-in or explicitly says what to install first.
 
-**Snapshot discipline:** revert to a clean snapshot before *every* run of this checklist, not
-just the first. A machine that has already installed and uninstalled Envryn once is no longer a
-clean machine for testing first-install or leftover-file behavior.
+**What "clean" means:** a Windows VM snapshot that has never had Envryn installed on it, and is
+reverted to that same snapshot before *every* run of this checklist — not just the first time.
+A machine that already has an old Envryn install, an old vault folder, or a prior run's leftover
+files is no longer a valid test of first-install or leftover-file behavior.
 
-**Target machine:** Windows 10 1809+ or Windows 11, no prior WebView2 runtime assumed (test both
-with and without it pre-installed — see §1), standard (non-admin-by-default) user account.
+**Why this can't be done on the developer's own machine:** that machine already has Rust,
+Node.js, WebView2, and every build tool installed, plus prior Envryn installs and test data — the
+opposite of what these checks need to be a real test.
+
+**Target VM:** Windows 10 (version 1809 or later) or Windows 11, a standard (non-administrator)
+user account, and — deliberately — no WebView2 Runtime pre-installed for the first pass (§1
+covers testing both states).
 
 ---
 
 ## 0. Before you start
 
-- [ ] Snapshot is confirmed clean (no prior Envryn install, no dev tools required to *run* the
-      app — WebView2 is the one exception, tested deliberately in both states below).
-- [ ] Network capture tool ready (Wireshark, or even just Resource Monitor's network tab) running
-      *before* the installer is launched, so nothing is missed between download and first launch.
-- [ ] Have both installer artifacts ready to test independently: the MSI and the NSIS `.exe`.
+- [ ] Confirm the VM snapshot is clean (see "What 'clean' means" above).
+- [ ] Get the two installer files onto the VM (copy them in, or download from wherever they were
+      shared — see `BETA_RELEASE_CHECKLIST.md` for where a real beta build's artifacts and their
+      checksums are published). You need both: the `.msi` and the `...-setup.exe` (NSIS).
+- [ ] **Verify each installer's checksum before running anything.** Open PowerShell (Start menu →
+      type `PowerShell` → Enter) and run, for each file:
+      ```powershell
+      Get-FileHash .\Envryn_x.y.z_x64_en-US.msi -Algorithm SHA256
+      Get-FileHash .\Envryn_x.y.z_x64-setup.exe -Algorithm SHA256
+      ```
+      Compare the `Hash` value printed against the checksum published alongside the build you
+      were given. If they don't match, stop — do not install a file whose checksum doesn't match.
+- [ ] Start a network capture *before* running either installer, so nothing between download and
+      first launch is missed. No download needed — Windows has a built-in packet monitor:
+      ```powershell
+      # Run PowerShell as Administrator for this. --pkt-size 0 logs full packets,
+      # not just headers; you'll stop it later in §10.
+      pktmon start --capture --pkt-size 0 --file-name "$env:USERPROFILE\Desktop\envryn-capture.etl"
+      ```
+      (If Wireshark is available and preferred instead, that works too — the point is *something*
+      is capturing for the whole session, not the specific tool.)
 
 ## 1. Installation
 
-- [ ] **Without WebView2 pre-installed:** run the installer. Confirm `webviewInstallMode:
-      downloadBootstrapper` actually triggers a WebView2 download+install rather than failing or
-      silently proceeding with a broken window.
-- [ ] **With WebView2 already installed:** confirm the installer does not reinstall/downgrade it.
-- [ ] NSIS installer: confirm it does **not** prompt for administrator elevation (per-user
-      `CurrentUser` install mode is the default — see `RELEASE_SIGNING.md`'s sibling review) and
-      installs to a per-user location, not `Program Files`.
-- [ ] MSI installer: confirm it **does** prompt for UAC elevation (WiX/MSI's standard per-machine
-      behavior) and installs under `Program Files`.
-- [ ] Record the literal install path each installer chose.
-- [ ] Confirm a Start Menu shortcut is created and launches the app.
-- [ ] Confirm no SmartScreen bypass beyond the expected "unknown publisher" warning (expected and
-      correct right now — the binaries are genuinely unsigned, see `RELEASE_SIGNING.md`). The
-      warning itself, appearing, is the *expected pass* for this specific check pre-signing.
+Test the MSI and the NSIS installer as two **separate, fully clean** passes (revert the VM
+snapshot between them) — they behave differently and both need their own clean-machine test.
+
+- [ ] **Pass A — no WebView2 pre-installed:** confirm the VM genuinely has no WebView2 Runtime
+      first (`Settings → Apps → Installed apps`, search "WebView2" — should show nothing). Run
+      the installer. It should download and install WebView2 automatically before Envryn opens,
+      not fail and not silently show a broken/blank window.
+- [ ] **Pass B — WebView2 already installed:** install WebView2 Runtime first
+      (https://developer.microsoft.com/microsoft-edge/webview2/ — "Evergreen Bootstrapper"), then
+      run the Envryn installer. Confirm it does not reinstall, downgrade, or otherwise disturb the
+      existing WebView2 install.
+- [ ] **NSIS installer specifically:** confirm it does **not** show a Windows "Do you want to
+      allow this app to make changes to your device?" (UAC) prompt, and confirm (Properties on
+      the installed `.exe`, or just note the path the installer showed) that it installed under
+      `%LOCALAPPDATA%\Envryn`, not `Program Files`.
+- [ ] **MSI installer specifically:** confirm it **does** show the UAC prompt, and that it
+      installed under `C:\Program Files\Envryn`.
+- [ ] Confirm a Start Menu entry named "Envryn" exists and launches the app.
+- [ ] Confirm you see a Windows SmartScreen warning ("Windows protected your PC") the first time
+      you run either installer. **This is expected and correct right now** — see
+      `RELEASE_SIGNING.md`; the build is genuinely unsigned. Seeing this warning is a *pass* for
+      this specific check, not a bug. (What it should say is covered by whatever label the actual
+      release build used — see `BETA_RELEASE_CHECKLIST.md`.)
 
 ## 2. First launch
 
-- [ ] App opens to the vault-creation screen (no vault exists yet on a clean machine).
-- [ ] Window chrome renders correctly (custom frameless title bar, resize borders, dark theme,
-      background color) — this is the exact class of bug the border/shadow issue earlier this
-      project had; a clean machine with no dev-time WebView2 profile cache is a real test of it.
-- [ ] Create a vault with a real password. Confirm the password-strength meter renders and
-      updates live (a real fix from the earlier security pass — verify it shipped, don't assume).
-- [ ] Confirm `%APPDATA%\dev.envryn.vault\` (or wherever `app_data_dir()` actually resolves for
-      this identifier) is created only *after* vault creation, not at first launch before that.
+- [ ] The app opens directly to a "create your vault" screen — nothing else, since no vault
+      exists yet on a clean machine.
+- [ ] The window looks correct: dark theme, no stray white/default window border or title bar
+      (a real bug this project fixed once already — this is the first time a truly clean WebView2
+      profile has tested it), and the app resizes and can be dragged/moved normally.
+- [ ] Create a vault: type a real password. Confirm a strength indicator appears and visibly
+      changes as you type different passwords (weak → strong).
+- [ ] Open File Explorer, type `%APPDATA%` in the address bar, press Enter. Confirm a
+      `dev.envryn.vault` folder now exists — and that it did **not** exist before you created the
+      vault (only after).
 
 ## 3. Vault lifecycle
 
-- [ ] Add one of each secret type (API Key, Token, Env Var, Note, Database, SSH, OAuth, Webhook,
-      Custom) and confirm each round-trips through create → list → reveal correctly.
-- [ ] Search, edit, and delete a secret; confirm the list updates correctly each time.
-- [ ] Lock the vault (`Ctrl+L` or the Lock button). Confirm every secret-bearing view immediately
-      shows locked/no-data state — no stale plaintext left rendered anywhere in the DOM.
-- [ ] Unlock with the correct password; confirm all secrets are exactly as left.
-- [ ] Unlock with a **wrong** password; confirm the error message does not distinguish "wrong
-      password" from any other failure mode (INV-006 — worth a real, not just source-level, check).
+- [ ] Add one secret of *each* available type (API Key, Token, Env Var, Note, Database, SSH,
+      OAuth, Webhook, Custom). For each: save it, find it in the list, click to reveal its value,
+      and confirm the revealed value matches exactly what you typed.
+- [ ] Use the search box to find one of them by name. Edit it (change the value), save, and
+      confirm the new value sticks. Delete one entirely and confirm it disappears from the list.
+- [ ] Lock the vault (`Ctrl+L`, or the Lock button in the sidebar). Confirm every screen
+      immediately stops showing any secret value or list — a locked vault should show nothing
+      readable anywhere on screen.
+- [ ] Unlock with the correct password. Confirm every secret you added is still there, unchanged.
+- [ ] Lock again, then try unlocking with a **wrong** password on purpose. Confirm the error
+      message is generic (something like "authentication failed"), not something that gives away
+      *why* it failed differently for a wrong password versus any other problem.
 
 ## 4. Clipboard expiry
 
-- [ ] Copy a secret's value. Confirm the configured clear countdown (Settings, default 30s)
-      actually clears the OS clipboard when it elapses.
-- [ ] Copy a secret, then copy something *else* (e.g. a browser URL) before the timer elapses.
-      Confirm Envryn's timer does **not** clear the new clipboard content — it must only clear if
-      the clipboard still holds exactly what Envryn put there (this exact behavior has a real
-      unit test in the codebase; this is the live, OS-level confirmation of it).
-- [ ] Confirm the copied value never appears in clipboard history tools (Win+V) in a way that
-      survives past the app's own exclusion tag — Envryn tags clipboard writes to exclude them
-      from monitoring; verify Win+V clipboard history genuinely doesn't retain it.
+- [ ] Reveal a secret and click "copy". Note the app's stated auto-clear time (Settings screen,
+      default 30 seconds). Paste into Notepad immediately to confirm the copy worked, then wait
+      out the full countdown *without pasting again*, then try pasting into Notepad again —
+      nothing should paste (clipboard was cleared).
+- [ ] Copy a secret again, but this time, before the countdown finishes, copy something unrelated
+      instead (select and copy any text from a browser or Notepad). Wait past when the original
+      countdown would have finished. Confirm the *new* clipboard content is still there — Envryn
+      must not clear a clipboard it no longer put there itself.
+- [ ] Copy a secret, then press `Win+V` to open Windows' Clipboard History. Confirm the secret
+      value does not appear in that history list.
 
 ## 5. Backup / restore
 
-- [ ] Create a backup to a chosen file path. Confirm the file is created and open it in a hex
-      viewer — no plaintext secret values, names, or notes should be readable in it.
-- [ ] Restore from that backup into a fresh vault with a new master password. Confirm every
-      secret is recovered correctly and the new vault uses the new password, not the original or
-      the backup password.
-- [ ] Attempt a restore with the wrong backup password; confirm it fails cleanly with no partial
-      import.
+- [ ] In Envryn, create a backup and save it somewhere findable (e.g. Desktop), with a backup
+      password you'll remember. Confirm a file is created.
+- [ ] Open that backup file in a plain text/hex viewer to eyeball it for plaintext leakage —
+      PowerShell has a built-in hex dump, no extra tool needed:
+      ```powershell
+      Format-Hex .\your-backup-file | more
+      ```
+      Skim the right-hand ASCII column: none of your secret values, names, or notes should be
+      readable there.
+- [ ] Restore that backup into a brand-new vault (create a new vault first if needed, with a
+      *different* master password than either the original vault or the backup password). Confirm
+      every secret comes back correctly, and that the new vault only accepts its own new
+      password — not the original vault's password, not the backup's password.
+- [ ] Try restoring the same backup file with the *wrong* backup password on purpose. Confirm it
+      fails cleanly with an error, and that nothing partial got imported.
 
 ## 6. Lock / unlock and idle behavior
 
-- [ ] Leave the app idle (no mouse/keyboard input) past the configured auto-lock threshold;
-      confirm it locks itself.
-- [ ] Lock the Windows session directly (`Win+L`) while Envryn is unlocked; confirm Envryn locks
-      itself too (the `WTS_SESSION_LOCK` hook) — this is explicitly documented as unverified on
-      real hardware in `docs/ARCHITECTURE.md`; this is the first real chance to verify it.
-- [ ] If Windows Hello / platform protection is enabled: confirm unlocking via the platform slot
-      genuinely requires the biometric/PIN prompt to succeed first.
+- [ ] Leave the app open and unlocked, and don't touch the mouse or keyboard until the configured
+      auto-lock time passes (check Settings for the exact value). Confirm it locks itself with no
+      further action from you.
+- [ ] With the vault unlocked, press `Win+L` to lock the Windows session itself (not just the
+      app). Log back into Windows and check Envryn — confirm it locked itself too. This is the
+      first real, physical-hardware test of that behavior; note the result either way.
+- [ ] If Windows Hello is available on the VM and you enable Envryn's platform-unlock option:
+      confirm that unlocking this way genuinely requires the Windows Hello prompt to succeed —
+      it shouldn't be possible to skip straight to an unlocked vault.
 
 ## 7. Restart behavior
 
-- [ ] With the vault unlocked, fully quit and relaunch Envryn. Confirm it starts **locked** —
-      there is deliberately no persisted "stay unlocked" state across process restarts.
-- [ ] Reboot the whole VM with Envryn set to launch at logon (if that's ever enabled) or launched
-      manually after reboot; confirm the vault file survives intact and unlocks normally.
+- [ ] With the vault unlocked, fully close Envryn (not just lock it) and reopen it. Confirm it
+      comes back **locked** — Envryn should never remember "stay unlocked" across a real restart
+      of the app.
+- [ ] Restart the whole VM. Reopen Envryn afterward and confirm your vault and all its secrets
+      are still there and unlock normally.
 
 ## 8. Uninstall
 
-- [ ] Uninstall via each installer's own mechanism (Settings → Apps, or `Add/Remove Programs` for
-      the MSI). Confirm it completes without error.
-- [ ] Confirm the Start Menu shortcut is removed.
-- [ ] **Deliberately check whether the vault database and its `-wal`/`-shm` files survive
-      uninstall or are deleted.** Neither Tauri's default WiX nor NSIS templates delete
-      `app_data_dir()` on uninstall unless a project explicitly adds an uninstall hook to do so —
-      Envryn has not (no `NSIS_HOOK_POSTUNINSTALL`/custom `.wxs` component targeting it was found
-      in this review). **Expected/current behavior: user data survives uninstall.** Confirm this
-      is what actually happens, and treat any *unexpected* deletion during uninstall as a real
-      data-loss bug, not a feature.
-- [ ] Confirm DPAPI-protected platform-slot data (if platform protection was enabled) doesn't
-      leave orphaned Windows Credential Manager / DPAPI blobs elsewhere.
+- [ ] Uninstall via `Settings → Apps → Installed apps → Envryn → Uninstall` (works for both
+      installer types). Confirm it completes with no error message.
+- [ ] Confirm the Start Menu entry is gone.
+- [ ] **This is the important one — check it deliberately, don't skip it:** open File Explorer,
+      go to `%APPDATA%`, and confirm the `dev.envryn.vault` folder (and your vault database
+      inside it) **is still there** after uninstalling. This is expected, correct behavior — an
+      uninstall should never silently destroy your secrets — see `INSTALLER_REVIEW.md` and the
+      README's "Uninstalling and removing your data" section. If the folder is instead gone,
+      that is a real, serious bug: report it, don't treat it as a pass.
 
 ## 9. Leftover files
 
-After uninstall, with the VM still on the same (now post-uninstall) state:
+Right after uninstalling (§8), still on the same VM:
 
-- [ ] Diff a full filesystem listing of `%LOCALAPPDATA%`, `%APPDATA%`, `%PROGRAMFILES%` (or
-      wherever the per-user/per-machine install went, per §1) against a pre-install baseline.
-      Expect: the vault data directory (if user data preservation is confirmed correct in §8),
-      and nothing else.
-- [ ] Confirm no registry keys survive under `HKCU`/`HKLM` beyond what the installer's own
-      uninstall metadata legitimately needs to have already cleaned (NSIS/WiX both remove their
-      own registry entries on a clean uninstall by design — verify this actually happened, don't
-      assume).
-- [ ] Confirm the WebView2 runtime installed in §1 is *not* removed by Envryn's uninstaller (it's
-      a shared system component, not Envryn's to manage) — and equally, confirm Envryn's own
-      uninstaller doesn't error out trying to touch it.
+- [ ] Confirm `C:\Program Files\Envryn` (MSI installs) or `%LOCALAPPDATA%\Envryn` (NSIS installs)
+      no longer exists.
+- [ ] Confirm `%APPDATA%\dev.envryn.vault` (your vault data) still exists — this is a repeat of
+      §8's check; confirming it twice, once right after uninstall and once here, catches a
+      cleanup step that runs with a delay.
+- [ ] Optionally check `%LOCALAPPDATA%\dev.envryn.vault` too, if present — this holds the
+      embedded browser engine's own cache files, not your secrets, but note whether it survived
+      uninstall as well (it's expected to, same reasoning as the vault folder).
 
 ## 10. Unexpected network connections
 
-- [ ] With the network capture from §0 running for the *entire* session (install through
-      uninstall), review it afterward for any connection that is **not**:
-  - the WebView2 bootstrapper download (§1, install time only, one-time)
-  - a Hugging Face HTTPS request, and only if the AI model download was explicitly triggered by
-    the user (`ai_download_model`) — confirm this by *not* triggering it in one full pass of this
-    checklist, and confirming zero network activity occurs, then triggering it in a second pass
-    and confirming the only activity is the two expected model file downloads
-  - explicit user-initiated sync/pairing traffic (mDNS + TLS to another paired device), only if
-    that flow is deliberately exercised
-- [ ] Any other outbound connection — telemetry-shaped, unexpected DNS lookups, anything to a
-      host that isn't `huggingface.co` or a local peer — is a real finding, not a false positive,
-      and should stop this checklist and be investigated before release.
+- [ ] Stop the packet capture from §0:
+      ```powershell
+      pktmon stop
+      pktmon etl2pcap "$env:USERPROFILE\Desktop\envryn-capture.etl" -o "$env:USERPROFILE\Desktop\envryn-capture.pcapng"
+      ```
+      Open the resulting `.pcapng` file — Wireshark is the easiest way to browse it if available;
+      if not, `pktmon` also has a `format` command to dump it as text for a rougher read-through.
+- [ ] Do **one full pass** of this checklist *without* ever turning on the local-AI feature in
+      Settings, and confirm the capture shows **zero** network activity from Envryn the entire
+      time (install, use, uninstall).
+- [ ] Separately, do a pass where you *do* turn on and use the AI feature (which downloads a
+      model on first use) and confirm the capture shows connections to `huggingface.co` and
+      nowhere else during that download — no other host, no repeated/background connections after
+      it completes.
+- [ ] If you test device sync/pairing, confirm capture activity only appears while that flow is
+      actively being used, to a local peer address on your own network, never anywhere else.
+- [ ] Any other connection you see — anything not explained by one of the three cases above — is
+      a real finding. Stop and report it; don't wave it off as noise.
 
 ---
 
 ## What this checklist cannot substitute for
 
-Running this on one clean VM snapshot is a single sample, not a guarantee across the full
-Windows 10/11 version and locale matrix. Treat a full pass as strong evidence, not proof, the
-same way this project's own `SECURITY_REMEDIATION_REPORT.md` treats every other check.
+One full pass, on one VM snapshot, is a single sample — not a guarantee across every Windows
+10/11 build, locale, and hardware combination. Treat a clean pass as strong evidence the release
+is ready, not absolute proof, the same way `SECURITY_REMEDIATION_REPORT.md` treats every other
+check in this project.
