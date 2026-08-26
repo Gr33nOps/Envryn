@@ -4,37 +4,30 @@ This is the exact process for cutting a beta release of the artifacts already bu
 in this pass. **Nothing in this document publishes anything** — it's the checklist to work
 through when you decide to.
 
-## 0. Blocker: fix the version-collision risk before publishing anything
+## 0. Version-collision risk — resolved
 
-**Do this first, before any of the steps below.** The GitHub release `v0.1.2-beta`
-(published earlier, before this pass's work) already has assets named
-`Envryn_0.1.2_x64_en-US.msi` and `Envryn_0.1.2_x64-setup.exe`. This pass's freshly-built
-artifacts (§1 below) have the **exact same filenames** — `tauri.conf.json`'s version has stayed
-at `0.1.2` throughout — but genuinely different content and different checksums, since
-substantial work (the full security remediation pass, the self-hosted CI runner, this
-release-hardening pass) landed on `main` since that release was cut.
+The GitHub release `v0.1.2-beta` (published before the security-remediation and
+release-hardening work landed) already had assets named `Envryn_0.1.2_x64_en-US.msi` and
+`Envryn_0.1.2_x64-setup.exe`. A fresh build against `main` after that work still carried version
+`0.1.2` and would have produced **filename-identical, checksum-different** artifacts — two
+genuinely different binaries indistinguishable by name alone.
 
-| File | Already-published `v0.1.2-beta` (old) | This pass's fresh build (new) |
+| File | Published `v0.1.2-beta` (old, unchanged, still live) | The `0.1.2`-labeled build this repo would otherwise have produced next |
 |---|---|---|
 | `Envryn_0.1.2_x64_en-US.msi` | `sha256:eb3a8d20f1ab98eaae289dd96652600384c99ba94859831339170f8fe3a796b6` | `sha256:34d44a6e0e55851d6e70555c489d0f67a9691a6ccce84530a2536721c2fbee92` |
 | `Envryn_0.1.2_x64-setup.exe` | `sha256:e8ad069f5c40ed88dc9643d5e9b18896d34cc7553ac0ba1e5efe5f1f843faecf` | `sha256:d0be22db615776991419989c5ba8cec80a1201d0b25fd92fef5ae4729497cc9c` |
 
-**Publishing the new build under the same `v0.1.2-beta` tag/filenames would make two genuinely
-different binaries indistinguishable by name alone** — exactly the confusion this pass was asked
-to rule out. This was not fixed automatically in this pass: bumping the version number touches
-several app-visible files (`Cargo.toml`, `src-tauri/tauri.conf.json`,
-`apps/ui/src/routes/vault/settings.tsx`'s About text, `Cargo.lock`) and is a real product
-decision — what the next version should be called — not a release-hardening config change.
-
-**Before doing anything else:** bump the version (e.g. `0.1.3-beta` or similar) everywhere it's
-recorded, and only then rebuild §1's artifacts against the new version string.
+**Fixed: the version is now `0.1.3`** (`Cargo.toml`, `src-tauri/tauri.conf.json`,
+`apps/ui/src/routes/vault/settings.tsx`'s About text — `Cargo.lock`/`fuzz/Cargo.lock` regenerated
+to match). Every artifact §1 produces is now named `Envryn_0.1.3_...`, which cannot collide with
+either existing `v0.1.1-beta` or `v0.1.2-beta` release. Neither of those releases was modified or
+deleted — this only changes what the *next* build calls itself.
 
 Locally-stale artifacts from earlier in this development machine's history (`0.1.0` and `0.1.1`
-builds sitting in `target/release/bundle/`) were found and deleted as part of this pass — that
-part of "no stale artifacts" is already handled. The `v0.1.2-beta` filename collision above is
-the one that still needs a human decision.
+builds that were sitting in `target/release/bundle/` alongside newer ones) were also found and
+deleted in an earlier pass.
 
-## 1. Build (repeat after the version bump in §0)
+## 1. Build
 
 ```powershell
 npm run build --workspace @envryn/ui
