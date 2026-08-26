@@ -723,6 +723,51 @@ fn restore_fails_with_the_wrong_backup_password() {
     ));
 }
 
+/// Adversarial canary: a secret with a unique, unmistakable marker (the same
+/// style a live leak hunt would use -- see SECURITY_REMEDIATION_REPORT.md's
+/// security remediation pass) stored, then exported through `backup::create`. The
+/// vault file itself is already covered end-to-end by
+/// `nothing_readable_is_written_to_disk`; a backup is a *second* place this
+/// data leaves the process as bytes on disk, with its own serialisation path
+/// (`backup::create`), so it gets its own check rather than assuming the
+/// vault file's guarantee extends to it for free.
+#[test]
+fn a_canary_secret_never_appears_in_plaintext_in_a_backup_file() {
+    use envryn_core::backup;
+
+    let canary = format!("ENVRYN_SECURITY_CANARY_{}", uuid::Uuid::now_v7());
+
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("master-password"), FAST).unwrap();
+    vault
+        .create_secret(NewSecret {
+            name: "CANARY_SECRET".into(),
+            project: "CanaryProject".into(),
+            environment: Environment::Production,
+            payload: SecretPayload::ApiKey {
+                value: canary.clone(),
+            },
+            notes: Some(canary.clone()),
+            tags: vec![canary.clone()],
+            provider: None,
+        })
+        .unwrap();
+
+    let file = backup::create(&vault.export_all().unwrap(), &pw("backup-password")).unwrap();
+
+    assert!(
+        !file.windows(canary.len()).any(|w| w == canary.as_bytes()),
+        "canary secret was found in plaintext in the backup file"
+    );
+
+    // The backup is only readable by someone who also has the backup
+    // password -- confirm the canary genuinely round-trips back out once
+    // restored with it, so a false pass (e.g. a backup that silently
+    // dropped the field) is not mistaken for the leak-free outcome above.
+    let restored = backup::restore(&file, &pw("backup-password")).unwrap();
+    assert_eq!(restored.len(), 1);
+}
+
 // --- HLC stamping on real writes -------------------------------------------
 
 #[test]
