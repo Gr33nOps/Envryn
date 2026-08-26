@@ -1,13 +1,17 @@
 import * as React from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
 import * as ipc from "@/lib/ipc";
-import { LogoMark } from "@/components/envryn/Logo";
 
 /**
  * Custom window chrome. `decorations: false` in `tauri.conf.json` removes
  * the native Windows title bar and border entirely -- this replaces it, the
  * same way most modern desktop apps (VS Code, Discord, Slack) do, rather
  * than leaving the window looking unfinished.
+ *
+ * Deliberately no logo/wordmark here -- `Sidebar.tsx`'s own header is
+ * Envryn's one clear branding spot, immediately below this bar. An earlier
+ * version of this component duplicated it up here too, which read as two
+ * competing app identities stacked on top of each other rather than one.
  *
  * Outside Tauri (`npm run dev` in a plain browser) there is no real window
  * to control, so every handler below is a no-op guarded by `ipc.isTauri()`
@@ -60,14 +64,9 @@ export function TitleBar() {
     <div
       data-tauri-drag-region
       onDoubleClick={() => void withWindow((win) => win.toggleMaximize())}
-      className="flex h-8 shrink-0 select-none items-center justify-between border-b border-border bg-surface pl-3"
+      className="flex h-8 shrink-0 select-none items-center justify-between border-b border-border bg-surface"
     >
-      <div data-tauri-drag-region className="flex flex-1 items-center gap-2">
-        <LogoMark size={13} />
-        <span className="text-[11.5px] font-medium tracking-tight text-muted-foreground">
-          Envryn
-        </span>
-      </div>
+      <div data-tauri-drag-region className="h-full flex-1" />
       <div className="flex h-full shrink-0 items-stretch">
         <button
           type="button"

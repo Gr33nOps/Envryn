@@ -85,7 +85,7 @@ export function Sidebar({ onLock }: Readonly<{ onLock: () => void }>) {
   return (
     <aside className="app-sidebar flex w-[220px] shrink-0 flex-col border-r border-border bg-background">
       <div className="flex h-[58px] items-center border-b border-border px-4">
-        <Wordmark size={18} />
+        <Wordmark size={21} />
       </div>
       <div className="px-4 pt-4">
         <div className="flex items-center gap-2 border-b border-border pb-3">
