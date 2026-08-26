@@ -7,6 +7,7 @@ your own machine, and never sent anywhere by default.
 [![CI](https://github.com/Gr33nOps/local-vault-for-devs/actions/workflows/ci.yml/badge.svg)](https://github.com/Gr33nOps/local-vault-for-devs/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0a84ff)](#installing)
+[![Platform: Android (experimental)](https://img.shields.io/badge/platform-Android%20(experimental)-3ddc84)](#installing)
 [![Status: beta](https://img.shields.io/badge/status-beta-orange)](#project-status)
 
 ---
@@ -56,12 +57,16 @@ it. Envryn is neither:
 
 ## Installing
 
-Download the latest installer from
-**[Releases](https://github.com/Gr33nOps/local-vault-for-devs/releases)**
-— either the `.msi` or the `-setup.exe` (NSIS) works the same way.
+Download the latest release from
+**[Releases](https://github.com/Gr33nOps/local-vault-for-devs/releases)**.
 
-Envryn currently targets **Windows**. Support for other platforms may
-follow but isn't a near-term goal.
+**Windows** (primary platform): either the `.msi` or the `-setup.exe`
+(NSIS) installs the same app.
+
+**Android** (experimental): a universal `.apk`. Unsigned, so you'll need to
+allow installs from an unknown source. This build has been verified to
+compile and run its full test suite, but hasn't yet been through the same
+device-level testing as the Windows build — treat it as early.
 
 > Envryn is in beta. Use it for real credentials once you're comfortable —
 > most people start with lower-stakes or easily-rotated ones while they get
@@ -141,8 +146,10 @@ Beta. Core vault functionality (create, lock/unlock, store, search, backup,
 restore, device sync) is real, tested, and has been through a full internal
 audit and a real production-build install/uninstall cycle. Rougher edges:
 
-- Windows only; no code signing yet, so Windows SmartScreen will warn on
-  first run
+- Windows is the primary, most-tested platform; no code signing yet, so
+  Windows SmartScreen will warn on first run
+- Android is experimental: it builds and passes the full test suite, but
+  hasn't had the same device-level verification as Windows yet
 - Local AI is an optional, early feature — quality reflects the small
   on-device model it deliberately uses to stay GPU-free
 - No auto-updater by design for now; update by downloading the latest
