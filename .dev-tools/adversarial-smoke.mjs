@@ -69,11 +69,14 @@ async function createSession() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      capabilities: { alwaysMatch: { browserName: "wry", "tauri:options": { application: appExe } } },
+      capabilities: {
+        alwaysMatch: { browserName: "wry", "tauri:options": { application: appExe } },
+      },
     }),
   });
   const body = await res.json();
-  if (!res.ok || !body.value?.sessionId) throw new Error(`session creation failed: ${JSON.stringify(body)}`);
+  if (!res.ok || !body.value?.sessionId)
+    throw new Error(`session creation failed: ${JSON.stringify(body)}`);
   return body.value.sessionId;
 }
 
@@ -134,7 +137,13 @@ async function actionClick(sessionId, elementId) {
           id: "mouse1",
           parameters: { pointerType: "mouse" },
           actions: [
-            { type: "pointerMove", duration: 0, origin: { "element-6066-11e4-a52e-4f735466cecf": elementId }, x: 0, y: 0 },
+            {
+              type: "pointerMove",
+              duration: 0,
+              origin: { "element-6066-11e4-a52e-4f735466cecf": elementId },
+              x: 0,
+              y: 0,
+            },
             { type: "pointerDown", button: 0 },
             { type: "pause", duration: 50 },
             { type: "pointerUp", button: 0 },
@@ -229,7 +238,11 @@ async function main() {
 
     // --- Test: create the baseline vault ---
     const created = await fillPasswordFields(sessionId, PASSWORD);
-    record("baseline: create screen has 2 password fields", created.length === 2, `found ${created.length}`);
+    record(
+      "baseline: create screen has 2 password fields",
+      created.length === 2,
+      `found ${created.length}`,
+    );
     const submitBtn = await findByCss(sessionId, 'button[type="submit"]');
     await actionClick(sessionId, submitBtn);
     await sleep(4000);
@@ -266,7 +279,11 @@ async function main() {
       await sleep(1500);
       record("canary secret: save form submitted", saved);
     } else {
-      record("canary secret: could not open add-secret form", false, "Ctrl+N shortcut did not open the expected fields");
+      record(
+        "canary secret: could not open add-secret form",
+        false,
+        "Ctrl+N shortcut did not open the expected fields",
+      );
     }
 
     // --- Test: lock -> attempt access ---
@@ -279,7 +296,9 @@ async function main() {
     record(
       "lock: canary secret value not present in DOM while locked",
       !afterLockText.includes(canaryValue),
-      afterLockText.includes(canaryValue) ? "CANARY VALUE FOUND IN DOM -- real leak" : "not found, as expected",
+      afterLockText.includes(canaryValue)
+        ? "CANARY VALUE FOUND IN DOM -- real leak"
+        : "not found, as expected",
     );
 
     // --- Test: wrong master password ---
@@ -312,7 +331,11 @@ async function main() {
     await actionClick(sessionId, unlockSubmit2);
     await sleep(2500);
     const rightPwUrl = await execScript(sessionId, "return location.pathname;");
-    record("correct password after a wrong attempt: unlocks normally", rightPwUrl === "/vault", `got ${rightPwUrl}`);
+    record(
+      "correct password after a wrong attempt: unlocks normally",
+      rightPwUrl === "/vault",
+      `got ${rightPwUrl}`,
+    );
     await screenshot(sessionId, "adversarial-05-unlocked-again.png");
 
     // --- Test: large/unicode secret value ---
@@ -353,7 +376,10 @@ async function main() {
       await sleep(1500);
     }
     await screenshot(sessionId, "adversarial-06-after-large-unicode-save.png");
-    const afterBigSaveCrashed = await execScript(sessionId, "return document.body ? document.body.innerHTML.length : -1;");
+    const afterBigSaveCrashed = await execScript(
+      sessionId,
+      "return document.body ? document.body.innerHTML.length : -1;",
+    );
     record(
       "large/unicode secret: app did not crash (DOM still renders)",
       typeof afterBigSaveCrashed === "number" && afterBigSaveCrashed > 0,
@@ -374,17 +400,21 @@ async function main() {
         await sleep(2000);
       }
     }
-    const importTrigger = await execScript(sessionId, `
+    const importTrigger = await execScript(
+      sessionId,
+      `
       const els = Array.from(document.querySelectorAll('button, a'));
       const match = els.find(e => /import/i.test(e.textContent || ""));
       if (match) { match.click(); return true; }
       return false;
-    `);
+    `,
+    );
     await sleep(800);
     if (importTrigger) {
       const textarea = await findByCss(sessionId, "textarea");
       if (textarea) {
-        const malformed = "not-a-valid-line\n====\n\n# comment only\nNOVALUEHERE\n" + "=".repeat(500);
+        const malformed =
+          "not-a-valid-line\n====\n\n# comment only\nNOVALUEHERE\n" + "=".repeat(500);
         await execScript(
           sessionId,
           `
@@ -396,15 +426,21 @@ async function main() {
           `,
           [{ "element-6066-11e4-a52e-4f735466cecf": textarea }, malformed],
         );
-        const continueBtn = await execScript(sessionId, `
+        const continueBtn = await execScript(
+          sessionId,
+          `
           const els = Array.from(document.querySelectorAll('button'));
           const match = els.find(e => /continue/i.test(e.textContent || ""));
           if (match) { match.click(); return true; }
           return false;
-        `);
+        `,
+        );
         await sleep(1000);
         await screenshot(sessionId, "adversarial-07-malformed-env-import.png");
-        const stillAlive = await execScript(sessionId, "return document.body ? document.body.innerHTML.length : -1;");
+        const stillAlive = await execScript(
+          sessionId,
+          "return document.body ? document.body.innerHTML.length : -1;",
+        );
         record(
           "malformed .env import: app did not crash",
           typeof stillAlive === "number" && stillAlive > 0,
@@ -414,17 +450,24 @@ async function main() {
         record("malformed .env import test", false, "import modal opened but no textarea found");
       }
     } else {
-      record("malformed .env import test", false, "no Import trigger found on this page -- not exercised");
+      record(
+        "malformed .env import test",
+        false,
+        "no Import trigger found on this page -- not exercised",
+      );
     }
 
     // --- Test: clipboard copy + expiry ---
     await keyCombo(sessionId, [ESCAPE_KEY]);
     await sleep(500);
-    const copyBtn = await execScript(sessionId, `
+    const copyBtn = await execScript(
+      sessionId,
+      `
       const els = Array.from(document.querySelectorAll('button[aria-label="Copy secret"]'));
       if (els.length) { els[0].click(); return true; }
       return false;
-    `);
+    `,
+    );
     await sleep(1000);
     if (copyBtn) {
       const clipboardImmediately = getClipboardText();
@@ -467,7 +510,10 @@ async function main() {
       freshUrl !== "/vault",
       `got ${freshUrl}`,
     );
-    record("restart: canary secret not visible on fresh launch", !freshText.includes("CANARY-SECRET-VALUE"));
+    record(
+      "restart: canary secret not visible on fresh launch",
+      !freshText.includes("CANARY-SECRET-VALUE"),
+    );
   } finally {
     if (sessionId) await deleteSession(sessionId);
     driverProc.kill();
@@ -509,7 +555,10 @@ async function main() {
           cleanRefusal,
           `url after attempted unlock: ${tamperedResultUrl}`,
         );
-        const stillResponsive = await execScript(sessionId, "return document.body ? document.body.innerHTML.length : -1;");
+        const stillResponsive = await execScript(
+          sessionId,
+          "return document.body ? document.body.innerHTML.length : -1;",
+        );
         record(
           "tampered vault: app window is still responsive after the failure (did not crash)",
           typeof stillResponsive === "number" && stillResponsive > 0,
