@@ -145,3 +145,22 @@ jobs:
       - run: npm run typecheck
 
       - run: npm run build
+
+  sonarqube:
+    name: SonarQube (crates/, src-tauri/src, apps/ui/src)
+    runs-on: ubuntu-latest
+    # Report-only: this surfaces new findings on the SonarCloud dashboard
+    # without blocking merges on Envryn's 100+ pre-existing code-quality
+    # findings (see AUDIT_REPORT.md) -- turning it into a hard gate is a
+    # separate, deliberate decision, not a side effect of wiring this up.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, not a shallow clone -- SonarQube's SCM sensor
+          # blames each line to a real commit/author, which a depth-1
+          # checkout cannot provide.
+          fetch-depth: 0
+
+      - uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

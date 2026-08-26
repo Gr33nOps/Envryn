@@ -4,7 +4,7 @@
 credentials, SSH keys, and other credentials — encrypted, stored only on
 your own machine, and never sent anywhere by default.
 
-[![CI](https://github.com/Gr33nOps/local-vault-for-devs/actions/workflows/ci.yml/badge.svg)](https://github.com/Gr33nOps/local-vault-for-devs/actions/workflows/ci.yml)
+[![CI](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml/badge.svg)](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0a84ff)](#installing)
 [![Platform: Android (experimental)](https://img.shields.io/badge/platform-Android%20(experimental)-3ddc84)](#installing)
@@ -58,7 +58,7 @@ it. Envryn is neither:
 ## Installing
 
 Download the latest release from
-**[Releases](https://github.com/Gr33nOps/local-vault-for-devs/releases)**.
+**[Releases](https://github.com/Gr33nOps/Envryn/releases)**.
 
 **Windows** (primary platform): either the `.msi` or the `-setup.exe`
 (NSIS) installs the same app.
@@ -79,7 +79,7 @@ Requires [Node.js](https://nodejs.org) 20+ and the
 [Tauri prerequisites](https://tauri.app/start/prerequisites/) for Windows.
 
 ```sh
-git clone https://github.com/Gr33nOps/local-vault-for-devs.git envryn
+git clone https://github.com/Gr33nOps/Envryn.git envryn
 cd envryn
 npm install
 
