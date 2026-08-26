@@ -40,6 +40,10 @@ export default defineConfig({
   },
 
   test: {
+    // jsdom, not the vitest default (node): component tests below render
+    // real React trees and need a DOM to render into.
+    environment: "jsdom",
+    setupFiles: ["./src/test-setup.ts"],
     coverage: {
       provider: "v8",
       // lcov is what SonarQube's generic JS/TS coverage import reads

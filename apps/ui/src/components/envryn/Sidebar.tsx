@@ -27,7 +27,7 @@ interface Item {
   count?: number;
 }
 
-function navigationGroups(
+export function navigationGroups(
   secrets: Secret[],
   projectCount: number,
 ): { label: string; items: Item[] }[] {

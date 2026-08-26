@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as ipc from "@/lib/ipc";
 
 /**
@@ -26,7 +27,6 @@ export function TitleBar() {
     let cancelled = false;
 
     (async () => {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const win = getCurrentWindow();
       const refresh = () => {
         win
@@ -49,15 +49,9 @@ export function TitleBar() {
     };
   }, []);
 
-  async function withWindow(fn: (win: Awaited<ReturnType<typeof currentWindow>>) => Promise<void>) {
+  async function withWindow(fn: (win: ReturnType<typeof getCurrentWindow>) => Promise<void>) {
     if (!ipc.isTauri()) return;
-    const win = await currentWindow();
-    await fn(win).catch(() => {});
-  }
-
-  async function currentWindow() {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    return getCurrentWindow();
+    await fn(getCurrentWindow()).catch(() => {});
   }
 
   return (

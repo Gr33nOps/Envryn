@@ -1,4 +1,5 @@
 import type * as React from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as ipc from "@/lib/ipc";
 
 /**
@@ -17,11 +18,9 @@ type ResizeDirection =
 
 function startResize(direction: ResizeDirection) {
   if (!ipc.isTauri()) return;
-  void import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
-    getCurrentWindow()
-      .startResizeDragging(direction)
-      .catch(() => {}),
-  );
+  void getCurrentWindow()
+    .startResizeDragging(direction)
+    .catch(() => {});
 }
 
 function Handle({
