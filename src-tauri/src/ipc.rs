@@ -425,16 +425,15 @@ pub fn clipboard_copy(app: tauri::AppHandle, value: String) -> IpcResult<()> {
 
     // Fire-and-forget: the command returns immediately, and a failure to
     // clear later has no meaningful way to report back to a call that has
-    // already completed.
+    // already completed. The "only clear if the clipboard still holds
+    // exactly what we put there" safety property lives in
+    // `envryn_core::platform::clear_clipboard_if_matches`, which has a real
+    // test against the real OS clipboard -- this command's own `AppHandle`
+    // parameter keeps it out of `tauri::test::MockRuntime`'s reach, so the
+    // logic that actually matters is tested one layer down instead.
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(clear_after).await;
-        // Only clear if the clipboard still holds exactly what we put there
-        // -- otherwise this would destroy something the user copied since.
-        if let Ok(Some(current)) = envryn_core::platform::read_clipboard_text() {
-            if current == value {
-                let _ = envryn_core::platform::clear_clipboard();
-            }
-        }
+        let _ = envryn_core::platform::clear_clipboard_if_matches(&value);
     });
 
     Ok(())

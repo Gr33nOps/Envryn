@@ -18,7 +18,6 @@ import type { Secret } from "@/lib/envryn-data";
 import { copyValue } from "@/lib/vault-actions";
 import { useRevealSecret } from "@/lib/use-vault";
 import { IpcError } from "@/lib/ipc";
-import { toast as notify } from "sonner";
 import { IconButton, StatusDot } from "./ui";
 import { useVaultUI } from "./vault-context";
 
@@ -43,13 +42,35 @@ function environmentTone(environment: Secret["environment"]) {
   return "neutral" as const;
 }
 
+function SecretListCell({ column, secret }: Readonly<{ column: Column; secret: Secret }>) {
+  if (column === "environment" && secret.environment !== "—") {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <StatusDot tone={environmentTone(secret.environment)} />
+        {secret.environment}
+      </span>
+    );
+  }
+  if (column === "environment") {
+    return <span className="text-subtle-foreground">No environment</span>;
+  }
+  if (column === "type") {
+    return (
+      <span className="rounded-full border border-border bg-background/40 px-2 py-0.5 text-[10px]">
+        {secret.type}
+      </span>
+    );
+  }
+  return <>{secret[column]}</>;
+}
+
 export function SecretList({
   items,
   columns = ["project", "environment", "type", "updated"],
-}: {
+}: Readonly<{
   items: Secret[];
   columns?: Column[];
-}) {
+}>) {
   const { selected, select, openEdit } = useVaultUI();
   const revealSecret = useRevealSecret();
 
@@ -60,7 +81,7 @@ export function SecretList({
       try {
         await copyValue(await revealSecret.mutateAsync(secret.id));
       } catch (err) {
-        notify(err instanceof IpcError ? err.message : "That secret could not be copied.");
+        toast(err instanceof IpcError ? err.message : "That secret could not be copied.");
       }
     },
     [revealSecret],
@@ -169,20 +190,7 @@ export function SecretList({
                         "text-foreground",
                     )}
                   >
-                    {column === "environment" && secret.environment !== "—" ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <StatusDot tone={environmentTone(secret.environment)} />
-                        {secret.environment}
-                      </span>
-                    ) : column === "environment" ? (
-                      <span className="text-subtle-foreground">No environment</span>
-                    ) : column === "type" ? (
-                      <span className="rounded-full border border-border bg-background/40 px-2 py-0.5 text-[10px]">
-                        {secret.type}
-                      </span>
-                    ) : (
-                      secret[column]
-                    )}
+                    <SecretListCell column={column} secret={secret} />
                   </div>
                 ))}
                 <div
@@ -227,9 +235,13 @@ export function SecretList({
       {context && (
         <div
           role="menu"
+          tabIndex={-1}
           className="fixed z-[60] w-[150px] rounded-md border border-border bg-surface p-1 shadow-[0_12px_28px_-12px_rgba(0,0,0,0.9)]"
           style={{ left: context.x, top: context.y }}
           onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setContext(null);
+          }}
         >
           <button
             type="button"

@@ -24,12 +24,12 @@ interface ParsedEntry {
  * is rare enough that silently skipping the line it can't parse is safer
  * than guessing at it.
  */
-function parseEnvText(text: string): { key: string; value: string }[] {
+export function parseEnvText(text: string): { key: string; value: string }[] {
   const entries: { key: string; value: string }[] = [];
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
-    const match = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    const match = /^(?:export\s+)?([A-Za-z_]\w*)\s*=\s*(.*)$/.exec(line);
     if (!match?.[1] || match[2] === undefined) continue;
     const key = match[1];
     let value = match[2].trim();
@@ -45,13 +45,46 @@ function parseEnvText(text: string): { key: string; value: string }[] {
   return entries;
 }
 
+/** Deterministic classification for every parsed entry; returns the keys it couldn't place. */
+async function classifyDeterministically(draft: ParsedEntry[]): Promise<string[]> {
+  const undetected: string[] = [];
+  for (const entry of draft) {
+    const deterministic = await ipc.classifyDeterministic(entry.value).catch(() => null);
+    if (deterministic) {
+      entry.type = KIND_TO_TYPE[deterministic.kind];
+    } else {
+      undetected.push(entry.key);
+    }
+  }
+  return undetected;
+}
+
+/** Local AI fallback for names deterministic matching couldn't place -- a no-op if AI is off. */
+async function classifyRemainingWithAi(draft: ParsedEntry[], undetected: string[]): Promise<void> {
+  if (undetected.length === 0) return;
+  const status = await ipc.aiStatus().catch(() => null);
+  if (!status?.enabled_in_settings || !status.engine_running) return;
+  const result = await ipc.aiClassifyEnvNames(undetected).catch(() => null);
+  if (!result) return;
+  const byName = new Map(result.names.map((n) => [n.name, n.kind]));
+  for (const entry of draft) {
+    const kind = byName.get(entry.key);
+    if (kind) entry.type = KIND_TO_TYPE[kind];
+  }
+}
+
+function envImportDescription(stage: "paste" | "review", entryCount: number): string {
+  if (stage === "paste") return "Paste the contents below. Nothing leaves this device.";
+  return `Review ${entryCount} variable${entryCount === 1 ? "" : "s"} before saving.`;
+}
+
 export function EnvImportModal({
   open,
   onOpenChange,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
-}) {
+}>) {
   const projects = useProjects();
   const createSecret = useCreateSecret();
 
@@ -98,29 +131,8 @@ export function EnvImportModal({
 
     setClassifying(true);
     try {
-      const undetected: string[] = [];
-      for (const entry of draft) {
-        const deterministic = await ipc.classifyDeterministic(entry.value).catch(() => null);
-        if (deterministic) {
-          entry.type = KIND_TO_TYPE[deterministic.kind];
-        } else {
-          undetected.push(entry.key);
-        }
-      }
-
-      if (undetected.length > 0) {
-        const status = await ipc.aiStatus().catch(() => null);
-        if (status?.enabled_in_settings && status.engine_running) {
-          const result = await ipc.aiClassifyEnvNames(undetected).catch(() => null);
-          if (result) {
-            const byName = new Map(result.names.map((n) => [n.name, n.kind]));
-            for (const entry of draft) {
-              const kind = byName.get(entry.key);
-              if (kind) entry.type = KIND_TO_TYPE[kind];
-            }
-          }
-        }
-      }
+      const undetected = await classifyDeterministically(draft);
+      await classifyRemainingWithAi(draft, undetected);
     } finally {
       setClassifying(false);
     }
@@ -193,11 +205,7 @@ export function EnvImportModal({
       onOpenChange={onOpenChange}
       width={stage === "review" ? "sm:max-w-[640px]" : "sm:max-w-[460px]"}
       title="Import a .env file"
-      description={
-        stage === "paste"
-          ? "Paste the contents below. Nothing leaves this device."
-          : `Review ${entries.length} variable${entries.length === 1 ? "" : "s"} before saving.`
-      }
+      description={envImportDescription(stage, entries.length)}
       footer={
         stage === "paste" ? (
           <>

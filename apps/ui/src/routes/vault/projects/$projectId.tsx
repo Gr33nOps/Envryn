@@ -7,7 +7,7 @@ import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
 import { Button, EmptyState, PageHeader, SearchField, Select, Tabs } from "@/components/envryn/ui";
 
-function NotFound({ projectId }: { projectId: string }) {
+function NotFound({ projectId }: Readonly<{ projectId: string }>) {
   return (
     <div className="px-5 py-10">
       <EmptyState

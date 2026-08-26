@@ -11,11 +11,11 @@ export function LogoMark({
   size = 18,
   mono,
   className,
-}: {
+}: Readonly<{
   size?: number;
   mono?: boolean;
   className?: string;
-}) {
+}>) {
   return (
     <img
       src={mark}
@@ -32,11 +32,11 @@ export function Wordmark({
   size = 18,
   className,
   subtitle,
-}: {
+}: Readonly<{
   size?: number;
   className?: string;
   subtitle?: string;
-}) {
+}>) {
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <LogoMark size={size} />

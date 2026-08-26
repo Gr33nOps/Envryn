@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Eye, EyeOff, KeyRound, Link2, ShieldCheck } from "lucide-react";
 import { Button, Field, IconButton, Input } from "@/components/envryn/ui";
 import { LogoMark } from "@/components/envryn/Logo";
+import { PasswordStrengthMeter } from "@/components/envryn/PasswordStrengthMeter";
 import {
   IpcError,
   listenPairingEvents,
@@ -30,19 +31,9 @@ export const Route = createFileRoute("/")({
  */
 type Mode = "loading" | "unlock" | "create" | "join";
 
-function Unlock() {
+/** The join-existing-vault flow, extracted so `Unlock` doesn't carry its state and control flow. */
+function JoinVaultView({ onCancel }: Readonly<{ onCancel: () => void }>) {
   const navigate = useNavigate();
-  const [mode, setMode] = React.useState<Mode>("loading");
-  const [value, setValue] = React.useState("");
-  const [confirm, setConfirm] = React.useState("");
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [showPassword, setShowPassword] = React.useState(false);
-  const [platformUnlock, setPlatformUnlock] = React.useState(false);
-  const [platformLoading, setPlatformLoading] = React.useState(false);
-
-  // --- Join an existing vault (the "join" side of manual-code pairing;
-  // see devices.tsx for the "host" side) ------------------------------------
   const [joinStage, setJoinStage] = React.useState<
     "form" | "connecting" | "confirming" | "joining" | "error"
   >("form");
@@ -57,17 +48,7 @@ function Unlock() {
 
   React.useEffect(() => () => joinUnlistenRef.current?.(), []);
 
-  function resetJoin() {
-    joinUnlistenRef.current?.();
-    joinUnlistenRef.current = null;
-    setJoinStage("form");
-    setJoinSas(null);
-    setJoinError(null);
-    setJoinPassword("");
-    setJoinConfirmPassword("");
-  }
-
-  async function startJoin(event: React.FormEvent) {
+  async function startJoin(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const port = Number.parseInt(joinPort, 10);
     if (!joinAddress.trim() || Number.isNaN(port)) {
@@ -121,9 +102,165 @@ function Unlock() {
 
   function cancelJoin() {
     void pairingCancel();
-    resetJoin();
-    setMode("create");
+    joinUnlistenRef.current?.();
+    onCancel();
   }
+
+  const confirmingOrJoining = joinStage === "confirming" || joinStage === "joining";
+
+  return (
+    <main className="unlock-page flex min-h-screen items-center justify-center bg-background px-5 py-10">
+      <div className="w-full max-w-[420px]">
+        <div className="flex items-center gap-3 px-1">
+          <LogoMark size={34} />
+          <div>
+            <h1 className="text-[17px] font-semibold tracking-[-0.025em]">
+              Join an existing vault
+            </h1>
+            <p className="mt-0.5 text-[12px] text-muted-foreground">
+              Pair with a device that already has one
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-7 rounded-lg border border-border bg-surface p-5 shadow-[0_18px_60px_-36px_rgba(0,0,0,0.9)]">
+          <div className="flex items-start gap-3">
+            <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
+              <Link2 className="size-4" />
+            </span>
+            <div>
+              <p className="text-[13px] font-medium">
+                {confirmingOrJoining
+                  ? "Confirm and choose a password"
+                  : "Connect to the other device"}
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
+                {confirmingOrJoining
+                  ? "Check that this code matches the one shown on the other device, then choose a master password for this device."
+                  : "Open Devices → Pair a device on the other machine, then enter what it shows here."}
+              </p>
+            </div>
+          </div>
+
+          {confirmingOrJoining ? (
+            <div className="mt-5 space-y-3">
+              <div className="rounded-md border border-border bg-background px-3 py-3 text-center">
+                <div className="text-[10.5px] uppercase tracking-[0.08em] text-subtle-foreground">
+                  Verification code
+                </div>
+                <div className="mt-0.5 font-mono text-[16px] tracking-[0.2em]">
+                  {joinSas?.sas ?? "······"}
+                </div>
+                {joinSas?.peer_fingerprint_display ? (
+                  <div className="mt-1 truncate font-mono text-[10.5px] text-muted-foreground">
+                    {joinSas.peer_fingerprint_display}
+                  </div>
+                ) : null}
+              </div>
+              <Field label="New master password for this device">
+                <Input
+                  type="password"
+                  autoFocus
+                  value={joinPassword}
+                  onChange={(event) => {
+                    setJoinPassword(event.target.value);
+                    setJoinError(null);
+                  }}
+                />
+                <PasswordStrengthMeter password={joinPassword} />
+              </Field>
+              <Field label="Confirm master password">
+                <Input
+                  type="password"
+                  value={joinConfirmPassword}
+                  onChange={(event) => {
+                    setJoinConfirmPassword(event.target.value);
+                    setJoinError(null);
+                  }}
+                />
+              </Field>
+              {joinError && <p className="text-[12px] text-destructive">{joinError}</p>}
+              <Button
+                type="button"
+                variant="primary"
+                size="block"
+                loading={joinStage === "joining"}
+                disabled={joinPassword.length === 0}
+                onClick={() => void confirmJoin()}
+              >
+                Trust device &amp; join vault
+              </Button>
+              <Button type="button" size="block" onClick={cancelJoin}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={(event) => void startJoin(event)} className="mt-5 space-y-2.5">
+              <Field label="Address">
+                <Input
+                  autoFocus
+                  placeholder="LAN address shown on the other device"
+                  value={joinAddress}
+                  onChange={(event) => setJoinAddress(event.target.value)}
+                />
+              </Field>
+              <Field label="Port">
+                <Input
+                  placeholder="e.g. 51820"
+                  inputMode="numeric"
+                  value={joinPort}
+                  onChange={(event) => setJoinPort(event.target.value)}
+                />
+              </Field>
+              <Field label="Pairing code">
+                <Input
+                  placeholder="6-digit code"
+                  inputMode="numeric"
+                  value={joinCode}
+                  onChange={(event) => setJoinCode(event.target.value)}
+                />
+              </Field>
+              {joinError && <p className="text-[12px] text-destructive">{joinError}</p>}
+              <Button
+                type="submit"
+                variant="primary"
+                size="block"
+                loading={joinStage === "connecting"}
+              >
+                Connect
+              </Button>
+              <Button type="button" size="block" onClick={cancelJoin}>
+                Cancel
+              </Button>
+            </form>
+          )}
+        </div>
+
+        <div className="mt-4 flex items-start gap-2.5 px-1 text-[12px] leading-relaxed text-muted-foreground">
+          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-success" />
+          <p>Devices sync directly over your local network. Nothing passes through a server.</p>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function unlockErrorMessage(err: unknown): string {
+  if (!(err instanceof IpcError)) return "Something went wrong. Your vault is unaffected.";
+  if (err.code === "auth_failed") return "That password did not work. Please try again.";
+  return err.message;
+}
+
+function Unlock() {
+  const navigate = useNavigate();
+  const [mode, setMode] = React.useState<Mode>("loading");
+  const [value, setValue] = React.useState("");
+  const [confirm, setConfirm] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [platformUnlock, setPlatformUnlock] = React.useState(false);
+  const [platformLoading, setPlatformLoading] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -160,7 +297,7 @@ function Unlock() {
     }
   }
 
-  async function submit(event: React.FormEvent) {
+  async function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
@@ -181,13 +318,7 @@ function Unlock() {
       setConfirm("");
       await navigate({ to: "/vault" });
     } catch (err) {
-      setError(
-        err instanceof IpcError
-          ? err.code === "auth_failed"
-            ? "That password did not work. Please try again."
-            : err.message
-          : "Something went wrong. Your vault is unaffected.",
-      );
+      setError(unlockErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -196,140 +327,7 @@ function Unlock() {
   const creating = mode === "create";
 
   if (mode === "join") {
-    return (
-      <main className="unlock-page flex min-h-screen items-center justify-center bg-background px-5 py-10">
-        <div className="w-full max-w-[420px]">
-          <div className="flex items-center gap-3 px-1">
-            <LogoMark size={34} />
-            <div>
-              <h1 className="text-[17px] font-semibold tracking-[-0.025em]">
-                Join an existing vault
-              </h1>
-              <p className="mt-0.5 text-[12px] text-muted-foreground">
-                Pair with a device that already has one
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-7 rounded-lg border border-border bg-surface p-5 shadow-[0_18px_60px_-36px_rgba(0,0,0,0.9)]">
-            <div className="flex items-start gap-3">
-              <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
-                <Link2 className="size-4" />
-              </span>
-              <div>
-                <p className="text-[13px] font-medium">
-                  {joinStage === "confirming" || joinStage === "joining"
-                    ? "Confirm and choose a password"
-                    : "Connect to the other device"}
-                </p>
-                <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-                  {joinStage === "confirming" || joinStage === "joining"
-                    ? "Check that this code matches the one shown on the other device, then choose a master password for this device."
-                    : "Open Devices → Pair a device on the other machine, then enter what it shows here."}
-                </p>
-              </div>
-            </div>
-
-            {joinStage === "confirming" || joinStage === "joining" ? (
-              <div className="mt-5 space-y-3">
-                <div className="rounded-md border border-border bg-background px-3 py-3 text-center">
-                  <div className="text-[10.5px] uppercase tracking-[0.08em] text-subtle-foreground">
-                    Verification code
-                  </div>
-                  <div className="mt-0.5 font-mono text-[16px] tracking-[0.2em]">
-                    {joinSas?.sas ?? "······"}
-                  </div>
-                  {joinSas?.peer_fingerprint_display ? (
-                    <div className="mt-1 truncate font-mono text-[10.5px] text-muted-foreground">
-                      {joinSas.peer_fingerprint_display}
-                    </div>
-                  ) : null}
-                </div>
-                <Field label="New master password for this device">
-                  <Input
-                    type="password"
-                    autoFocus
-                    value={joinPassword}
-                    onChange={(event) => {
-                      setJoinPassword(event.target.value);
-                      setJoinError(null);
-                    }}
-                  />
-                </Field>
-                <Field label="Confirm master password">
-                  <Input
-                    type="password"
-                    value={joinConfirmPassword}
-                    onChange={(event) => {
-                      setJoinConfirmPassword(event.target.value);
-                      setJoinError(null);
-                    }}
-                  />
-                </Field>
-                {joinError && <p className="text-[12px] text-destructive">{joinError}</p>}
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="block"
-                  loading={joinStage === "joining"}
-                  disabled={joinPassword.length === 0}
-                  onClick={() => void confirmJoin()}
-                >
-                  Trust device &amp; join vault
-                </Button>
-                <Button type="button" size="block" onClick={cancelJoin}>
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <form onSubmit={(event) => void startJoin(event)} className="mt-5 space-y-2.5">
-                <Field label="Address">
-                  <Input
-                    autoFocus
-                    placeholder="192.168.1.42"
-                    value={joinAddress}
-                    onChange={(event) => setJoinAddress(event.target.value)}
-                  />
-                </Field>
-                <Field label="Port">
-                  <Input
-                    placeholder="e.g. 51820"
-                    inputMode="numeric"
-                    value={joinPort}
-                    onChange={(event) => setJoinPort(event.target.value)}
-                  />
-                </Field>
-                <Field label="Pairing code">
-                  <Input
-                    placeholder="6-digit code"
-                    inputMode="numeric"
-                    value={joinCode}
-                    onChange={(event) => setJoinCode(event.target.value)}
-                  />
-                </Field>
-                {joinError && <p className="text-[12px] text-destructive">{joinError}</p>}
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="block"
-                  loading={joinStage === "connecting"}
-                >
-                  Connect
-                </Button>
-                <Button type="button" size="block" onClick={cancelJoin}>
-                  Cancel
-                </Button>
-              </form>
-            )}
-          </div>
-
-          <div className="mt-4 flex items-start gap-2.5 px-1 text-[12px] leading-relaxed text-muted-foreground">
-            <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-success" />
-            <p>Devices sync directly over your local network. Nothing passes through a server.</p>
-          </div>
-        </div>
-      </main>
-    );
+    return <JoinVaultView onCancel={() => setMode("create")} />;
   }
 
   return (
@@ -389,6 +387,8 @@ function Unlock() {
               </IconButton>
             </div>
 
+            {creating && <PasswordStrengthMeter password={value} />}
+
             {creating && (
               <Input
                 type={showPassword ? "text" : "password"}
@@ -429,15 +429,7 @@ function Unlock() {
             )}
 
             {creating && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="block"
-                onClick={() => {
-                  resetJoin();
-                  setMode("join");
-                }}
-              >
+              <Button type="button" variant="ghost" size="block" onClick={() => setMode("join")}>
                 <Link2 />
                 Join an existing vault instead
               </Button>

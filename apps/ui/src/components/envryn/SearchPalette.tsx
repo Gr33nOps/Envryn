@@ -31,15 +31,38 @@ function applyAiFilter(secrets: Secret[], filter: ipc.SearchFilterOutput): Secre
   });
 }
 
+function SearchStatusBanner({
+  aiSearching,
+  aiResults,
+}: Readonly<{ aiSearching: boolean; aiResults: Secret[] | null }>) {
+  if (aiSearching) {
+    return (
+      <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
+        <Sparkles className="size-3 animate-pulse" />
+        Asking local AI what you mean...
+      </div>
+    );
+  }
+  if (aiResults) {
+    return (
+      <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
+        <Sparkles className="size-3" />
+        Matched by local AI, not an exact search
+      </div>
+    );
+  }
+  return null;
+}
+
 export function SearchPalette({
   open,
   onOpenChange,
   onSelect,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSelect: (s: Secret) => void;
-}) {
+}>) {
   const secrets = useSecretList();
   const [q, setQ] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
@@ -131,17 +154,7 @@ export function SearchPalette({
             <span className="kbd">Esc</span>
           </div>
 
-          {aiSearching ? (
-            <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
-              <Sparkles className="size-3 animate-pulse" />
-              Asking local AI what you mean...
-            </div>
-          ) : aiResults ? (
-            <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
-              <Sparkles className="size-3" />
-              Matched by local AI, not an exact search
-            </div>
-          ) : null}
+          <SearchStatusBanner aiSearching={aiSearching} aiResults={aiResults} />
 
           {results.length === 0 ? (
             <div className="px-4 py-8 text-center">
@@ -155,6 +168,7 @@ export function SearchPalette({
               {results.map((s, i) => (
                 <li key={s.id}>
                   <button
+                    type="button"
                     onMouseEnter={() => setCursor(i)}
                     onClick={() => {
                       onSelect(s);

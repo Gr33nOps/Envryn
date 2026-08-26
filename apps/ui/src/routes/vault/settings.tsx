@@ -31,11 +31,11 @@ function Group({
   label,
   description,
   children,
-}: {
+}: Readonly<{
   label: string;
   description?: string;
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <section className="space-y-1.5">
       <div>
@@ -54,11 +54,11 @@ function EnablePlatformProtectionModal({
   open,
   onOpenChange,
   onEnabled,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onEnabled: () => void;
-}) {
+}>) {
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -124,10 +124,10 @@ function EnablePlatformProtectionModal({
 function ChangePasswordModal({
   open,
   onOpenChange,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
-}) {
+}>) {
   const [current, setCurrent] = React.useState("");
   const [next, setNext] = React.useState("");
   const [confirmValue, setConfirmValue] = React.useState("");
@@ -216,10 +216,10 @@ function ChangePasswordModal({
 function AiSettingsGroup({
   settings,
   updateSettings,
-}: {
+}: Readonly<{
   settings: AppSettings | null;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
-}) {
+}>) {
   const [status, setStatus] = React.useState<ipc.AiStatus | null>(null);
   const [downloading, setDownloading] = React.useState(false);
   const [starting, setStarting] = React.useState(false);

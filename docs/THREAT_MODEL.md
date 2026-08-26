@@ -67,7 +67,7 @@ Stated plainly, because a threat model that claims to cover everything is not cr
 
 | ID | Threat | Mitigation | Residual risk |
 |---|---|---|---|
-| **V-01** | Stolen device, vault locked | All records AEAD-encrypted under a VMK wrapped by Argon2id; SQLCipher at rest | A weak master password is brute-forceable offline. Argon2id raises the cost; it cannot fix a 6-character password. Envryn enforces a minimum and shows strength. |
+| **V-01** | Stolen device, vault locked | All records AEAD-encrypted under a VMK wrapped by Argon2id; SQLCipher at rest | A weak master password is brute-forceable offline. Argon2id raises the cost; it cannot fix a 6-character password. Envryn enforces an 8-character minimum and shows a real-time strength estimate (`apps/ui/src/lib/password-strength.ts`: character-class entropy, a common-password blocklist, and repeated/sequential-run penalties) on every screen that sets a master or backup password -- not a full grammar-based estimator like zxcvbn, and advisory only, since the 8-character floor is still enforced independently in Rust and is not raised by a weak score. Found during the 2026-08-26 security audit that this row had claimed "shows strength" since Phase 1 with no such UI actually built; closed rather than left overclaiming. |
 | **V-02** | Stolen device, vault unlocked | Auto-lock on idle, on session lock, on backgrounding | Anything readable in the window before lock |
 | **V-03** | Another local user account reads the DB file | SQLCipher + OS file ACLs | None significant |
 | **V-04** | Offline password guessing | Argon2id calibrated to 500-800 ms, params raisable | Bounded by password entropy |

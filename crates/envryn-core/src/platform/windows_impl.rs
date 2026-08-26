@@ -632,6 +632,7 @@ mod tests {
 
     #[test]
     fn clipboard_round_trip() {
+        let _guard = super::super::clipboard_test_lock();
         set_clipboard_text_excluded("envryn-platform-test-value").expect("set_clipboard");
         let read = read_clipboard_text().expect("read_clipboard");
         assert_eq!(read.as_deref(), Some("envryn-platform-test-value"));

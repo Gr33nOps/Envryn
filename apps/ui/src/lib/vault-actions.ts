@@ -41,4 +41,6 @@ export async function copyValue(value: string): Promise<void> {
  * lock-triggered clipboard wipe (clearing immediately on lock, rather than
  * waiting out the timer) has an obvious place to go.
  */
-export function forgetClipboardTimer(): void {}
+export function forgetClipboardTimer(): void {
+  // Intentionally empty -- see the doc comment above.
+}

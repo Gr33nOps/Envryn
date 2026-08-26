@@ -3,18 +3,26 @@ import { Archive, FileDown, RotateCcw, ShieldCheck } from "lucide-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Button, Field, Input, Modal } from "@/components/envryn/ui";
+import { PasswordStrengthMeter } from "@/components/envryn/PasswordStrengthMeter";
 import { backupCreate, backupRestore, IpcError } from "@/lib/ipc";
 import { useRefreshVaultCache } from "@/lib/use-vault";
 
 export const Route = createFileRoute("/vault/backup")({ component: Backup });
 
+function restoreErrorMessage(err: unknown): string {
+  if (err instanceof IpcError) {
+    return err.code === "auth_failed" ? "That backup password did not work." : err.message;
+  }
+  return "That backup could not be restored.";
+}
+
 function CreateBackupModal({
   open,
   onOpenChange,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
-}) {
+}>) {
   const [path, setPath] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
@@ -95,6 +103,7 @@ function CreateBackupModal({
               setError(null);
             }}
           />
+          <PasswordStrengthMeter password={password} />
         </Field>
         <Field label="Confirm password">
           <Input
@@ -115,11 +124,11 @@ function RestoreBackupModal({
   open,
   onOpenChange,
   onRestored,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onRestored: (count: number) => void;
-}) {
+}>) {
   const [path, setPath] = React.useState("");
   const [backupPassword, setBackupPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
@@ -158,13 +167,7 @@ function RestoreBackupModal({
       onOpenChange(false);
       onRestored(summary.restored);
     } catch (err) {
-      setError(
-        err instanceof IpcError && err.code === "auth_failed"
-          ? "That backup password did not work."
-          : err instanceof IpcError
-            ? err.message
-            : "That backup could not be restored.",
-      );
+      setError(restoreErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -220,6 +223,7 @@ function RestoreBackupModal({
                 setError(null);
               }}
             />
+            <PasswordStrengthMeter password={newPassword} />
           </Field>
           <Field label="Confirm new password">
             <Input

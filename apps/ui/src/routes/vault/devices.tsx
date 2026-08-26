@@ -25,11 +25,9 @@ function deviceIcon(name: string) {
 }
 
 function statusTone(status: Device["status"]) {
-  return status === "Trusted"
-    ? ("success" as const)
-    : status === "Syncing"
-      ? ("syncing" as const)
-      : ("neutral" as const);
+  if (status === "Trusted") return "success" as const;
+  if (status === "Syncing") return "syncing" as const;
+  return "neutral" as const;
 }
 
 /**
@@ -107,6 +105,48 @@ function usePairingSession(onPaired: () => void) {
   }, [password]);
 
   return { open, stage, host, sas, error, password, setPassword, start, cancel, confirm };
+}
+
+function PairingModalFooter({
+  stage,
+  password,
+  onCancel,
+  onConfirm,
+  onRetry,
+}: Readonly<{
+  stage: PairingStage;
+  password: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onRetry: () => void;
+}>) {
+  if (stage === "found" || stage === "confirming") {
+    return (
+      <>
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button
+          variant="primary"
+          loading={stage === "confirming"}
+          disabled={password.length < 8}
+          onClick={onConfirm}
+        >
+          <Check />
+          Trust device
+        </Button>
+      </>
+    );
+  }
+  if (stage === "error") {
+    return (
+      <>
+        <Button onClick={onCancel}>Close</Button>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
+        </Button>
+      </>
+    );
+  }
+  return <Button onClick={onCancel}>Cancel</Button>;
 }
 
 function TrustedDevices() {
@@ -325,29 +365,13 @@ function TrustedDevices() {
         title="Pair a device"
         description="Enter this code and address on the other device."
         footer={
-          pairing.stage === "found" || pairing.stage === "confirming" ? (
-            <>
-              <Button onClick={pairing.cancel}>Cancel</Button>
-              <Button
-                variant="primary"
-                loading={pairing.stage === "confirming"}
-                disabled={pairing.password.length < 8}
-                onClick={() => void pairing.confirm()}
-              >
-                <Check />
-                Trust device
-              </Button>
-            </>
-          ) : pairing.stage === "error" ? (
-            <>
-              <Button onClick={pairing.cancel}>Close</Button>
-              <Button variant="primary" onClick={() => void pairing.start()}>
-                Try again
-              </Button>
-            </>
-          ) : (
-            <Button onClick={pairing.cancel}>Cancel</Button>
-          )
+          <PairingModalFooter
+            stage={pairing.stage}
+            password={pairing.password}
+            onCancel={pairing.cancel}
+            onConfirm={() => void pairing.confirm()}
+            onRetry={() => void pairing.start()}
+          />
         }
       >
         {pairing.stage === "error" ? (

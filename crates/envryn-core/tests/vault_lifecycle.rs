@@ -103,6 +103,112 @@ fn wrong_password_fails_and_leaves_the_vault_locked() {
     assert_eq!(vault.count().unwrap(), 1);
 }
 
+/// Adversarial: a bit-flipped (corrupted or tampered) vault file must fail
+/// cleanly -- an authentication/format error, never a panic and never a
+/// partial or silently-wrong unlock. This is the direct test for
+/// `docs/SECURITY_INVARIANTS.md` section 11's "no best-effort parse of an
+/// unknown/damaged format" claim, exercised against a real SQLite file on
+/// disk rather than asserted from the doc alone.
+#[test]
+fn a_corrupted_vault_file_fails_cleanly_instead_of_panicking_or_silently_succeeding() {
+    let t = temp();
+    {
+        let mut v = Vault::create(&t.path, &pw("right-password"), FAST).unwrap();
+        v.create_secret(api_key("K", "P", Environment::Production, "v"))
+            .unwrap();
+        v.lock();
+    }
+
+    // Flip bytes through the middle third of the real file on disk -- avoids
+    // only touching the SQLite header (a narrower, less interesting check)
+    // and instead corrupts actual page content, the way real disk damage or
+    // a hostile edit would.
+    let mut bytes = std::fs::read(&t.path).unwrap();
+    let start = bytes.len() / 3;
+    let end = (bytes.len() * 2) / 3;
+    let mut i = start;
+    while i < end {
+        bytes[i] ^= 0xff;
+        i += 7;
+    }
+    std::fs::write(&t.path, &bytes).unwrap();
+
+    // `Vault::open` itself must not panic on a corrupted file...
+    let opened = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Vault::open(&t.path)));
+    let mut vault = match opened {
+        Ok(Ok(v)) => v,
+        Ok(Err(_)) => return, // a clean refusal at open time is an equally acceptable outcome
+        Err(_) => panic!("Vault::open panicked on a corrupted file -- must fail cleanly instead"),
+    };
+
+    // ...and if it does open (SQLite itself may tolerate page-level damage
+    // outside the corrupted region), unlocking against the real, undamaged
+    // password must not panic and must not silently return plaintext that
+    // doesn't match what was written.
+    let unlocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        vault.unlock(&pw("right-password"))
+    }));
+    match unlocked {
+        Err(_) => panic!("Vault::unlock panicked on a corrupted file -- must fail cleanly instead"),
+        Ok(Err(_)) => {} // clean authentication/format failure -- the expected, safe outcome
+        Ok(Ok(())) => {
+            // Unlock reported success despite corruption -- only acceptable if
+            // AEAD authentication still genuinely caught the damage on read.
+            let listed = vault.list();
+            if let Ok(records) = listed {
+                for r in &records {
+                    assert!(
+                        vault.reveal(r.id).is_err(),
+                        "corrupted vault: unlock succeeded AND a corrupted record still revealed \
+                         successfully -- AEAD authentication should have caught this"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Adversarial: a large, multi-script Unicode value must round-trip through
+/// real AEAD encryption/decryption and real SQLite storage byte-for-byte --
+/// no truncation, no lossy re-encoding, no panic on a value near (but under)
+/// the enforced size cap.
+#[test]
+fn a_large_unicode_secret_value_round_trips_exactly() {
+    let t = temp();
+    // Mixes multi-byte scripts (Japanese, Cyrillic, emoji, a 4-byte
+    // supplementary-plane symbol) with plain ASCII padding to stay a
+    // realistic-but-large size (well under the 256 KiB cap) while still
+    // exercising multi-byte UTF-8 boundaries throughout.
+    let value = format!(
+        "\u{1F510}日本語の秘密鍵Секретный ключ{}\u{1D306}END",
+        "A".repeat(50_000)
+    );
+
+    let id = {
+        let mut vault = Vault::create(&t.path, &pw("unicode-password"), FAST).unwrap();
+        let summary = vault
+            .create_secret(api_key(
+                "Big Unicode Secret",
+                "P",
+                Environment::Development,
+                &value,
+            ))
+            .unwrap();
+        vault.lock();
+        summary.id
+    };
+
+    let mut vault = Vault::open(&t.path).unwrap();
+    vault.unlock(&pw("unicode-password")).unwrap();
+    let revealed = vault.reveal(id).unwrap();
+    match revealed.payload {
+        SecretPayload::ApiKey { value: got } => {
+            assert_eq!(got, value, "value did not round-trip exactly")
+        }
+        other => panic!("unexpected payload: {other:?}"),
+    }
+}
+
 /// The headline claim: a stolen vault file reveals nothing. Scans the database
 /// and every sidecar (WAL, SHM) for the secret value *and* its metadata.
 #[test]

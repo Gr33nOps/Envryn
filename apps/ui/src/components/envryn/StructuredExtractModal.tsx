@@ -10,8 +10,15 @@ import { IpcError } from "@/lib/ipc";
 const ENVIRONMENTS: Environment[] = ["Development", "Staging", "Production", "—"];
 
 interface FieldRow {
+  id: number;
   label: string;
   value: string;
+}
+
+let nextFieldRowId = 0;
+function newFieldRow(label = "", value = ""): FieldRow {
+  nextFieldRowId += 1;
+  return { id: nextFieldRowId, label, value };
 }
 
 /**
@@ -25,10 +32,10 @@ interface FieldRow {
 export function StructuredExtractModal({
   open,
   onOpenChange,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
-}) {
+}>) {
   const projects = useProjects();
   const createSecret = useCreateSecret();
 
@@ -71,7 +78,7 @@ export function StructuredExtractModal({
         setError("No labeled fields were found in that text.");
         return;
       }
-      setFields(result.fields.map((f) => ({ label: f.label, value: f.value })));
+      setFields(result.fields.map((f) => newFieldRow(f.label, f.value)));
       setStage("review");
     } catch (err) {
       setError(err instanceof IpcError ? err.message : "Could not extract fields from that text.");
@@ -80,16 +87,16 @@ export function StructuredExtractModal({
     }
   }
 
-  function updateField(index: number, patch: Partial<FieldRow>) {
-    setFields((prev) => prev.map((f, i) => (i === index ? { ...f, ...patch } : f)));
+  function updateField(id: number, patch: Partial<FieldRow>) {
+    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   }
 
-  function removeField(index: number) {
-    setFields((prev) => prev.filter((_, i) => i !== index));
+  function removeField(id: number) {
+    setFields((prev) => prev.filter((f) => f.id !== id));
   }
 
   function addField() {
-    setFields((prev) => [...prev, { label: "", value: "" }]);
+    setFields((prev) => [...prev, newFieldRow()]);
   }
 
   async function save() {
@@ -228,24 +235,24 @@ export function StructuredExtractModal({
 
           <div className="space-y-2">
             <p className="text-[11px] font-medium text-muted-foreground">Fields</p>
-            {fields.map((field, index) => (
-              <div key={index} className="flex items-center gap-1.5">
+            {fields.map((field) => (
+              <div key={field.id} className="flex items-center gap-1.5">
                 <Input
                   value={field.label}
-                  onChange={(event) => updateField(index, { label: event.target.value })}
+                  onChange={(event) => updateField(field.id, { label: event.target.value })}
                   placeholder="Label"
                   className="w-[130px] shrink-0"
                 />
                 <Input
                   mono
                   value={field.value}
-                  onChange={(event) => updateField(index, { value: event.target.value })}
+                  onChange={(event) => updateField(field.id, { value: event.target.value })}
                   placeholder="Value"
                   className="min-w-0 flex-1"
                 />
                 <button
                   type="button"
-                  onClick={() => removeField(index)}
+                  onClick={() => removeField(field.id)}
                   aria-label="Remove field"
                   className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-subtle-foreground hover:bg-surface-3 hover:text-destructive"
                 >

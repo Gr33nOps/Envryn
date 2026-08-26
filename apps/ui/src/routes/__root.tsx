@@ -33,7 +33,7 @@ function NotFoundComponent() {
  * The detail goes to the console for local debugging and no further -- Envryn
  * uploads nothing (see THREAT_MODEL.md, V-10).
  */
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error, reset }: Readonly<{ error: Error; reset: () => void }>) {
   console.error(error);
   const router = useRouter();
 
@@ -48,6 +48,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
+            type="button"
             onClick={() => {
               router.invalidate();
               reset();

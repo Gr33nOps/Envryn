@@ -105,8 +105,8 @@ function isIpcErrorShape(value: unknown): value is { code: IpcErrorCode; message
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>(command, args);
-  } catch (raw) {
-    if (isIpcErrorShape(raw)) throw new IpcError(raw.code, raw.message);
+  } catch (error_) {
+    if (isIpcErrorShape(error_)) throw new IpcError(error_.code, error_.message);
     // An unrecognised rejection means something went wrong below our contract.
     // Report it generically rather than surfacing an unknown payload, which
     // could carry internal detail.

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Fast local gate, run on every commit. Deliberately lighter than
+# pre-push: formatting and lint only, not the full test suite, so
+# committing stays quick. The full gate runs at push time (see
+# .githooks/pre-push) and again in CI (.github/workflows/ci.yml) --
+# three layers, cheapest first.
+set -e
+
+echo "[pre-commit] cargo fmt --check"
+cargo fmt --all -- --check
+
+echo "[pre-commit] eslint (frontend)"
+npx eslint apps/ui/src
+
+echo "[pre-commit] OK"

@@ -10,17 +10,53 @@ import { IpcError } from "@/lib/ipc";
 
 const ENVIRONMENTS: Environment[] = ["Development", "Staging", "Production", "—"];
 
+function valueFieldHint(editing: boolean, isNote: boolean): string {
+  if (editing) return "Leave blank to keep the value you already stored.";
+  if (isNote) return "Write anything you want to keep private.";
+  return "Paste the key, password, or token here.";
+}
+
+function ValueFieldLabel({
+  showSuggestType,
+  isNote,
+  suggesting,
+  onSuggestType,
+}: Readonly<{
+  showSuggestType: boolean;
+  isNote: boolean;
+  suggesting: boolean;
+  onSuggestType: () => void;
+}>) {
+  if (showSuggestType) {
+    return (
+      <span className="flex items-center justify-between">
+        <span>Value</span>
+        <button
+          type="button"
+          onClick={onSuggestType}
+          disabled={suggesting}
+          className="inline-flex items-center gap-1 text-[10.5px] font-normal text-primary hover:text-foreground disabled:opacity-50"
+        >
+          <Sparkles className="size-3" />
+          {suggesting ? "Checking..." : "Suggest type"}
+        </button>
+      </span>
+    );
+  }
+  return <>{isNote ? "Note" : "Value"}</>;
+}
+
 export function SecretFormModal({
   open,
   onOpenChange,
   secret,
   preset,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
   secret?: Secret | null | undefined;
   preset?: Partial<Secret> | undefined;
-}) {
+}>) {
   const projects = useProjects();
   const createSecret = useCreateSecret();
   const updateSecret = useUpdateSecret();
@@ -273,32 +309,14 @@ export function SecretFormModal({
 
         <Field
           label={
-            !editing && type !== "Note" && value.trim() ? (
-              <span className="flex items-center justify-between">
-                <span>Value</span>
-                <button
-                  type="button"
-                  onClick={() => void suggestType()}
-                  disabled={suggesting}
-                  className="inline-flex items-center gap-1 text-[10.5px] font-normal text-primary hover:text-foreground disabled:opacity-50"
-                >
-                  <Sparkles className="size-3" />
-                  {suggesting ? "Checking..." : "Suggest type"}
-                </button>
-              </span>
-            ) : type === "Note" ? (
-              "Note"
-            ) : (
-              "Value"
-            )
+            <ValueFieldLabel
+              showSuggestType={!editing && type !== "Note" && Boolean(value.trim())}
+              isNote={type === "Note"}
+              suggesting={suggesting}
+              onSuggestType={() => void suggestType()}
+            />
           }
-          hint={
-            editing
-              ? "Leave blank to keep the value you already stored."
-              : type === "Note"
-                ? "Write anything you want to keep private."
-                : "Paste the key, password, or token here."
-          }
+          hint={valueFieldHint(editing, type === "Note")}
         >
           {type === "Note" ? (
             <textarea

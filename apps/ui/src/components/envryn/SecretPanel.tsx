@@ -10,7 +10,7 @@ import { useVaultUI } from "./vault-context";
 
 const REVEAL_SECONDS = 20;
 
-export function SecretPanel({ secret }: { secret: Secret }) {
+export function SecretPanel({ secret }: Readonly<{ secret: Secret }>) {
   const { select, openEdit } = useVaultUI();
   const revealSecret = useRevealSecret();
   const deleteSecret = useDeleteSecret();

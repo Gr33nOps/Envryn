@@ -76,7 +76,7 @@ function navigationGroups(
   ];
 }
 
-export function Sidebar({ onLock }: { onLock: () => void }) {
+export function Sidebar({ onLock }: Readonly<{ onLock: () => void }>) {
   const path = useRouterState({ select: (state) => state.location.pathname });
   const secrets = useSecretList();
   const projects = useProjects();
@@ -169,7 +169,7 @@ export function Sidebar({ onLock }: { onLock: () => void }) {
       <div className="border-t border-border px-3 py-3">
         <div className="sidebar-status mb-2 flex items-center gap-2 px-2.5 text-[11px]">
           <span className="size-1 rounded-full bg-subtle-foreground" />
-          Unlocked
+          <span>Unlocked</span>
         </div>
         <button
           onClick={onLock}
@@ -177,7 +177,8 @@ export function Sidebar({ onLock }: { onLock: () => void }) {
           className="flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-[11.5px] text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
         >
           <Lock className="size-3.5 text-subtle-foreground" />
-          Lock vault<span className="kbd ml-auto">Ctrl L</span>
+          <span>Lock vault</span>
+          <span className="kbd ml-auto">Ctrl L</span>
         </button>
       </div>
     </aside>

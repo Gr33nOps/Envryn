@@ -10,6 +10,24 @@ export const Route = createFileRoute("/vault/sync")({ component: Sync });
 
 type Outcome = "ok" | "failed";
 
+function deviceStatusText(outcome: Outcome | undefined, online: boolean, lastSync: string): string {
+  if (outcome === "ok") return "Synced just now";
+  if (outcome === "failed") return "Could not reach this device";
+  if (online) return "Seen on this network";
+  return `Last sync ${lastSync}`;
+}
+
+function DeviceStatusLabel({
+  outcome,
+  syncing,
+  online,
+}: Readonly<{ outcome: Outcome | undefined; syncing: boolean; online: boolean }>) {
+  if (outcome === "failed") return <StatusLabel tone="danger">Failed</StatusLabel>;
+  if (syncing) return <StatusLabel tone="syncing">Syncing</StatusLabel>;
+  if (online) return <StatusLabel tone="success">Online</StatusLabel>;
+  return <StatusLabel tone="neutral">Offline</StatusLabel>;
+}
+
 function Sync() {
   const devicesQuery = useDevices();
   const devices = devicesQuery.data ?? [];
@@ -137,7 +155,7 @@ function Sync() {
     }
   }
 
-  const anyFailed = Object.values(outcomes).some((o) => o === "failed");
+  const anyFailed = Object.values(outcomes).includes("failed");
 
   return (
     <div className="min-h-full bg-background">
@@ -192,24 +210,10 @@ function Sync() {
                   <div className="min-w-0 flex-1">
                     <p className="text-[12.5px] font-medium">{device.name}</p>
                     <p className="mt-1 text-[11px] text-muted-foreground">
-                      {outcome === "ok"
-                        ? "Synced just now"
-                        : outcome === "failed"
-                          ? "Could not reach this device"
-                          : online
-                            ? "Seen on this network"
-                            : `Last sync ${device.lastSync}`}
+                      {deviceStatusText(outcome, online, device.lastSync)}
                     </p>
                   </div>
-                  {outcome === "failed" ? (
-                    <StatusLabel tone="danger">Failed</StatusLabel>
-                  ) : syncing ? (
-                    <StatusLabel tone="syncing">Syncing</StatusLabel>
-                  ) : online ? (
-                    <StatusLabel tone="success">Online</StatusLabel>
-                  ) : (
-                    <StatusLabel tone="neutral">Offline</StatusLabel>
-                  )}
+                  <DeviceStatusLabel outcome={outcome} syncing={syncing} online={online} />
                 </div>
               );
             })

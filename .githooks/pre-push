@@ -1,0 +1,38 @@
+#!/bin/sh
+# Full local security gate, run before every push. This is what "the
+# security gate" refers to in AUDIT_REPORT.md and SECURITY_CHECKLIST.md --
+# its job is to catch a regression (AI-generated or otherwise) before it
+# ever reaches the remote, not just rely on CI to notice after the fact.
+#
+# Mirrors .github/workflows/ci.yml's `rust` and `frontend` jobs as closely
+# as a local machine reasonably can (no cargo-deny/cargo-audit here --
+# those hit the network and are slow; run them by hand before a release,
+# same as docs/ARCHITECTURE.md section 9 already describes). A failure
+# here blocks the push (non-zero exit); fix it and push again, or in a
+# genuine emergency use `git push --no-verify` -- but that defeats the
+# entire point of this hook, so treat it as a last resort worth a second
+# look afterward, not a routine escape hatch.
+set -e
+
+echo "[pre-push] cargo fmt --check"
+cargo fmt --all -- --check
+
+echo "[pre-push] cargo clippy --workspace --all-targets --all-features -D warnings"
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+echo "[pre-push] cargo test --workspace"
+cargo test --workspace
+
+echo "[pre-push] frontend: typecheck"
+npm run typecheck --workspace @envryn/ui
+
+echo "[pre-push] frontend: eslint"
+npx eslint apps/ui/src
+
+echo "[pre-push] frontend: vitest"
+npx vitest run --root apps/ui
+
+echo "[pre-push] frontend: build"
+npm run build --workspace @envryn/ui
+
+echo "[pre-push] ALL CHECKS PASSED"

@@ -19,7 +19,7 @@ export const Route = createFileRoute("/vault")({
   component: VaultLayout,
 });
 
-function TopBar({ onSearch }: { onSearch: () => void }) {
+function TopBar({ onSearch }: Readonly<{ onSearch: () => void }>) {
   return (
     <header className="titlebar flex h-[50px] shrink-0 items-center gap-3 border-b border-border bg-background px-4">
       <button

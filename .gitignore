@@ -49,3 +49,7 @@ vault-data/
 /.dev-tools/edgedriver*
 /.dev-tools/*.png
 /.dev-tools/page-source.html
+
+# Local SonarScanner working directory -- throwaway per-run cache, not ours
+# to commit (see AUDIT_REPORT.md for the real, committed findings).
+.scannerwork/

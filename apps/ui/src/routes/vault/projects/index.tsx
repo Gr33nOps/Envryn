@@ -8,6 +8,12 @@ export const Route = createFileRoute("/vault/projects/")({
   component: Projects,
 });
 
+function environmentDotClass(name: string): string {
+  if (name === "Production") return "environment-dot environment-dot--production";
+  if (name === "Staging") return "environment-dot environment-dot--staging";
+  return "environment-dot";
+}
+
 function Projects() {
   const projects = useProjects();
   return (
@@ -62,15 +68,7 @@ function Projects() {
                   <span className="mt-2 flex flex-wrap gap-1.5">
                     {project.environments.map((environment) => (
                       <span key={environment.name} className="environment-chip">
-                        <span
-                          className={
-                            environment.name === "Production"
-                              ? "environment-dot environment-dot--production"
-                              : environment.name === "Staging"
-                                ? "environment-dot environment-dot--staging"
-                                : "environment-dot"
-                          }
-                        />
+                        <span className={environmentDotClass(environment.name)} />
                         {environment.name}{" "}
                         <span className="text-subtle-foreground">{environment.count}</span>
                       </span>

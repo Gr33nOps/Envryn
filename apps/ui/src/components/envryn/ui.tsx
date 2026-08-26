@@ -46,10 +46,12 @@ export function Button({
   loading,
   children,
   disabled,
+  type = "button",
   ...props
-}: ButtonProps) {
+}: Readonly<ButtonProps>) {
   return (
     <button
+      type={type}
       className={cn(buttonVariants({ variant, size }), className)}
       disabled={disabled || loading}
       {...props}
@@ -65,12 +67,14 @@ export function Button({
 export function IconButton({
   className,
   label,
+  type = "button",
   children,
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+}: Readonly<React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string }>) {
   return (
     <Tooltip content={label}>
       <button
+        type={type}
         aria-label={label}
         className={cn(
           "inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-3 hover:text-foreground [&_svg]:size-3.5",
@@ -105,28 +109,33 @@ export const Input = React.forwardRef<
   );
 });
 
+function FieldMessage({
+  error,
+  hint,
+}: Readonly<{ error?: string | undefined; hint?: string | undefined }>) {
+  if (error) return <p className="text-[11px] text-destructive">{error}</p>;
+  if (hint) return <p className="text-[11px] text-subtle-foreground">{hint}</p>;
+  return null;
+}
+
 export function Field({
   label,
   hint,
   error,
   children,
   className,
-}: {
+}: Readonly<{
   label: React.ReactNode;
   hint?: string | undefined;
   error?: string | undefined;
   children: React.ReactNode;
   className?: string | undefined;
-}) {
+}>) {
   return (
     <div className={cn("space-y-1", className)}>
       <label className="block text-[11px] font-medium text-muted-foreground">{label}</label>
       {children}
-      {error ? (
-        <p className="text-[11px] text-destructive">{error}</p>
-      ) : hint ? (
-        <p className="text-[11px] text-subtle-foreground">{hint}</p>
-      ) : null}
+      <FieldMessage error={error} hint={hint} />
     </div>
   );
 }
@@ -135,7 +144,7 @@ export function SearchField({
   className,
   shortcut,
   ...props
-}: React.InputHTMLAttributes<HTMLInputElement> & { shortcut?: string }) {
+}: Readonly<React.InputHTMLAttributes<HTMLInputElement> & { shortcut?: string }>) {
   return (
     <div className={cn("relative", className)}>
       <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
@@ -156,7 +165,7 @@ export function Select({
   className,
   children,
   ...props
-}: React.SelectHTMLAttributes<HTMLSelectElement>) {
+}: Readonly<React.SelectHTMLAttributes<HTMLSelectElement>>) {
   return (
     <div className="relative">
       <select
@@ -176,10 +185,10 @@ export function Select({
 export function Switch({
   checked,
   onCheckedChange,
-}: {
+}: Readonly<{
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
-}) {
+}>) {
   return (
     <SwitchPrimitive.Root
       checked={checked}
@@ -199,13 +208,13 @@ export function Tabs({
   onChange,
   variant = "underline",
   className,
-}: {
+}: Readonly<{
   items: { value: string; label: string; count?: number }[];
   value: string;
   onChange: (v: string) => void;
   variant?: "underline" | "segmented";
   className?: string;
-}) {
+}>) {
   if (variant === "segmented") {
     return (
       <div
@@ -216,6 +225,7 @@ export function Tabs({
       >
         {items.map((i) => (
           <button
+            type="button"
             key={i.value}
             onClick={() => onChange(i.value)}
             aria-pressed={value === i.value}
@@ -237,6 +247,7 @@ export function Tabs({
     <div className={cn("flex items-center gap-4 border-b border-border", className)}>
       {items.map((i) => (
         <button
+          type="button"
           key={i.value}
           onClick={() => onChange(i.value)}
           className={cn(
@@ -261,10 +272,10 @@ export function Tabs({
 export function StatusDot({
   tone = "neutral",
   className,
-}: {
+}: Readonly<{
   tone?: "success" | "warning" | "danger" | "neutral" | "syncing";
   className?: string;
-}) {
+}>) {
   return (
     <span
       className={cn(
@@ -283,10 +294,10 @@ export function StatusDot({
 export function StatusLabel({
   tone,
   children,
-}: {
+}: Readonly<{
   tone: "success" | "warning" | "danger" | "neutral" | "syncing";
   children: React.ReactNode;
-}) {
+}>) {
   return (
     <span
       className={cn(
@@ -304,7 +315,7 @@ export function StatusLabel({
   );
 }
 
-export function TypeTag({ type }: { type: string }) {
+export function TypeTag({ type }: Readonly<{ type: string }>) {
   return <span className="text-[11.5px] text-muted-foreground">{type}</span>;
 }
 
@@ -318,7 +329,7 @@ export function Modal({
   children,
   footer,
   width = "sm:max-w-[420px]",
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title: string;
@@ -326,7 +337,7 @@ export function Modal({
   children?: React.ReactNode;
   footer?: React.ReactNode;
   width?: string;
-}) {
+}>) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -350,6 +361,7 @@ export function Modal({
             </div>
             <DialogPrimitive.Close asChild>
               <button
+                type="button"
                 aria-label="Close"
                 className="-mr-1 mt-0.5 inline-flex size-5 items-center justify-center rounded text-subtle-foreground hover:bg-surface-3 hover:text-foreground"
               >
@@ -377,7 +389,7 @@ export function ConfirmDialog({
   confirmLabel,
   onConfirm,
   destructive = true,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title: string;
@@ -385,7 +397,7 @@ export function ConfirmDialog({
   confirmLabel: string;
   onConfirm: () => void;
   destructive?: boolean;
-}) {
+}>) {
   return (
     <Modal
       open={open}
@@ -416,11 +428,11 @@ export function Tooltip({
   content,
   children,
   side = "top",
-}: {
+}: Readonly<{
   content: string;
   children: React.ReactNode;
   side?: "top" | "bottom" | "left" | "right";
-}) {
+}>) {
   return (
     <TooltipPrimitive.Provider delayDuration={350}>
       <TooltipPrimitive.Root>
@@ -446,12 +458,12 @@ export function PageHeader({
   subtitle,
   actions,
   back,
-}: {
+}: Readonly<{
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
   back?: React.ReactNode;
-}) {
+}>) {
   return (
     <div className="flex items-start justify-between gap-4 px-5 pb-3 pt-4">
       <div className="min-w-0">
@@ -464,7 +476,7 @@ export function PageHeader({
   );
 }
 
-export function SectionLabel({ children }: { children: React.ReactNode }) {
+export function SectionLabel({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <div className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground">
       {children}
@@ -476,11 +488,11 @@ export function EmptyState({
   title,
   body,
   action,
-}: {
+}: Readonly<{
   title: string;
   body?: string;
   action?: React.ReactNode;
-}) {
+}>) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
       <p className="text-[13px] font-medium text-foreground">{title}</p>
@@ -498,11 +510,11 @@ export function SettingsRow({
   label,
   description,
   control,
-}: {
+}: Readonly<{
   label: string;
   description?: string;
   control: React.ReactNode;
-}) {
+}>) {
   return (
     <div className="flex items-center justify-between gap-6 border-b border-border/70 px-3 py-2 last:border-0">
       <div className="min-w-0">
@@ -516,7 +528,10 @@ export function SettingsRow({
   );
 }
 
-export function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
+export function Panel({
+  children,
+  className,
+}: Readonly<{ children: React.ReactNode; className?: string }>) {
   return (
     <div className={cn("overflow-hidden rounded-md border border-border bg-surface", className)}>
       {children}
@@ -528,11 +543,11 @@ export function DetailRow({
   label,
   value,
   mono,
-}: {
+}: Readonly<{
   label: string;
   value: React.ReactNode;
   mono?: boolean;
-}) {
+}>) {
   return (
     <div>
       <div className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-subtle-foreground">

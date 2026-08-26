@@ -217,6 +217,21 @@ impl GrammarState {
                     }
                 }
             }
+            Step::NumberLeading
+            | Step::AfterZero
+            | Step::ZeroFraction
+            | Step::AfterOne
+            | Step::OneFraction => self.step_number(current, ch),
+        }
+    }
+
+    /// The `confidence` field's number grammar: a leading `0` or `1`
+    /// (values outside `[0, 1]` are rejected), then an optional fraction --
+    /// `1.` may only be followed by `0`s, so the value can never exceed 1.
+    /// Split out of [`Self::step`] purely to keep that function's branching
+    /// readable; the state machine itself is unchanged.
+    fn step_number(mut self, phase: Step, ch: char) -> Option<GrammarState> {
+        match phase {
             Step::NumberLeading => match ch {
                 '0' => {
                     self.queue.push_front(Step::AfterZero);
@@ -261,6 +276,7 @@ impl GrammarState {
                 '}' => self.step_literal_close(ch),
                 _ => None,
             },
+            _ => unreachable!("step_number is only called for the number-phase Step variants"),
         }
     }
 
