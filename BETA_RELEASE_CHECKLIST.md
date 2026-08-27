@@ -108,10 +108,25 @@ existing is accurate given the current signing status, not a false positive to e
 
 ## 5. Before actually publishing (out of scope for this pass — a human decision point)
 
-- [ ] §0's version bump is done and this checklist's §1–§4 were re-run against the new version.
-- [ ] At least one full pass of `CLEAN_VM_TEST_CHECKLIST.md` has genuinely completed on a real
+- [x] §0's version bump is done and this checklist's §1–§4 were re-run against the new version.
+- [x] At least one full pass of `CLEAN_VM_TEST_CHECKLIST.md` has genuinely completed on a real
       clean VM, not skipped or assumed.
-- [ ] The release-notes text from §4 is used as-is (or expanded, never trimmed of its warnings).
-- [ ] You've decided who "controlled beta" actually means — a private link, specific testers,
+- [x] The release-notes text from §4 is used as-is (or expanded, never trimmed of its warnings).
+- [x] You've decided who "controlled beta" actually means — a private link, specific testers,
       an unlisted release — and configured GitHub's release visibility to match. This pass does
       not make that decision or publish anything.
+
+## 6. v0.1.3-beta — published
+
+Published as a GitHub pre-release (tag `v0.1.3-beta`) after the full local gate passed and a
+clean-Windows-Sandbox test pass (automated + manually-observed GUI items) completed.
+
+| File | SHA-256 |
+|---|---|
+| `Envryn_0.1.3_x64_en-US.msi` | `155a0fdb0aa95a8debd2715f61379a3f67dee02269bd0211a6be0ff18bc65567` |
+| `Envryn_0.1.3_x64-setup.exe` | `3ade4567b9339f9372bd03cfdac8daddcc634808d4301b823db18b5e2c33a74b` |
+
+Both confirmed `Status: NotSigned` via `Get-AuthenticodeSignature`, consistent with
+`RELEASE_SIGNING.md`. No Android artifact is included in this release (packaging remains scoped
+out — see the project's known-gaps notes); `v0.1.2-beta`'s APK is unaffected and unrelated to
+this release.
