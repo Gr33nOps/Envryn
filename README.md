@@ -84,7 +84,10 @@ If you want your data gone too, not just the app, remove it yourself after unins
 1. Press `Win+R`, type `%APPDATA%`, press Enter.
 2. Delete the `dev.envryn.vault` folder you find there. This holds your encrypted vault database
    (`envryn.db` and its `-wal`/`-shm` files), your device identity, your settings, and — if you
-   ever enabled the local AI feature — the downloaded model files.
+   ever enabled the local AI feature — the downloaded model files. (This folder exists even if
+   you never created a vault — Envryn creates it within seconds of any launch to store your
+   auto-lock/clipboard preferences, which have to be readable before a vault exists. If you never
+   created a vault, it holds nothing sensitive.)
 3. Optionally, also check `%LOCALAPPDATA%\dev.envryn.vault` (press `Win+R`, type
    `%LOCALAPPDATA%`, Enter). If present, this holds the embedded browser engine's own cache and
    metrics data — never your secrets (Envryn's UI never holds key material; see

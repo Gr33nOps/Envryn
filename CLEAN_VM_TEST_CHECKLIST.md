@@ -79,8 +79,12 @@ snapshot between them) — they behave differently and both need their own clean
 - [ ] Create a vault: type a real password. Confirm a strength indicator appears and visibly
       changes as you type different passwords (weak → strong).
 - [ ] Open File Explorer, type `%APPDATA%` in the address bar, press Enter. Confirm a
-      `dev.envryn.vault` folder now exists — and that it did **not** exist before you created the
-      vault (only after).
+      `dev.envryn.vault` folder exists. **Note:** this folder is created within a few seconds of
+      *any* launch, before you create a vault — the auto-lock background timer reads app settings
+      (auto-lock minutes, clipboard-clear seconds) on every tick, and creating that folder is a
+      side effect of checking for a settings file that may not exist yet. This is expected,
+      deliberate behavior (see `INSTALLER_REVIEW.md`), not a sign anything vault-related has
+      happened — the folder holds no secret data until you actually create a vault.
 
 ## 3. Vault lifecycle
 
