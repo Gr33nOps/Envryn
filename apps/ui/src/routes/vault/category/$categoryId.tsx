@@ -46,10 +46,12 @@ function CategoryView() {
               </span>
             </p>
           </div>
-          <Button variant="primary" size="lg" onClick={() => openAdd()}>
-            <Plus />
-            Add secret
-          </Button>
+          {allItems.length > 0 && (
+            <Button variant="primary" size="lg" onClick={() => openAdd()}>
+              <Plus />
+              Add secret
+            </Button>
+          )}
         </header>
         {allItems.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

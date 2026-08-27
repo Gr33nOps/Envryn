@@ -388,6 +388,27 @@
   .filter-select {
     min-width: 142px;
   }
+
+  /* Narrower and more restrained than the global scrollbar -- the sidebar is
+     a fixed 220px column, and the default 10px track/thumb read as a heavy
+     stripe eating into that width. Thumb stays near-invisible until actually
+     hovered or scrolled, rather than sitting there as a constant visual bar. */
+  .sidebar-nav {
+    scrollbar-width: thin;
+  }
+
+  .sidebar-nav::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .sidebar-nav::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 8px;
+  }
+
+  .sidebar-nav:hover::-webkit-scrollbar-thumb {
+    background: var(--surface-3);
+  }
 }
 
 @layer components {

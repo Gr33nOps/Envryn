@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { ArrowDownUp, ChevronDown, Plus, Sparkles, Upload } from "lucide-react";
+import { categories, type SecretType } from "@/lib/envryn-data";
 import { useSecretList } from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
@@ -10,13 +11,24 @@ export const Route = createFileRoute("/vault/")({
   component: AllSecrets,
 });
 
+// Mirrors the sidebar's own category grouping (`envryn-data.ts`'s
+// `categories`) rather than listing individual secret types -- these used to
+// disagree (the sidebar showed one combined "API & tokens" entry while this
+// page split it into separate "API keys"/"Tokens" tabs), which read as two
+// different category schemes for the same vault. One source of truth now.
 const filters = [
   { value: "all", label: "All" },
-  { value: "API Key", label: "API keys" },
-  { value: "Token", label: "Tokens" },
-  { value: "Database", label: "Databases" },
-  { value: "SSH", label: "SSH" },
+  ...Object.entries(categories).map(([value, category]) => ({
+    value,
+    label: category.label,
+  })),
 ];
+
+function matchesFilter(secretType: SecretType, filter: string): boolean {
+  if (filter === "all") return true;
+  const category = categories[filter as keyof typeof categories];
+  return category ? (category.types as SecretType[]).includes(secretType) : false;
+}
 
 function AllSecrets() {
   const { openAdd, openImport, openExtract } = useVaultUI();
@@ -29,7 +41,7 @@ function AllSecrets() {
   const items = React.useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return secrets
-      .filter((secret) => filter === "all" || secret.type === filter)
+      .filter((secret) => matchesFilter(secret.type, filter))
       .filter((secret) => environment === "all" || secret.environment === environment)
       .filter((secret) =>
         [secret.name, secret.project, secret.environment, secret.type, secret.provider ?? ""]
@@ -58,12 +70,17 @@ function AllSecrets() {
               Your local development credentials, organized by project and environment.
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="primary" size="lg" onClick={() => openAdd()}>
-              <Plus />
-              Add secret
-            </Button>
-          </div>
+          {/* The empty state below already offers its own centered "Add secret" --
+              showing this one too, on a screen with nothing else on it, was two
+              identical calls to action competing for the same click. */}
+          {secrets.length > 0 && (
+            <div className="flex shrink-0 items-center gap-2">
+              <Button variant="primary" size="lg" onClick={() => openAdd()}>
+                <Plus />
+                Add secret
+              </Button>
+            </div>
+          )}
         </header>
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-y border-border/70 py-2.5">
@@ -78,7 +95,7 @@ function AllSecrets() {
             <SearchField
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by name, project, or provider"
+              placeholder="Filter this list by name, project, or provider"
               className="min-w-0 flex-1 md:max-w-[390px]"
             />
             <div className="flex items-center gap-2 md:ml-auto">
@@ -113,21 +130,43 @@ function AllSecrets() {
             className="overflow-x-auto px-3.5"
           />
           {items.length === 0 ? (
-            <EmptyState
-              title={query ? `No results for “${query}”` : "No secrets in this view"}
-              body="Try a different filter or environment."
-              action={
-                query ? (
-                  <Button variant="secondary" onClick={() => setQuery("")}>
-                    Clear search
-                  </Button>
-                ) : (
+            secrets.length === 0 ? (
+              <EmptyState
+                title="No secrets yet"
+                body="Add your first secret to get started."
+                action={
                   <Button variant="primary" onClick={() => openAdd()}>
                     <Plus /> Add secret
                   </Button>
-                )
-              }
-            />
+                }
+              />
+            ) : query ? (
+              <EmptyState
+                title={`No results for “${query}”`}
+                body="Try a different name, project, or provider."
+                action={
+                  <Button variant="secondary" onClick={() => setQuery("")}>
+                    Clear search
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                title="No secrets match these filters"
+                body="Try a different filter or environment."
+                action={
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setFilter("all");
+                      setEnvironment("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                }
+              />
+            )
           ) : (
             <SecretList items={items} />
           )}

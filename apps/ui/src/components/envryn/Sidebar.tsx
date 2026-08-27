@@ -16,7 +16,6 @@ import type { LucideIcon } from "lucide-react";
 import { categories, type Secret } from "@/lib/envryn-data";
 import { useProjects, useSecretList } from "@/lib/use-vault";
 import { cn } from "@/lib/utils";
-import { Wordmark } from "./Logo";
 import { SectionLabel } from "./ui";
 
 interface Item {
@@ -84,11 +83,8 @@ export function Sidebar({ onLock }: Readonly<{ onLock: () => void }>) {
 
   return (
     <aside className="app-sidebar flex w-[220px] shrink-0 flex-col border-r border-border bg-background">
-      <div className="flex h-[58px] items-center border-b border-border px-4">
-        <Wordmark size={21} />
-      </div>
-      <div className="px-4 pt-4">
-        <div className="flex items-center gap-2 border-b border-border pb-3">
+      <div className="flex h-[50px] items-center border-b border-border px-4">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="workspace-avatar">E</span>
           <div className="min-w-0">
             <p className="truncate text-[12px] font-medium text-foreground">My vault</p>
@@ -96,7 +92,7 @@ export function Sidebar({ onLock }: Readonly<{ onLock: () => void }>) {
           </div>
         </div>
       </div>
-      <nav className="flex-1 overflow-y-auto px-3 pb-3 pt-5">
+      <nav className="sidebar-nav flex-1 overflow-y-auto px-3 pb-3 pt-5">
         {groups.map((group) => (
           <div key={group.label} className="mb-5">
             <div className="px-2 pb-1.5">
@@ -128,7 +124,9 @@ export function Sidebar({ onLock }: Readonly<{ onLock: () => void }>) {
                         )}
                       />
                       <span className="flex-1 truncate">{item.label}</span>
-                      {item.count !== undefined && (
+                      {/* A zero count is noise, not information -- an empty vault's sidebar
+                          shouldn't read as six things all reporting the same "nothing here" */}
+                      {!!item.count && (
                         <span className="font-mono text-[10px] text-subtle-foreground">
                           {item.count}
                         </span>

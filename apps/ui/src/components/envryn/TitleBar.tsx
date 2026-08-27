@@ -2,6 +2,7 @@ import * as React from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as ipc from "@/lib/ipc";
+import { Wordmark } from "./Logo";
 
 /**
  * Custom window chrome. `decorations: false` in `tauri.conf.json` removes
@@ -9,10 +10,13 @@ import * as ipc from "@/lib/ipc";
  * same way most modern desktop apps (VS Code, Discord, Slack) do, rather
  * than leaving the window looking unfinished.
  *
- * Deliberately no logo/wordmark here -- `Sidebar.tsx`'s own header is
- * Envryn's one clear branding spot, immediately below this bar. An earlier
- * version of this component duplicated it up here too, which read as two
- * competing app identities stacked on top of each other rather than one.
+ * The one branding mark in the whole app lives here, small and restrained
+ * (17px mark, 13px wordmark -- `Wordmark`'s own defaults) at the far left,
+ * ahead of the drag region. `Sidebar.tsx` used to carry this instead; moved
+ * here so the sidebar can lead with the user's own vault, not the app's
+ * name, and so the window reads as one native-feeling piece of chrome with
+ * its identity in the conventional title-bar position rather than repeated
+ * below it.
  *
  * Outside Tauri (`npm run dev` in a plain browser) there is no real window
  * to control, so every handler below is a no-op guarded by `ipc.isTauri()`
@@ -60,6 +64,9 @@ export function TitleBar() {
       onDoubleClick={() => void withWindow((win) => win.toggleMaximize())}
       className="flex h-8 shrink-0 select-none items-center justify-between border-b border-border bg-surface"
     >
+      <div className="flex h-full shrink-0 items-center pl-3">
+        <Wordmark size={17} />
+      </div>
       <div data-tauri-drag-region className="h-full flex-1" />
       <div className="flex h-full shrink-0 items-stretch">
         <button
