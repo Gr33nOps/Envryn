@@ -125,8 +125,19 @@ clean-Windows-Sandbox test pass (automated + manually-observed GUI items) comple
 |---|---|
 | `Envryn_0.1.3_x64_en-US.msi` | `155a0fdb0aa95a8debd2715f61379a3f67dee02269bd0211a6be0ff18bc65567` |
 | `Envryn_0.1.3_x64-setup.exe` | `3ade4567b9339f9372bd03cfdac8daddcc634808d4301b823db18b5e2c33a74b` |
+| `Envryn_0.1.3_android-universal-unsigned.apk` | `50a4a9b1732227747c5660600dbfbb8e7cbb3759d21f3f5f552387c1e77a895f` |
 
-Both confirmed `Status: NotSigned` via `Get-AuthenticodeSignature`, consistent with
-`RELEASE_SIGNING.md`. No Android artifact is included in this release (packaging remains scoped
-out — see the project's known-gaps notes); `v0.1.2-beta`'s APK is unaffected and unrelated to
-this release.
+All three confirmed unsigned (`Get-AuthenticodeSignature` → `NotSigned` on both Windows
+installers; the APK has no signing block either), consistent with `RELEASE_SIGNING.md`.
+
+**Android packaging succeeded this pass, uploaded to the same release as an additional asset.**
+[[project-envryn-known-gaps]] previously recorded this as blocked: Tauri's Android build step
+symlinks the compiled `.so` into `jniLibs/`, and Windows requires Developer Mode or an elevated
+process holding `SeCreateSymbolicLinkPrivilege` to create symlinks. This build machine's shell
+was running elevated when this pass ran (`New-Item -ItemType SymbolicLink` succeeded directly,
+verified before attempting the real build), so `cargo tauri android build --apk` completed
+cleanly against all 4 ABIs (`aarch64`, `armv7`, `i686`, `x86_64`) into one universal APK —
+verified via `aapt dump badging` (`package: dev.envryn.vault`, `versionName: 0.1.3`) and by
+confirming `libenvryn_lib.so` is present under all 4 `lib/<abi>/` paths inside the APK. This
+doesn't retroactively fix the gap for a non-elevated session — it means this specific build ran
+with the privilege the earlier gap note said was missing.
