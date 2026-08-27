@@ -1,14 +1,35 @@
+<div align="center">
+
+<img src="docs/assets/logo.png" alt="Envryn" width="88" height="88">
+
 # Envryn
 
-**A local-first secrets vault for developers.** API keys, tokens, database
-credentials, SSH keys, and other credentials — encrypted, stored only on
-your own machine, and never sent anywhere by default.
+**A local-first secrets vault for developers.**
+API keys, tokens, database credentials, SSH keys, and other credentials —
+encrypted, stored only on your own machine, and never sent anywhere by default.
 
 [![CI](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml/badge.svg)](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/Gr33nOps/Envryn?include_prereleases&label=release&color=2ea043)](https://github.com/Gr33nOps/Envryn/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-0a84ff)](#installing)
 [![Platform: Android (experimental)](https://img.shields.io/badge/platform-Android%20(experimental)-3ddc84)](#installing)
 [![Status: beta](https://img.shields.io/badge/status-beta-orange)](#project-status)
+
+</div>
+
+<br>
+
+## Contents
+
+[Why Envryn](#why-envryn) ·
+[Features](#features) ·
+[Installing](#installing) ·
+[Uninstalling](#uninstalling-and-removing-your-data) ·
+[Updating](#manual-updates-no-auto-updater-in-v01x) ·
+[Development](#development) ·
+[Architecture](#architecture-in-brief) ·
+[Security docs](#security-documentation) ·
+[Project status](#project-status)
 
 ---
 
@@ -204,6 +225,8 @@ audit and a real production-build install/uninstall cycle. Rougher edges:
   on-device model it deliberately uses to stay GPU-free
 - No auto-updater by design for now; update by downloading the latest
   release
+
+---
 
 ## License
 
