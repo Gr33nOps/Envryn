@@ -83,6 +83,10 @@ export type IpcErrorCode =
   | "decryption_failed"
   | "platform_unavailable"
   | "ai_unavailable"
+  // The local model is already working on another request. The worker
+  // serves one request at a time, so a second concurrent call is refused
+  // rather than queued behind the first.
+  | "ai_busy"
   | "internal";
 
 export class IpcError extends Error {

@@ -233,6 +233,22 @@ is an acceptable outcome. "Malformed output is a clean failure that surfaces as 
 complete this locally,' never a partially-parsed suggestion" -- true for every schema; genuinely
 *impossible to violate in the first place* for `ClassificationOutput` specifically.
 
+**Missing fields are now distinguished from extra ones, and only for the three list/filter
+schemas.** `SearchFilterOutput`, `ExtractedFieldsOutput`, and `EnvNameClassificationOutput`
+carry `#[serde(default)]` alongside `deny_unknown_fields`, so a response that *omits* a field
+parses with that field empty, while a response that *adds* one is still refused outright. This
+was a real usability defect, not a theoretical one: rejecting an entire search filter because
+a 1.5B model left `tags` out is why natural-language search reported "No match found" for
+essentially every query -- the filter never survived parsing, so the search never ran. The
+distinction matters for the security argument in section 4 and is worth stating precisely: the
+injection property there depends on a model being **unable to express a field the schema does
+not have**, which is what `deny_unknown_fields` enforces and what
+`tolerating_missing_fields_did_not_start_tolerating_extra_ones`
+(`crates/envryn-core/src/ai/gateway.rs`) pins with a test. Defaulting an absent field does not
+weaken it. `ClassificationOutput` and `NameSuggestionOutput` deliberately keep every field
+required -- a classification missing its `kind`, or a name suggestion missing its `name`, has
+nothing usable to fall back on.
+
 Model output is never rendered as HTML and never executed.
 
 ---

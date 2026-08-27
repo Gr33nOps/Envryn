@@ -30,11 +30,23 @@ Every row is a contract. Changing any cell requires updating `THREAT_MODEL.md` a
 ### Tier 1 (MVP)
 
 **All five implemented and tested** (`crates/envryn-core/src/ai/gateway.rs`'s five typed
-methods; `src-tauri/src/ai.rs`'s matching commands; `crates/envryn-core/tests/ai_real_model.rs`
-proves three of the five against real local inference -- classification, naming, and search-
-intent parsing -- with a real Qwen2-0.5B-Instruct model, including the honest finding recorded
-in `AI_SECURITY.md` section 5 about that model's reliability on the five-field search schema
-specifically).
+methods; `src-tauri/src/ai.rs`'s matching commands). `crates/envryn-core/tests/ai_real_model.rs`
+now exercises **all five** against real local inference with the real
+**Qwen2.5-1.5B-Instruct (Q4_0 GGUF)** model that ships as the pinned download
+(`model_download::QWEN2_5_1_5B_INSTRUCT`) -- classification, naming, search-intent parsing,
+`.env` name classification, and structured extraction -- plus a test that a killed worker
+produces a recoverable error rather than a crash.
+
+**The five-field search-schema fragility recorded in `AI_SECURITY.md` section 5 is fixed, not
+worked around.** Two changes: `SearchFilterOutput` now defaults absent fields instead of
+rejecting the response (a small model omitting `tags` no longer fails the entire search --
+`deny_unknown_fields` is untouched, so extra fields are still refused and the injection
+property in section 4 still holds), and `crates/envryn-core/src/ai/search.rs` resolves
+environment names, secret kinds, and stop words deterministically *before* the model is
+consulted at all. A query like "production databases" never reaches the model; only genuinely
+vague phrasing does, and if that fails the deterministic parse is still returned. Search is
+consequently the one AI-adjacent command that does not fail closed when AI is off or the worker
+is down -- see `ai_parse_search_intent`'s own note.
 
 | Feature | Level | Input required | Why that input | Plaintext secret? | Persistence | Confirmation |
 |---|---|---|---|---|---|---|
@@ -49,9 +61,19 @@ specifically).
 and tries `classify_deterministic` first, falling back to the AI command only if that finds
 nothing and local AI is enabled and running -- exactly the "deterministic first" rule in
 section 3 below, expressed in the UI's own call order, not only in the backend. Smart naming is
-wired the same way ("Suggest name," same file). Natural-language search
-(`apps/ui/src/components/envryn/SearchPalette.tsx`) falls back to `ai_parse_search_intent` only
-once plain substring search finds nothing. `.env` import
+wired the same way ("Suggest name," same file). **`ai_classify_pasted_value` also short-circuits
+on a deterministic match server-side**, so the precedence is a property of the command rather
+than a convention a caller could forget -- which is exactly how an OpenRouter key (`sk-or-v1-`,
+an unambiguous literal prefix) previously reached the model at all and came back labelled
+"Stripe".
+
+Natural-language search (`apps/ui/src/components/envryn/SearchPalette.tsx`) runs **only on
+explicit submission** -- the Search button or the Enter key. It previously fired on a debounce
+timer after every keystroke, which meant typing a sentence launched a burst of inference
+requests for a result the user had not asked for yet, all queued behind one another on the
+worker's single connection. Typing now invalidates a stale result set but starts nothing, an
+empty query cannot be submitted, and a second submission is refused while one is still running.
+`.env` import
 (`apps/ui/src/components/envryn/EnvImportModal.tsx`) parses pasted text with a real client-side
 parser (never the model), classifies each variable's *value* deterministically first, and only
 sends the bare **names** `classify_deterministic` couldn't place to `ai_classify_env_names` --

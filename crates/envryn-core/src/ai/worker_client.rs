@@ -123,10 +123,12 @@ impl WorkerClient {
             .arg(&config.eos_token)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            .env("RAYON_NUM_THREADS", inference_thread_count().to_string());
         for (key, value) in &config.extra_env {
             command.env(key, value);
         }
+        configure_windows_process_creation(&mut command);
         let mut child = command.spawn().map_err(|_| EngineError::Unavailable)?;
 
         // Best-effort: a platform without `KillOnCloseJob` (anything but
@@ -231,6 +233,55 @@ impl LocalAiEngine for WorkerClient {
         }
     }
 }
+
+/// How many threads the worker may use for inference.
+///
+/// Two real problems, one knob. The worker is a plain console binary doing
+/// CPU-only matrix math through `candle`, which parallelises over `rayon`'s
+/// global pool -- and rayon's default is *every* logical core. On an
+/// ordinary desktop that starves the two things the user is actually looking
+/// at (Envryn's own main thread and the WebView2 renderer process) for the
+/// entire length of a generation, which is what "the app goes Not
+/// Responding while AI is generating" actually was: not a blocked UI thread,
+/// a CPU-starved one.
+///
+/// Leaving two cores unclaimed keeps the UI interactive while still giving
+/// inference the bulk of the machine. `RAYON_NUM_THREADS` is read by rayon
+/// when it lazily builds its global pool, so setting it on the child's
+/// environment reaches candle without this crate depending on rayon at all.
+fn inference_thread_count() -> usize {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+    cores.saturating_sub(2).max(1)
+}
+
+/// Windows-only process-creation flags.
+///
+/// `CREATE_NO_WINDOW` fixes two separate reported problems at once:
+///
+/// 1. **No console window.** The worker is a console-subsystem binary
+///    (deliberately -- it stays runnable from a terminal for debugging), so
+///    Windows hands it a console when a GUI parent spawns it. That console
+///    is the black CMD window that flashed up whenever AI started.
+/// 2. **Closing a terminal no longer kills AI.** A child that inherits its
+///    parent's console joins that console's process group and receives
+///    `CTRL_CLOSE_EVENT`/`CTRL_C_EVENT` when the terminal closes. With this
+///    flag the worker gets its own detached (never-shown) console instead,
+///    so closing the terminal Envryn was launched from leaves it running.
+///
+/// The worker's lifetime stays bound to Envryn's by the two mechanisms that
+/// should own it -- `WorkerClient::shutdown`/`Drop` and the Job Object in
+/// `spawn` -- neither of which this flag affects.
+#[cfg(windows)]
+fn configure_windows_process_creation(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn configure_windows_process_creation(_command: &mut Command) {}
 
 /// Reads the worker's `READY <port> <token>` line on a background thread so
 /// a worker that hangs before printing it (stuck loading a corrupt or

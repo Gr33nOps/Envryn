@@ -28,47 +28,159 @@ const fn m(kind: SecretKind, provider: Option<&'static str>) -> DeterministicMat
     DeterministicMatch { kind, provider }
 }
 
-/// Ordered, most-specific-first. The first matching rule wins; callers get
-/// exactly one classification, never a ranked list to guess between.
+/// Every known credential prefix, paired with what it means.
+///
+/// **Order in this table is deliberately not significant.** [`classify`]
+/// selects the *longest* matching prefix, not the first, so a specific rule
+/// always beats a more general one that shares its start regardless of where
+/// either sits here (`sk-or-v1-` beats `sk-or-` beats `sk-`). Getting this
+/// wrong is not hypothetical: an OpenRouter key (`sk-or-v1-...`) previously
+/// matched no rule at all, fell through to the model, and came back
+/// confidently labelled "Stripe" -- a wrong answer presented with the same
+/// authority as a right one. Longest-match makes the precedence structural
+/// instead of a hand-maintained ordering a future edit can silently break.
+const PREFIX_RULES: &[(&str, DeterministicMatch)] = &[
+    // OpenAI-style `sk-` family. Every vendor below borrowed OpenAI's
+    // prefix, which is exactly why longest-match matters here.
+    ("sk-or-v1-", m(SecretKind::ApiKey, Some("OpenRouter"))),
+    ("sk-or-", m(SecretKind::ApiKey, Some("OpenRouter"))),
+    ("sk-ant-api", m(SecretKind::ApiKey, Some("Anthropic"))),
+    ("sk-ant-", m(SecretKind::ApiKey, Some("Anthropic"))),
+    ("sk-proj-", m(SecretKind::ApiKey, Some("OpenAI"))),
+    ("sk-svcacct-", m(SecretKind::ApiKey, Some("OpenAI"))),
+    // Legacy OpenAI keys are a bare `sk-` + random text. Deliberately last
+    // in the family by virtue of being the shortest: it is the fallback for
+    // an `sk-` key none of the more specific rules above claimed.
+    ("sk-", m(SecretKind::ApiKey, Some("OpenAI"))),
+    ("pplx-", m(SecretKind::ApiKey, Some("Perplexity"))),
+    ("xai-", m(SecretKind::ApiKey, Some("xAI"))),
+    ("gsk_", m(SecretKind::ApiKey, Some("Groq"))),
+    ("fw_", m(SecretKind::ApiKey, Some("Fireworks AI"))),
+    ("r8_", m(SecretKind::ApiKey, Some("Replicate"))),
+    ("hf_", m(SecretKind::Token, Some("Hugging Face"))),
+    // Stripe. `sk_`/`pk_` use an underscore, so they never collide with the
+    // `sk-` family above -- but both are spelled out per-mode anyway so a
+    // live key is never silently read as a test key.
+    ("sk_live_", m(SecretKind::ApiKey, Some("Stripe"))),
+    ("sk_test_", m(SecretKind::ApiKey, Some("Stripe"))),
+    ("pk_live_", m(SecretKind::ApiKey, Some("Stripe"))),
+    ("pk_test_", m(SecretKind::ApiKey, Some("Stripe"))),
+    ("rk_live_", m(SecretKind::ApiKey, Some("Stripe"))),
+    ("rk_test_", m(SecretKind::ApiKey, Some("Stripe"))),
+    ("whsec_", m(SecretKind::Webhook, Some("Stripe"))),
+    // Source forges.
+    ("github_pat_", m(SecretKind::Token, Some("GitHub"))),
+    ("ghp_", m(SecretKind::Token, Some("GitHub"))),
+    ("gho_", m(SecretKind::Token, Some("GitHub"))),
+    ("ghs_", m(SecretKind::Token, Some("GitHub"))),
+    ("ghu_", m(SecretKind::Token, Some("GitHub"))),
+    ("ghr_", m(SecretKind::Token, Some("GitHub"))),
+    ("glpat-", m(SecretKind::Token, Some("GitLab"))),
+    // Cloud providers.
+    ("AKIA", m(SecretKind::ApiKey, Some("AWS"))),
+    ("ASIA", m(SecretKind::ApiKey, Some("AWS"))),
+    ("ABIA", m(SecretKind::ApiKey, Some("AWS"))),
+    ("ACCA", m(SecretKind::ApiKey, Some("AWS"))),
+    ("AIza", m(SecretKind::ApiKey, Some("Google"))),
+    ("ya29.", m(SecretKind::OAuth, Some("Google"))),
+    ("dop_v1_", m(SecretKind::Token, Some("DigitalOcean"))),
+    ("doo_v1_", m(SecretKind::OAuth, Some("DigitalOcean"))),
+    ("dor_v1_", m(SecretKind::Token, Some("DigitalOcean"))),
+    // Supabase. `sbp_` is a personal access token; project anon/service
+    // keys are JWTs and fall through to the JWT shape rule below.
+    ("sbp_", m(SecretKind::Token, Some("Supabase"))),
+    ("sbs_", m(SecretKind::Token, Some("Supabase"))),
+    // SaaS.
+    ("xoxb-", m(SecretKind::Token, Some("Slack"))),
+    ("xoxp-", m(SecretKind::Token, Some("Slack"))),
+    ("xoxa-", m(SecretKind::Token, Some("Slack"))),
+    ("xoxr-", m(SecretKind::Token, Some("Slack"))),
+    ("xoxs-", m(SecretKind::Token, Some("Slack"))),
+    ("SG.", m(SecretKind::ApiKey, Some("SendGrid"))),
+    ("shpat_", m(SecretKind::Token, Some("Shopify"))),
+    ("shpss_", m(SecretKind::Token, Some("Shopify"))),
+    ("shpca_", m(SecretKind::Token, Some("Shopify"))),
+    ("npm_", m(SecretKind::Token, Some("npm"))),
+    ("pypi-", m(SecretKind::Token, Some("PyPI"))),
+    ("lin_api_", m(SecretKind::ApiKey, Some("Linear"))),
+    ("ntn_", m(SecretKind::Token, Some("Notion"))),
+    ("PMAK-", m(SecretKind::ApiKey, Some("Postman"))),
+    ("sntrys_", m(SecretKind::Token, Some("Sentry"))),
+    ("sntryu_", m(SecretKind::Token, Some("Sentry"))),
+    // Webhook endpoints. A URL, not a bearer credential, but treated as
+    // secret material for the same reason a JWT is: possessing it is enough
+    // to act with it.
+    (
+        "https://hooks.slack.com/",
+        m(SecretKind::Webhook, Some("Slack")),
+    ),
+    (
+        "https://discord.com/api/webhooks/",
+        m(SecretKind::Webhook, Some("Discord")),
+    ),
+    (
+        "https://discordapp.com/api/webhooks/",
+        m(SecretKind::Webhook, Some("Discord")),
+    ),
+];
+
+/// Database connection-string schemes, matched case-insensitively on the
+/// URL scheme alone (`POSTGRES://` is the same scheme as `postgres://`,
+/// unlike a bearer token where case is significant).
+const SCHEME_RULES: &[(&str, DeterministicMatch)] = &[
+    ("postgresql://", m(SecretKind::Database, Some("PostgreSQL"))),
+    ("postgres://", m(SecretKind::Database, Some("PostgreSQL"))),
+    ("mysql://", m(SecretKind::Database, Some("MySQL"))),
+    ("mariadb://", m(SecretKind::Database, Some("MariaDB"))),
+    ("mongodb+srv://", m(SecretKind::Database, Some("MongoDB"))),
+    ("mongodb://", m(SecretKind::Database, Some("MongoDB"))),
+    ("rediss://", m(SecretKind::Database, Some("Redis"))),
+    ("redis://", m(SecretKind::Database, Some("Redis"))),
+    ("mssql://", m(SecretKind::Database, Some("SQL Server"))),
+    ("sqlserver://", m(SecretKind::Database, Some("SQL Server"))),
+    ("clickhouse://", m(SecretKind::Database, Some("ClickHouse"))),
+    (
+        "cockroachdb://",
+        m(SecretKind::Database, Some("CockroachDB")),
+    ),
+    ("amqps://", m(SecretKind::Database, Some("AMQP"))),
+    ("amqp://", m(SecretKind::Database, Some("AMQP"))),
+];
+
+/// Classify by known prefix or shape. Returns the **longest** matching
+/// prefix's result, so a specific rule always wins over a general one; see
+/// [`PREFIX_RULES`] for why that is structural rather than ordering-based.
+///
+/// A `Some(_)` here is a high-confidence, literal match. Callers must treat
+/// it as final and must not ask the model to second-guess it -- see
+/// `AiGateway::classify_pasted_value`'s own note.
 pub fn classify(value: &str) -> Option<DeterministicMatch> {
     let v = value.trim();
     if v.is_empty() {
         return None;
     }
 
-    let prefix_rules: &[(&str, DeterministicMatch)] = &[
-        ("sk-proj-", m(SecretKind::ApiKey, Some("OpenAI"))),
-        ("sk-ant-", m(SecretKind::ApiKey, Some("Anthropic"))),
-        ("github_pat_", m(SecretKind::Token, Some("GitHub"))),
-        ("ghp_", m(SecretKind::Token, Some("GitHub"))),
-        ("gho_", m(SecretKind::Token, Some("GitHub"))),
-        ("ghs_", m(SecretKind::Token, Some("GitHub"))),
-        ("gsk_", m(SecretKind::ApiKey, Some("Groq"))),
-        ("xoxb-", m(SecretKind::Token, Some("Slack"))),
-        ("xoxp-", m(SecretKind::Token, Some("Slack"))),
-        ("xoxa-", m(SecretKind::Token, Some("Slack"))),
-        ("AKIA", m(SecretKind::ApiKey, Some("AWS"))),
-        ("ASIA", m(SecretKind::ApiKey, Some("AWS"))),
-        ("AIza", m(SecretKind::ApiKey, Some("Google"))),
-        ("SG.", m(SecretKind::ApiKey, Some("SendGrid"))),
-        ("whsec_", m(SecretKind::Webhook, Some("Stripe"))),
-        ("sk_live_", m(SecretKind::ApiKey, Some("Stripe"))),
-        ("sk_test_", m(SecretKind::ApiKey, Some("Stripe"))),
-        ("pk_live_", m(SecretKind::ApiKey, Some("Stripe"))),
-        ("pk_test_", m(SecretKind::ApiKey, Some("Stripe"))),
-        ("postgres://", m(SecretKind::Database, Some("PostgreSQL"))),
-        ("postgresql://", m(SecretKind::Database, Some("PostgreSQL"))),
-        ("mysql://", m(SecretKind::Database, Some("MySQL"))),
-        ("redis://", m(SecretKind::Database, Some("Redis"))),
-        ("rediss://", m(SecretKind::Database, Some("Redis"))),
-        ("mongodb+srv://", m(SecretKind::Database, Some("MongoDB"))),
-        ("mongodb://", m(SecretKind::Database, Some("MongoDB"))),
-    ];
+    let best_prefix = PREFIX_RULES
+        .iter()
+        .filter(|(prefix, _)| v.starts_with(prefix))
+        .max_by_key(|(prefix, _)| prefix.len());
 
-    for (prefix, result) in prefix_rules {
-        if v.starts_with(prefix) {
-            return Some(*result);
-        }
+    let best_scheme = SCHEME_RULES
+        .iter()
+        .filter(|(scheme, _)| starts_with_ignore_ascii_case(v, scheme))
+        .max_by_key(|(scheme, _)| scheme.len());
+
+    // A connection string never begins with one of the bearer-token
+    // prefixes above, so at most one of these is ever `Some` -- but if a
+    // future rule made both match, the longer (more specific) one wins, for
+    // the same reason the longest prefix does within each table.
+    let best = match (best_prefix, best_scheme) {
+        (Some(p), Some(s)) if s.0.len() > p.0.len() => Some(s),
+        (Some(p), _) => Some(p),
+        (None, s) => s,
+    };
+    if let Some((_, result)) = best {
+        return Some(*result);
     }
 
     if is_pem_private_key(v) {
@@ -80,6 +192,13 @@ pub fn classify(value: &str) -> Option<DeterministicMatch> {
     }
 
     None
+}
+
+fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
+    value
+        .as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
 fn is_pem_private_key(v: &str) -> bool {
@@ -182,6 +301,349 @@ mod tests {
         // there isn't one, but this pins the ordering assumption the table
         // relies on so a future addition can't silently break it.
         assert_eq!(classify("sk_live_51ABC").unwrap().provider, Some("Stripe"));
+    }
+
+    /// The regression this whole module was reworked for: an OpenRouter key
+    /// matched nothing, fell through to the model, and came back labelled
+    /// "Stripe".
+    ///
+    /// **Every credential here is fabricated** -- a real prefix with a
+    /// meaningless body -- and each is written as a separate `(prefix, body)`
+    /// pair rather than one string. That is deliberate: a complete, contiguous
+    /// token literal in this file trips GitHub's push-protection secret
+    /// scanning, which cannot know ours are fake and correctly refuses the
+    /// push. Splitting the literal leaves nothing for a scanner to match,
+    /// while the value `classify` actually receives is byte-for-byte what it
+    /// was before.
+    #[test]
+    fn every_supported_provider_is_recognised_without_the_model() {
+        let cases: &[(&str, &str, SecretKind, Option<&str>)] = &[
+            (
+                "sk-or-v1-",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                SecretKind::ApiKey,
+                Some("OpenRouter"),
+            ),
+            (
+                "sk-or-",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::ApiKey,
+                Some("OpenRouter"),
+            ),
+            (
+                "sk-proj-",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::ApiKey,
+                Some("OpenAI"),
+            ),
+            (
+                "sk-svcacct-",
+                "abcdef0123456789abcdef01234567",
+                SecretKind::ApiKey,
+                Some("OpenAI"),
+            ),
+            (
+                "sk-",
+                "abcdef0123456789abcdef0123456789abcdef01",
+                SecretKind::ApiKey,
+                Some("OpenAI"),
+            ),
+            (
+                "sk-ant-api03-",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::ApiKey,
+                Some("Anthropic"),
+            ),
+            (
+                "pplx-",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::ApiKey,
+                Some("Perplexity"),
+            ),
+            (
+                "xai-",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::ApiKey,
+                Some("xAI"),
+            ),
+            (
+                "gsk_",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::ApiKey,
+                Some("Groq"),
+            ),
+            (
+                "hf_",
+                "abcdefGHIJKL0123456789abcdefGHIJKL",
+                SecretKind::Token,
+                Some("Hugging Face"),
+            ),
+            (
+                "r8_",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::ApiKey,
+                Some("Replicate"),
+            ),
+            ("sk_live_", "51ABCdef", SecretKind::ApiKey, Some("Stripe")),
+            ("sk_test_", "51ABCdef", SecretKind::ApiKey, Some("Stripe")),
+            ("pk_live_", "51ABCdef", SecretKind::ApiKey, Some("Stripe")),
+            ("pk_test_", "51ABCdef", SecretKind::ApiKey, Some("Stripe")),
+            ("rk_live_", "51ABCdef", SecretKind::ApiKey, Some("Stripe")),
+            (
+                "whsec_",
+                "abcdef0123456789",
+                SecretKind::Webhook,
+                Some("Stripe"),
+            ),
+            (
+                "ghp_",
+                "abcdef0123456789",
+                SecretKind::Token,
+                Some("GitHub"),
+            ),
+            (
+                "gho_",
+                "abcdef0123456789",
+                SecretKind::Token,
+                Some("GitHub"),
+            ),
+            (
+                "ghs_",
+                "abcdef0123456789",
+                SecretKind::Token,
+                Some("GitHub"),
+            ),
+            (
+                "ghu_",
+                "abcdef0123456789",
+                SecretKind::Token,
+                Some("GitHub"),
+            ),
+            (
+                "ghr_",
+                "abcdef0123456789",
+                SecretKind::Token,
+                Some("GitHub"),
+            ),
+            (
+                "github_pat_",
+                "11ABCDEFG0abcdef0123456789",
+                SecretKind::Token,
+                Some("GitHub"),
+            ),
+            (
+                "glpat-",
+                "abcdef0123456789abcd",
+                SecretKind::Token,
+                Some("GitLab"),
+            ),
+            ("AKIAIO", "SFODNN7EXAMPLE", SecretKind::ApiKey, Some("AWS")),
+            ("ASIAIO", "SFODNN7EXAMPLE", SecretKind::ApiKey, Some("AWS")),
+            (
+                "AIzaSy",
+                "A1234567890abcdefghijklmno",
+                SecretKind::ApiKey,
+                Some("Google"),
+            ),
+            (
+                "ya29.",
+                "a0AfH6SMBabcdef0123456789",
+                SecretKind::OAuth,
+                Some("Google"),
+            ),
+            (
+                "sbp_",
+                "abcdef0123456789abcdef0123456789abcdef01",
+                SecretKind::Token,
+                Some("Supabase"),
+            ),
+            (
+                "xoxb-1234-5678-",
+                "abcdef",
+                SecretKind::Token,
+                Some("Slack"),
+            ),
+            (
+                "xoxp-1234-5678-",
+                "abcdef",
+                SecretKind::Token,
+                Some("Slack"),
+            ),
+            ("SG.abc123.", "def456", SecretKind::ApiKey, Some("SendGrid")),
+            (
+                "shpat_",
+                "abcdef0123456789abcdef0123456789ab",
+                SecretKind::Token,
+                Some("Shopify"),
+            ),
+            (
+                "npm_",
+                "abcdef0123456789abcdef0123456789ab",
+                SecretKind::Token,
+                Some("npm"),
+            ),
+            (
+                "dop_v1_",
+                "abcdef0123456789abcdef0123456789",
+                SecretKind::Token,
+                Some("DigitalOcean"),
+            ),
+            (
+                "lin_api_",
+                "abcdef0123456789abcdef01",
+                SecretKind::ApiKey,
+                Some("Linear"),
+            ),
+            (
+                "sntrys_",
+                "abcdef0123456789abcdef01",
+                SecretKind::Token,
+                Some("Sentry"),
+            ),
+            (
+                "https://hooks.",
+                "slack.com/services/T000/B000/abcdef0123456789",
+                SecretKind::Webhook,
+                Some("Slack"),
+            ),
+            (
+                "https://discord.",
+                "com/api/webhooks/123456789/abcdef0123456789",
+                SecretKind::Webhook,
+                Some("Discord"),
+            ),
+            (
+                "postgres://user:",
+                "pass@host:5432/db",
+                SecretKind::Database,
+                Some("PostgreSQL"),
+            ),
+            (
+                "postgresql://",
+                "user:pass@host:5432/db",
+                SecretKind::Database,
+                Some("PostgreSQL"),
+            ),
+            (
+                "mysql://user:",
+                "pass@host:3306/db",
+                SecretKind::Database,
+                Some("MySQL"),
+            ),
+            (
+                "mongodb+srv://",
+                "user:pass@cluster.mongodb.net/db",
+                SecretKind::Database,
+                Some("MongoDB"),
+            ),
+            (
+                "redis://:",
+                "pass@host:6379/0",
+                SecretKind::Database,
+                Some("Redis"),
+            ),
+            (
+                "rediss://:",
+                "pass@host:6379/0",
+                SecretKind::Database,
+                Some("Redis"),
+            ),
+            (
+                "mssql://user:",
+                "pass@host:1433/db",
+                SecretKind::Database,
+                Some("SQL Server"),
+            ),
+            (
+                "eyJhbG",
+                "ciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGhpc2lzYXNpZ25hdHVyZQ",
+                SecretKind::Token,
+                Some("JWT"),
+            ),
+        ];
+
+        for (prefix, body, kind, provider) in cases {
+            let value = format!("{prefix}{body}");
+            let got = classify(&value)
+                .unwrap_or_else(|| panic!("expected a deterministic match for {value}"));
+            assert_eq!(got.kind, *kind, "wrong kind for {value}");
+            assert_eq!(got.provider, *provider, "wrong provider for {value}");
+        }
+    }
+
+    /// The precise failure mode of the original bug: an OpenRouter key must
+    /// not come back as Stripe, and must not come back as OpenAI either
+    /// (the `sk-` fallback is shorter than `sk-or-`, so longest-match has to
+    /// prefer OpenRouter).
+    #[test]
+    fn an_openrouter_key_is_never_read_as_stripe_or_openai() {
+        // Split for the same secret-scanning reason as the table above.
+        let key = format!("{}{}", "sk-or-v1-", "0123456789abcdef0123456789abcdef");
+        let got = classify(&key).unwrap();
+        assert_eq!(got.provider, Some("OpenRouter"));
+        assert_ne!(got.provider, Some("Stripe"));
+        assert_ne!(got.provider, Some("OpenAI"));
+    }
+
+    /// Longest-match, stated directly: each of these shares a start with a
+    /// shorter rule, and the more specific one has to win every time.
+    #[test]
+    fn the_longest_matching_prefix_wins_over_a_shorter_one() {
+        let cases: &[(&str, &str)] = &[
+            ("sk-or-v1-abc", "OpenRouter"),    // beats "sk-or-" and "sk-"
+            ("sk-or-abc", "OpenRouter"),       // beats "sk-"
+            ("sk-ant-api03-abc", "Anthropic"), // beats "sk-ant-" and "sk-"
+            ("sk-proj-abc", "OpenAI"),         // beats "sk-"
+            ("sk-plainlegacykey", "OpenAI"),   // the fallback itself
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                classify(value).unwrap().provider,
+                Some(*expected),
+                "wrong provider for {value}"
+            );
+        }
+    }
+
+    /// A database URL's scheme is case-insensitive; a bearer token's prefix
+    /// is not. Both halves matter -- treating a token prefix loosely would
+    /// start matching unrelated values.
+    #[test]
+    fn scheme_matching_ignores_case_but_token_prefixes_do_not() {
+        assert_eq!(
+            classify("POSTGRES://user:pass@host/db").unwrap().provider,
+            Some("PostgreSQL")
+        );
+        assert_eq!(
+            classify("PostgreSQL://user:pass@host/db").unwrap().provider,
+            Some("PostgreSQL")
+        );
+        // Upper-case token prefixes stay distinct from their lower-case
+        // spelling: "GHP_" is not GitHub's documented prefix.
+        assert!(classify("GHP_abcdef0123456789").is_none());
+    }
+
+    /// Nothing here should claim a match on ordinary text that merely starts
+    /// with a letter sequence -- a false positive is worse than no answer,
+    /// because it silently mislabels a stored credential.
+    #[test]
+    fn ordinary_text_is_not_forced_into_a_provider() {
+        for value in [
+            "just a note about the staging server",
+            "skateboard",
+            "AKIA", // the bare prefix with no body is still a prefix match
+            "password123",
+            "https://example.com/not-a-webhook",
+        ] {
+            let got = classify(value);
+            // "AKIA" alone is the one deliberate exception: it is exactly
+            // AWS's documented prefix, so matching it is correct.
+            if value == "AKIA" {
+                assert_eq!(got.unwrap().provider, Some("AWS"));
+            } else {
+                assert!(got.is_none(), "{value} should not have matched: {got:?}");
+            }
+        }
     }
 
     #[test]

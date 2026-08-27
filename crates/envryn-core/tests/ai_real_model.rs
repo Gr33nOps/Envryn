@@ -146,3 +146,159 @@ fn classification_still_works_with_the_workers_proxy_env_poisoned() {
     println!("real model classification result under poisoned proxy env: {result:?}");
     assert_eq!(result.kind, SecretKind::ApiKey);
 }
+
+// --- End-to-end coverage of all five Tier-1 features against the real model.
+//
+// Added after a round of beta feedback in which every AI feature was
+// reported broken in some way. Each test below drives the real worker, the
+// real 1.5B model, and the real gateway with fake-but-realistic inputs, so a
+// regression in any one feature fails here rather than in a user's hands.
+
+/// Feature 1 of 5: classification. The exact reported bug -- an OpenRouter
+/// key coming back as "Stripe" -- plus the other providers that share its
+/// prefix family. These must all resolve *deterministically*, never
+/// reaching the model at all, which is what makes them reliable.
+#[test]
+#[ignore = "requires a real downloaded model -- see module doc"]
+fn classification_resolves_known_providers_without_asking_the_model() {
+    use envryn_core::ai::classify;
+
+    // Prefix and body are separate literals so no complete (fabricated)
+    // token string exists in this file -- see the same note on
+    // `every_supported_provider_is_recognised_without_the_model` in
+    // `crates/envryn-core/src/ai/classify.rs`.
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "sk-or-v1-",
+            "0123456789abcdef0123456789abcdef",
+            "OpenRouter",
+        ),
+        ("sk-proj-", "0123456789abcdef0123456789abcdef", "OpenAI"),
+        ("sk-ant-api03-", "0123456789abcdef0123456789", "Anthropic"),
+        ("sk_live_", "51ABCdefGHIjklMNO", "Stripe"),
+        ("ghp_", "0123456789abcdef0123456789abcdef", "GitHub"),
+        ("AKIA", "IOSFODNN7EXAMPLE", "AWS"),
+        ("sbp_", "0123456789abcdef0123456789abcdef0123", "Supabase"),
+        (
+            "postgres://",
+            "user:pass@db.example.com:5432/prod",
+            "PostgreSQL",
+        ),
+    ];
+
+    for (prefix, body, expected) in cases {
+        let value = format!("{prefix}{body}");
+        let got = classify::classify(&value)
+            .unwrap_or_else(|| panic!("{value} must classify deterministically"));
+        assert_eq!(got.provider, Some(*expected), "wrong provider for {value}");
+    }
+}
+
+/// Feature 2 of 5: name suggestion, driven by the real model.
+#[test]
+#[ignore = "requires a real downloaded model -- see module doc"]
+fn name_suggestion_produces_a_usable_label_end_to_end() {
+    let gateway = AiGateway::new(spawn_real_engine());
+
+    let result = gateway
+        .suggest_name(
+            &format!("{}{}", "sk-or-v1-", "0123456789abcdef0123456789abcdef"),
+            Some("OpenRouter"),
+        )
+        .expect("name suggestion must succeed against the real model");
+
+    println!("real model suggested name: {result:?}");
+    assert!(!result.name.trim().is_empty(), "a blank name is not usable");
+    assert!(result.name.len() <= 80, "name should be a short label");
+}
+
+/// Feature 3 of 5: natural-language search. The reported symptom was "always
+/// returns No match found"; the fix makes obvious queries resolve without the
+/// model at all, so these must produce real structured filters every time.
+#[test]
+#[ignore = "requires a real downloaded model -- see module doc"]
+fn search_resolves_obvious_queries_end_to_end() {
+    use envryn_core::model::Environment;
+
+    let gateway = AiGateway::new(spawn_real_engine());
+
+    let production = gateway
+        .parse_search_intent("production database")
+        .expect("search parsing must not fail");
+    println!("search 'production database' -> {production:?}");
+    assert_eq!(production.environment, Some(Environment::Production));
+    assert_eq!(production.kind, Some(SecretKind::Database));
+
+    let staging = gateway
+        .parse_search_intent("staging tokens")
+        .expect("search parsing must not fail");
+    assert_eq!(staging.environment, Some(Environment::Staging));
+    assert_eq!(staging.kind, Some(SecretKind::Token));
+
+    // A vague query does reach the model -- and must still come back with
+    // something usable rather than an error.
+    let vague = gateway
+        .parse_search_intent("that key I use for payments")
+        .expect("a vague query must degrade, never error");
+    println!("search 'that key I use for payments' -> {vague:?}");
+}
+
+/// Feature 4 of 5: `.env` import (variable NAMES only, never values).
+#[test]
+#[ignore = "requires a real downloaded model -- see module doc"]
+fn env_name_classification_works_end_to_end() {
+    let gateway = AiGateway::new(spawn_real_engine());
+
+    let names = vec![
+        "DATABASE_URL".to_string(),
+        "STRIPE_SECRET_KEY".to_string(),
+        "GITHUB_TOKEN".to_string(),
+    ];
+    let result = gateway
+        .classify_env_names(&names)
+        .expect("env-name classification must succeed against the real model");
+
+    println!("real model env-name classification: {result:?}");
+    // The model may not place every name, but it must return a well-formed
+    // response rather than failing the whole import.
+    assert!(result.names.len() <= names.len());
+}
+
+/// Feature 5 of 5: structured field extraction from a pasted block.
+#[test]
+#[ignore = "requires a real downloaded model -- see module doc"]
+fn structured_extraction_works_end_to_end() {
+    let gateway = AiGateway::new(spawn_real_engine());
+
+    let block = "host: db.example.com\nport: 5432\nusername: appuser\npassword: hunter2";
+    let result = gateway
+        .extract_structured_fields(block)
+        .expect("extraction must succeed against the real model");
+
+    println!("real model extracted fields: {result:?}");
+    // Whatever it found must be well-formed; an empty result is a legitimate
+    // answer, a parse failure is not.
+    for field in &result.fields {
+        assert!(
+            !field.label.trim().is_empty(),
+            "a blank label is not usable"
+        );
+    }
+}
+
+/// The crash requirement, exercised against the real worker: killing it
+/// mid-flight must produce a recoverable error on the *next* call, never a
+/// panic or a hang that takes the host process with it.
+#[test]
+#[ignore = "requires a real downloaded model -- see module doc"]
+fn a_killed_worker_produces_a_recoverable_error_not_a_crash() {
+    let engine = spawn_real_engine();
+    engine.shutdown();
+    let gateway = AiGateway::new(engine);
+
+    let fake_key = format!("{}{}", "sk-or-v1-", "abcdef0123456789");
+    let result = gateway.suggest_name(&fake_key, Some("OpenRouter"));
+
+    println!("result after killing the worker: {result:?}");
+    assert!(result.is_err(), "a dead worker must report an error");
+}

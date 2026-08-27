@@ -1,11 +1,12 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Search, Sparkles } from "lucide-react";
+import { Search, Sparkles, TriangleAlert } from "lucide-react";
 import { type Secret } from "@/lib/envryn-data";
 import { useSecretList } from "@/lib/use-vault";
 import { KIND_TO_TYPE, toUiEnvironment } from "@/lib/vault-repository";
 import { cn } from "@/lib/utils";
 import * as ipc from "@/lib/ipc";
+import { IpcError } from "@/lib/ipc";
 
 /**
  * Turn a parsed `SearchFilterOutput` into the same `Secret[]` shape plain
@@ -16,16 +17,37 @@ import * as ipc from "@/lib/ipc";
  */
 function applyAiFilter(secrets: Secret[], filter: ipc.SearchFilterOutput): Secret[] {
   const text = filter.text?.trim().toLowerCase();
+  // Every field is defensively defaulted. The Rust type guarantees the
+  // shape, but this runs on whatever the IPC boundary actually handed back,
+  // and a `filter.tags.length` on an absent array is a TypeError that
+  // unmounts the dialog rather than showing "no results".
+  const tags = filter.tags ?? [];
   return secrets.filter((s) => {
     if (filter.project && s.project.toLowerCase() !== filter.project.toLowerCase()) return false;
     if (filter.environment && s.environment !== toUiEnvironment(filter.environment)) return false;
-    if (filter.kind && s.type !== KIND_TO_TYPE[filter.kind]) return false;
-    if (filter.tags.length && !filter.tags.some((t) => (s.tags ?? []).includes(t))) return false;
+    // An unrecognised kind must not silently exclude everything -- if the
+    // map has no entry, treat the kind as "no constraint" rather than as a
+    // constraint nothing can satisfy.
+    if (filter.kind) {
+      const mapped = KIND_TO_TYPE[filter.kind];
+      if (mapped && s.type !== mapped) return false;
+    }
+    if (tags.length && !tags.some((t) => (s.tags ?? []).includes(t))) return false;
     if (text) {
-      const haystack = [s.name, s.project, s.provider ?? "", ...(s.tags ?? [])]
+      const haystack = [
+        s.name,
+        s.project,
+        s.environment,
+        s.type,
+        s.provider ?? "",
+        ...(s.tags ?? []),
+      ]
         .join(" ")
         .toLowerCase();
-      if (!haystack.includes(text)) return false;
+      // Every whitespace-separated term must appear somewhere, so a
+      // residual like "stripe keys" still matches a "Stripe API Key"
+      // record whose words are not adjacent in that order.
+      if (!text.split(/\s+/).every((term) => haystack.includes(term))) return false;
     }
     return true;
   });
@@ -34,12 +56,23 @@ function applyAiFilter(secrets: Secret[], filter: ipc.SearchFilterOutput): Secre
 function SearchStatusBanner({
   aiSearching,
   aiResults,
-}: Readonly<{ aiSearching: boolean; aiResults: Secret[] | null }>) {
+  aiError,
+}: Readonly<{ aiSearching: boolean; aiResults: Secret[] | null; aiError: string | null }>) {
   if (aiSearching) {
     return (
       <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
         <Sparkles className="size-3 animate-pulse" />
-        Asking local AI what you mean...
+        Searching your vault...
+      </div>
+    );
+  }
+  // A failed search is a visible, recoverable state -- not a silently empty
+  // result list that looks identical to "you have nothing matching this".
+  if (aiError) {
+    return (
+      <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-warning">
+        <TriangleAlert className="size-3" />
+        {aiError} Showing plain name matches instead.
       </div>
     );
   }
@@ -47,7 +80,7 @@ function SearchStatusBanner({
     return (
       <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
         <Sparkles className="size-3" />
-        Matched by local AI, not an exact search
+        Interpreted your search
       </div>
     );
   }
@@ -68,12 +101,21 @@ export function SearchPalette({
   const [cursor, setCursor] = React.useState(0);
   const [aiResults, setAiResults] = React.useState<Secret[] | null>(null);
   const [aiSearching, setAiSearching] = React.useState(false);
+  const [aiError, setAiError] = React.useState<string | null>(null);
+  // Which query the current `aiResults` belong to. Editing the box after a
+  // search must clear the stale result set without launching a new one.
+  const [searchedQuery, setSearchedQuery] = React.useState<string | null>(null);
+  // Guards against a second in-flight request: the worker answers one
+  // request at a time, so a double-click would queue rather than parallelise.
+  const runningRef = React.useRef(false);
 
   React.useEffect(() => {
     if (open) {
       setQ("");
       setCursor(0);
       setAiResults(null);
+      setAiError(null);
+      setSearchedQuery(null);
     }
   }, [open]);
 
@@ -88,42 +130,52 @@ export function SearchPalette({
     );
   }, [q, secrets]);
 
-  // Natural-language fallback (docs/AI_DATA_ACCESS.md Tier 1 "search"): only
-  // attempted once plain substring matching finds nothing and the query
-  // looks like a sentence rather than a single term someone would expect to
-  // match literally -- never replaces the fast, deterministic path above,
-  // only fills the gap it deliberately leaves (no fuzzy/semantic matching).
-  React.useEffect(() => {
-    setAiResults(null);
-    if (!ipc.isTauri() || substringResults.length > 0) return;
-    const trimmed = q.trim();
-    if (trimmed.split(/\s+/).length < 2) return;
+  const trimmed = q.trim();
+  const canSearch = trimmed.length > 0 && !aiSearching;
 
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      void (async () => {
-        setAiSearching(true);
-        try {
-          const status = await ipc.aiStatus();
-          if (!status.enabled_in_settings || !status.engine_running) return;
-          const filter = await ipc.aiParseSearchIntent(trimmed);
-          if (!cancelled) setAiResults(applyAiFilter(secrets, filter));
-        } catch {
-          // No AI result is a silent fallback to "no matches," never a
-          // blocked search -- the substring path already answered the user.
-        } finally {
-          if (!cancelled) setAiSearching(false);
-        }
-      })();
-    }, 500);
+  /**
+   * Run the assisted search. **Only ever called from the Search button or
+   * the Enter key** -- never from a `useEffect` watching the query.
+   *
+   * It used to run on a 500ms timer after every keystroke, which meant
+   * typing a sentence fired a burst of inference requests, each one
+   * competing for the same single-threaded worker, for a result the user
+   * had not asked for yet. Nothing here is triggered by typing now.
+   */
+  async function runSearch() {
+    const query = q.trim();
+    if (!query || runningRef.current) return;
 
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [q, secrets, substringResults.length]);
+    runningRef.current = true;
+    setAiSearching(true);
+    setAiError(null);
+    try {
+      // `aiParseSearchIntent` deliberately never fails closed: with AI off
+      // or the worker down it still returns a deterministic parse, so this
+      // is a real search either way rather than a disabled feature.
+      const filter = await ipc.aiParseSearchIntent(query);
+      const matched = applyAiFilter(secrets, filter);
+      setAiResults(matched);
+      setSearchedQuery(query);
+      setCursor(0);
+    } catch (err) {
+      // A worker crash, timeout, or malformed response lands here and shows
+      // an inline, recoverable message. It must never propagate -- an
+      // unhandled rejection out of this handler would unmount the dialog.
+      setAiResults(null);
+      setSearchedQuery(query);
+      setAiError(
+        err instanceof IpcError ? err.message : "Search could not be completed. Try again.",
+      );
+    } finally {
+      runningRef.current = false;
+      setAiSearching(false);
+    }
+  }
 
-  const results = aiResults ?? substringResults;
+  // Typing invalidates a previous result set without starting a new search.
+  const resultsAreStale = searchedQuery !== null && searchedQuery !== trimmed;
+  const results = aiResults && !resultsAreStale ? aiResults : substringResults;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -132,7 +184,7 @@ export function SearchPalette({
         <DialogPrimitive.Content className="fixed left-1/2 top-[18%] z-50 w-full max-w-[520px] -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-surface shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]">
           <DialogPrimitive.Title className="sr-only">Search</DialogPrimitive.Title>
           <div className="flex items-center gap-2 border-b border-border px-3">
-            <Search className="size-3.5 text-subtle-foreground" />
+            <Search className="size-3.5 shrink-0 text-subtle-foreground" />
             <input
               autoFocus
               value={q}
@@ -141,26 +193,58 @@ export function SearchPalette({
                 setCursor(0);
               }}
               onKeyDown={(e) => {
-                if (e.key === "ArrowDown") setCursor((c) => Math.min(c + 1, results.length - 1));
-                if (e.key === "ArrowUp") setCursor((c) => Math.max(c - 1, 0));
-                if (e.key === "Enter" && results[cursor]) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setCursor((c) => Math.min(c + 1, results.length - 1));
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setCursor((c) => Math.max(c - 1, 0));
+                  return;
+                }
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                // Enter submits the search. Only once a search has run (or
+                // the plain substring list is already showing a highlighted
+                // row for this exact query) does Enter open that row --
+                // otherwise the first Enter would skip searching entirely.
+                if (canSearch && (resultsAreStale || searchedQuery === null)) {
+                  void runSearch();
+                  return;
+                }
+                if (results[cursor]) {
                   onSelect(results[cursor]);
                   onOpenChange(false);
                 }
               }}
-              placeholder="Search everywhere in your vault..."
+              placeholder="Search your vault, then press Enter"
               className="h-9 w-full bg-transparent text-[13px] placeholder:text-subtle-foreground focus:outline-none"
             />
-            <span className="kbd">Esc</span>
+            <button
+              type="button"
+              onClick={() => void runSearch()}
+              disabled={!canSearch}
+              className="shrink-0 rounded-md border border-border bg-surface-2 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted-foreground"
+            >
+              {aiSearching ? "Searching..." : "Search"}
+            </button>
+            <span className="kbd shrink-0">Esc</span>
           </div>
 
-          <SearchStatusBanner aiSearching={aiSearching} aiResults={aiResults} />
+          <SearchStatusBanner
+            aiSearching={aiSearching}
+            aiResults={resultsAreStale ? null : aiResults}
+            aiError={resultsAreStale ? null : aiError}
+          />
 
           {results.length === 0 ? (
             <div className="px-4 py-8 text-center">
               <p className="text-[12.5px]">No results for "{q}"</p>
               <p className="mt-1 text-[11.5px] text-muted-foreground">
-                Try another name, project, or tag.
+                {resultsAreStale || searchedQuery === null
+                  ? "Press Enter or choose Search to look more thoroughly."
+                  : "Try another name, project, or tag."}
               </p>
             </div>
           ) : (

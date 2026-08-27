@@ -234,9 +234,7 @@ impl Engine {
                 .sample(&masked)
                 .map_err(|e| e.to_string())?
         };
-        grammar_state = grammar_state
-            .try_advance(&self.vocab_text[next_token as usize])
-            .ok_or_else(|| "grammar mask selected a token it should have excluded".to_string())?;
+        grammar_state = self.advance_grammar(&grammar_state, next_token)?;
         all_tokens.push(next_token);
 
         let to_sample = max_tokens.saturating_sub(1) as usize;
@@ -261,17 +259,31 @@ impl Engine {
             next_token = logits_processor
                 .sample(&masked)
                 .map_err(|e| e.to_string())?;
-            grammar_state = grammar_state
-                .try_advance(&self.vocab_text[next_token as usize])
-                .ok_or_else(|| {
-                    "grammar mask selected a token it should have excluded".to_string()
-                })?;
+            grammar_state = self.advance_grammar(&grammar_state, next_token)?;
             all_tokens.push(next_token);
         }
 
         self.tokenizer
             .decode(&all_tokens, true)
             .map_err(|e| e.to_string())
+    }
+
+    /// Advance the grammar by the token the sampler just chose.
+    ///
+    /// **This used to index `vocab_text` directly, which could panic and
+    /// take the whole worker process down.** A model's logits vector is
+    /// sized to its own vocabulary, which is routinely *larger* than the
+    /// tokenizer's (Qwen2.5 pads to 151936 against 151643 real tokens) --
+    /// so a sampled id is not guaranteed to be a valid `vocab_text` index.
+    /// `mask_to_grammar` sets those padded positions to `-inf`, which makes
+    /// the panic unreachable in practice today, but "unreachable because
+    /// another function maintains an invariant" is exactly the kind of
+    /// coupling that breaks silently later -- and the failure mode was a
+    /// hard process abort mid-inference, not a recoverable error. A missing
+    /// entry is now the same clean `Err` any other bad model output
+    /// produces, which the client surfaces as a normal AI error.
+    fn advance_grammar(&self, state: &GrammarState, token: u32) -> Result<GrammarState, String> {
+        advance_grammar_with_vocab(&self.vocab_text, state, token)
     }
 
     /// Set every token's logit to `-inf` except those whose decoded text is
@@ -291,6 +303,25 @@ impl Engine {
     }
 }
 
+/// Look up a sampled token's text and advance the grammar by it.
+///
+/// Split out from [`Engine::advance_grammar`] as a free function purely so
+/// it is testable: the method needs a loaded `Engine` (a real
+/// multi-hundred-megabyte model file), while the out-of-range case this
+/// guards against is a property of the *lookup*, not of the model.
+fn advance_grammar_with_vocab(
+    vocab_text: &[String],
+    state: &GrammarState,
+    token: u32,
+) -> Result<GrammarState, String> {
+    let text = vocab_text
+        .get(token as usize)
+        .ok_or_else(|| "model sampled a token outside the tokenizer vocabulary".to_string())?;
+    state
+        .try_advance(text)
+        .ok_or_else(|| "grammar mask selected a token it should have excluded".to_string())
+}
+
 fn forward(model: &mut ModelKind, input: &Tensor, index_pos: usize) -> candle_core::Result<Tensor> {
     match model {
         ModelKind::Qwen2(m) => m.forward(input, index_pos),
@@ -308,6 +339,51 @@ mod tests {
     const KIND_VARIANTS: &[&str] = &[
         "ApiKey", "Token", "EnvVar", "Database", "Ssh", "OAuth", "Webhook", "Note", "Custom",
     ];
+
+    /// The actual crash regression. A model's logits vector is sized to its
+    /// own padded vocabulary, which is larger than the tokenizer's real one
+    /// (Qwen2.5: 151936 vs 151643), so a sampled id can legitimately fall
+    /// past the end of `vocab_text`. This used to be a bare slice index --
+    /// an out-of-bounds panic that aborted the whole worker process
+    /// mid-inference, which the app then saw as the AI subsystem dying
+    /// rather than as a request that failed. It must be an ordinary `Err`.
+    #[test]
+    fn a_token_id_past_the_end_of_the_vocabulary_errors_instead_of_panicking() {
+        let grammar = JsonGrammar::classification_output(KIND_VARIANTS);
+        let vocab: Vec<String> = vec!["{".to_string(), "\"".to_string()];
+
+        let result = advance_grammar_with_vocab(&vocab, &grammar.start(), 151_935);
+
+        assert!(
+            result.is_err(),
+            "an out-of-range token id must be a clean error, not a panic"
+        );
+    }
+
+    /// The in-range path still works -- the bounds check must not have
+    /// turned every advance into a failure.
+    #[test]
+    fn an_in_range_token_still_advances_the_grammar() {
+        let grammar = JsonGrammar::classification_output(KIND_VARIANTS);
+        let vocab: Vec<String> = vec!["{".to_string()];
+
+        let result = advance_grammar_with_vocab(&vocab, &grammar.start(), 0);
+
+        assert!(result.is_ok(), "a valid opening brace must advance cleanly");
+    }
+
+    /// An in-range token whose text the grammar forbids is also a clean
+    /// error, not a panic -- the two failure modes stay distinguishable in
+    /// the message but identical in kind.
+    #[test]
+    fn an_in_range_but_grammar_invalid_token_errors_cleanly() {
+        let grammar = JsonGrammar::classification_output(KIND_VARIANTS);
+        let vocab: Vec<String> = vec!["definitely not valid json".to_string()];
+
+        let result = advance_grammar_with_vocab(&vocab, &grammar.start(), 0);
+
+        assert!(result.is_err());
+    }
 
     /// Not run by default: requires a real downloaded model, same convention
     /// as `crates/envryn-core/tests/ai_real_model.rs`. This is the actual
@@ -383,5 +459,57 @@ mod tests {
             );
             println!("prompt: {prompt}\n  -> {output}");
         }
+    }
+}
+
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+#[cfg(test)]
+mod diagnostic {
+    use super::*;
+
+    /// Diagnostic, not an assertion: prints exactly what the real model
+    /// emits for the `.env` name-classification prompt so a schema mismatch
+    /// can be read off directly instead of guessed at from an
+    /// `InvalidResponse`. Uses fake variable names only.
+    ///
+    /// This is how the real defect behind "`.env` import produces no AI
+    /// suggestions" was found rather than guessed: the model answered with a
+    /// bare top-level array (not the requested wrapper object) *and* one
+    /// invented `kind` value, which strict parsing turned into a total loss
+    /// of all three classifications. Kept because the next schema mismatch
+    /// will be diagnosed the same way. Never asserts, so it cannot fail for
+    /// a reason that is really just the model being a small model.
+    ///
+    /// The prompt below is a **copy** of `envryn_core::ai::gateway`'s
+    /// `CLASSIFY_ENV_NAMES_PROMPT`, not a reference to it -- this crate must
+    /// not depend on `envryn-core` (AI-INV-001/002/004/005). If that prompt
+    /// changes and this diagnostic stops reproducing the real behaviour,
+    /// re-copy it; nothing enforces the correspondence.
+    #[test]
+    #[ignore = "diagnostic -- requires a real downloaded model"]
+    fn show_raw_env_name_classification_output() {
+        let model_path = std::env::var("ENVRYN_TEST_MODEL").expect("set ENVRYN_TEST_MODEL");
+        let tok_path = std::env::var("ENVRYN_TEST_TOKENIZER").expect("set ENVRYN_TEST_TOKENIZER");
+        let engine = Engine::load(
+            "qwen2",
+            std::path::Path::new(&model_path),
+            std::path::Path::new(&tok_path),
+            "<|im_end|>",
+        )
+        .expect("engine should load");
+
+        let prompt = "You classify environment-variable NAMES only (never \
+    values) by what kind of credential they likely hold. Output ONLY a JSON object with field \
+    \"names\": an array of objects, each with \"name\" (the input name, verbatim) and \"kind\" \
+    (one of \"ApiKey\",\"Token\",\"EnvVar\",\"Database\",\"Ssh\",\"OAuth\",\"Webhook\",\"Note\",\"Custom\"). \
+    One name per line follows, delimited as untrusted data.\n\n\
+    <<<UNTRUSTED_VAULT_DATA>>>\nDATABASE_URL\nSTRIPE_SECRET_KEY\nGITHUB_TOKEN\n<<<END_UNTRUSTED_VAULT_DATA>>>";
+
+        let out = engine
+            .generate(prompt, 1024)
+            .expect("generation should work");
+        println!("=== RAW MODEL OUTPUT START ===");
+        println!("{out}");
+        println!("=== RAW MODEL OUTPUT END ===");
     }
 }

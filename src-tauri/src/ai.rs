@@ -25,7 +25,8 @@
 //! setting that has nothing to do with it.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use envryn_core::ai::classify::{self, DeterministicMatch};
 use envryn_core::ai::gateway::{AiError, AiGateway};
@@ -114,22 +115,83 @@ fn worker_binary_path(app: &AppHandle) -> IpcResult<PathBuf> {
     }
 }
 
+/// The running gateway, if any.
+///
+/// **The `Arc` is load-bearing, not incidental.** This used to be a plain
+/// `Mutex<Option<AiGateway<_>>>` whose lock was held for the *entire*
+/// duration of an inference call -- and `ai_status`, a synchronous
+/// `#[tauri::command]` that runs directly on Tauri's IPC event loop, locks
+/// the same mutex. So any status poll issued while a generation was in
+/// flight blocked the IPC thread for as long as the model took, and the
+/// whole webview stopped responding: no repaint, no keystroke echo, a real
+/// "Envryn (Not Responding)". Cloning an `Arc` out from under a
+/// momentarily-held lock and running inference on the clone means the lock
+/// is held for a pointer copy instead of for tens of seconds.
+///
+/// `in_flight` is the second half: without it, N queued requests would each
+/// take a turn on the worker's single connection, so a user who clicked
+/// twice waited twice as long for an answer they asked for once.
 #[derive(Default)]
-pub struct AiState(Mutex<Option<AiGateway<WorkerClient>>>);
+pub struct AiState {
+    gateway: Mutex<Option<Arc<AiGateway<WorkerClient>>>>,
+    in_flight: AtomicBool,
+}
 
 impl AiState {
+    /// Take a reference to the gateway without holding the lock across the
+    /// call. Returns the same "not running" error as before when AI is off.
+    fn gateway(&self) -> IpcResult<Arc<AiGateway<WorkerClient>>> {
+        let guard = self
+            .gateway
+            .lock()
+            .map_err(|_| internal("AI state unavailable"))?;
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| invalid("Local AI is not running. Enable it in Settings first."))
+    }
+
+    /// True when a gateway is present, answered without ever blocking on an
+    /// in-progress inference -- `try_lock`, not `lock`, because this is
+    /// called from the IPC event loop and a definite "busy" answer is better
+    /// than a stalled one. A held lock means a request is being handed off
+    /// right now, which only happens while a gateway exists.
+    fn is_running(&self) -> bool {
+        match self.gateway.try_lock() {
+            Ok(guard) => guard.is_some(),
+            Err(std::sync::TryLockError::WouldBlock) => true,
+            Err(std::sync::TryLockError::Poisoned(_)) => false,
+        }
+    }
+
+    /// Run one AI operation, refusing to start a second while one is still
+    /// running. The worker serves a single connection serially, so a
+    /// concurrent second request would not be faster -- it would queue
+    /// behind the first while the user watched two spinners.
     fn with<T>(
         &self,
         f: impl FnOnce(&AiGateway<WorkerClient>) -> Result<T, AiError>,
     ) -> IpcResult<T> {
-        let guard = self
-            .0
-            .lock()
-            .map_err(|_| internal("AI state unavailable"))?;
-        let gateway = guard
-            .as_ref()
-            .ok_or_else(|| invalid("Local AI is not running. Enable it in Settings first."))?;
-        Ok(f(gateway)?)
+        let gateway = self.gateway()?;
+        if self.in_flight.swap(true, Ordering::SeqCst) {
+            return Err(IpcError {
+                code: "ai_busy",
+                message: "The local AI model is already working on another request.".to_string(),
+            });
+        }
+        let _guard = InFlightGuard(&self.in_flight);
+        Ok(f(&gateway)?)
+    }
+}
+
+/// Clears the in-flight flag however `with` exits -- including on an early
+/// `?` return or a panic inside the closure. Without this, one failed
+/// request would leave AI permanently reporting itself as busy.
+struct InFlightGuard<'a>(&'a AtomicBool);
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -154,7 +216,7 @@ pub struct AiStatus {
 pub fn ai_status(app: AppHandle, state: State<'_, AiState>) -> IpcResult<AiStatus> {
     let dir = models_dir(&app)?;
     let model_downloaded = model_download::already_verified(&QWEN2_5_1_5B_INSTRUCT, &dir).is_some();
-    let engine_running = state.0.lock().map(|g| g.is_some()).unwrap_or(false);
+    let engine_running = state.is_running();
     Ok(AiStatus {
         enabled_in_settings: settings::load(&app).ai_enabled,
         model_downloaded,
@@ -217,7 +279,7 @@ pub async fn ai_start(app: AppHandle, state: State<'_, AiState>) -> IpcResult<()
 
     {
         let guard = state
-            .0
+            .gateway
             .lock()
             .map_err(|_| internal("AI state unavailable"))?;
         if guard.is_some() {
@@ -242,10 +304,10 @@ pub async fn ai_start(app: AppHandle, state: State<'_, AiState>) -> IpcResult<()
     .map_err(|_| internal("Could not start the local AI model."))?;
 
     let mut guard = state
-        .0
+        .gateway
         .lock()
         .map_err(|_| internal("AI state unavailable"))?;
-    *guard = Some(gateway);
+    *guard = Some(Arc::new(gateway));
     Ok(())
 }
 
@@ -258,8 +320,13 @@ pub fn ai_stop(state: State<'_, AiState>) {
 }
 
 pub fn stop(state: &AiState) {
-    if let Ok(mut guard) = state.0.lock() {
-        *guard = None; // AiGateway -> WorkerClient::drop() kills the process
+    if let Ok(mut guard) = state.gateway.lock() {
+        // Dropping the last Arc runs AiGateway -> WorkerClient::drop(),
+        // which kills the process. An in-flight request holds a clone, so
+        // the kill lands when that request finishes rather than tearing the
+        // socket out from under it -- and `WorkerClient`'s Job Object still
+        // guarantees termination even if this process dies before then.
+        *guard = None;
     }
 }
 
@@ -274,11 +341,28 @@ pub fn stop(state: &AiState) {
 // (`app.state::<AiState>()`), which is equivalent -- the state lives for
 // the app's lifetime regardless of which handle borrows it.
 
+/// **A deterministic match is final; the model never gets to overrule it.**
+///
+/// The frontend already tries `classify_deterministic` first, but that was a
+/// convention a caller could forget -- and one did, which is how an
+/// OpenRouter key (a literal, unambiguous `sk-or-v1-` prefix) ended up
+/// labelled "Stripe" by a 1.5B model guessing at a string it had no reason
+/// to recognise. Short-circuiting here makes the precedence a property of
+/// the command itself: for any value the rules recognise, this returns the
+/// rules' answer at full confidence without the worker being consulted at
+/// all -- faster, and correct even if the model is running and confident.
 #[tauri::command]
 pub async fn ai_classify_pasted_value(
     app: AppHandle,
     value: String,
 ) -> IpcResult<ClassificationOutput> {
+    if let Some(deterministic) = classify::classify(&value) {
+        return Ok(ClassificationOutput {
+            kind: deterministic.kind,
+            provider: deterministic.provider.map(str::to_string),
+            confidence: 1.0,
+        });
+    }
     require_enabled(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<AiState>()
@@ -331,16 +415,30 @@ pub async fn ai_extract_structured_fields(
     .map_err(|_| internal("AI task failed"))?
 }
 
+/// **Search never fails closed.** Unlike every other command here, this one
+/// does not refuse when AI is off, not downloaded, or crashed -- it falls
+/// back to `envryn_core::ai::search::parse_query`, which needs no model at
+/// all. Search is the one AI-adjacent feature a user reaches for constantly,
+/// and "the local model isn't running" is not a useful answer to "find my
+/// production Stripe key" when the vault can answer that from metadata.
 #[tauri::command]
 pub async fn ai_parse_search_intent(
     app: AppHandle,
     query: String,
 ) -> IpcResult<SearchFilterOutput> {
-    require_enabled(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let deterministic = envryn_core::ai::search::parse_query(&query);
+    if require_enabled(&app).is_err() {
+        return Ok(deterministic);
+    }
+    let fallback = deterministic.clone();
+    let parsed = tauri::async_runtime::spawn_blocking(move || {
         app.state::<AiState>()
             .with(|g| g.parse_search_intent(&query))
     })
     .await
-    .map_err(|_| internal("AI task failed"))?
+    .map_err(|_| internal("AI task failed"))?;
+    // A worker that is down, busy, or returned nonsense degrades to the
+    // deterministic parse instead of surfacing an error the user can do
+    // nothing about mid-search.
+    Ok(parsed.unwrap_or(fallback))
 }

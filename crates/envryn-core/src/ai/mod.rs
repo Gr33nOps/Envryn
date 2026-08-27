@@ -35,6 +35,7 @@ pub mod gateway;
 pub mod model_download;
 pub mod operations;
 pub mod schemas;
+pub mod search;
 pub mod worker_client;
 
 pub use engine::{EngineError, LocalAiEngine, SchemaKind};

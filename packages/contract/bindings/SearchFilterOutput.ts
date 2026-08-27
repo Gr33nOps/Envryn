@@ -2,4 +2,19 @@
 import type { RustEnvironment } from "./RustEnvironment";
 import type { SecretKind } from "./SecretKind";
 
-export type SearchFilterOutput = { project: string | null, environment: RustEnvironment | null, kind: SecretKind | null, tags: Array<string>, text: string | null, };
+/**
+ * **The one type here that tolerates a *missing* field, and only a missing
+ * one.** Every field is optional-by-absence: a 1.5B model asked for five
+ * keys routinely returns three, and rejecting the whole response over an
+ * omitted `tags: []` is why natural-language search answered "No match
+ * found" essentially always -- the filter never survived parsing, so the
+ * search never ran.
+ *
+ * `deny_unknown_fields` is deliberately still here. The security property
+ * it carries (a model cannot express a field, therefore cannot express an
+ * action -- see `gateway`'s `a_fully_persuaded_model_still_cannot_express_an_action`)
+ * is about *extra* fields and is completely unaffected by defaulting absent
+ * ones. Tolerating an omission is a robustness fix; tolerating an addition
+ * would have been a security regression, and is not what this does.
+ */
+export type SearchFilterOutput = { project?: string | null, environment?: RustEnvironment | null, kind?: SecretKind | null, tags: Array<string>, text?: string | null, };
