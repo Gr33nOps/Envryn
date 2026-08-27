@@ -14,6 +14,7 @@
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
     "prepare:sidecar": "node .dev-tools/prepare-sidecar.mjs",
+    "sign:apk": "node .dev-tools/sign-apk.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "npm run typecheck --workspace @envryn/ui"

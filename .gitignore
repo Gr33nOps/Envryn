@@ -59,3 +59,13 @@ vault-data/
 apps/ui/coverage/
 lcov.info
 target/llvm-cov/
+
+# Android signing material. The real keystore lives outside this repo
+# entirely (~/.envryn/), so these patterns are defence in depth rather than
+# the primary control -- a signing key committed once is compromised forever,
+# and Android has no key-rotation path: an update signed with a different key
+# cannot install over an existing installation.
+*.jks
+*.keystore
+keystore-password.txt
+keystore.properties

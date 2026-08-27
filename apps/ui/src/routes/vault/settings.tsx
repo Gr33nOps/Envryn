@@ -520,7 +520,7 @@ function Settings() {
             <Group label="About">
               <SettingsRow
                 label="Envryn"
-                control={<span className="text-[12px] text-muted-foreground">Version 0.1.4</span>}
+                control={<span className="text-[12px] text-muted-foreground">Version 0.1.5</span>}
               />
               <SettingsRow
                 label="Security documentation"

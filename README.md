@@ -63,10 +63,17 @@ Download the latest release from
 **Windows** (primary platform): either the `.msi` or the `-setup.exe`
 (NSIS) installs the same app.
 
-**Android** (experimental): a universal `.apk`. Unsigned, so you'll need to
-allow installs from an unknown source. This build has been verified to
-compile and run its full test suite, but hasn't yet been through the same
-device-level testing as the Windows build — treat it as early.
+**Android** (experimental): a universal `.apk`, signed with Envryn's own
+release key. Android shows it as from an unknown developer, so you'll need to
+allow installs from an unknown source — but it will install. This build has
+been verified to compile and run its full test suite, but hasn't yet been
+through the same device-level testing as the Windows build — treat it as
+early. Android has no local AI; that feature is Windows-only.
+
+> If you installed the `v0.1.4-beta` APK or earlier and got "package appears
+> to be invalid", that was our bug, not yours: those APKs were published
+> genuinely unsigned, which Android refuses outright. Use `v0.1.5-beta` or
+> later.
 
 > Envryn is in beta. Use it for real credentials once you're comfortable —
 > most people start with lower-stakes or easily-rotated ones while they get

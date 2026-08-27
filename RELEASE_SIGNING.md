@@ -115,3 +115,45 @@ Once a certificate/signing-service exists:
    be proven by inspecting the actual binary, not assumed from the build succeeding.
 
 This is a config-and-secrets addition to the existing pipeline shape, not a rewrite of it.
+
+---
+
+## Android signing — done, and the reasoning is different from Windows
+
+Android signing is **already in place**, unlike Windows. The two are not comparable, and
+conflating them caused a real shipped defect worth recording.
+
+**Windows:** signing is optional and costs money. An unsigned installer runs; SmartScreen simply
+warns. Shipping unsigned is a real but *degraded* experience.
+
+**Android:** signing is mandatory and free. The package installer refuses an unsigned APK
+outright — "package appears to be invalid" / "There was a problem parsing the package" — so an
+unsigned APK is not degraded, it is **completely uninstallable**. `v0.1.1-beta` through
+`v0.1.4-beta` each shipped an APK built as `app-universal-release-unsigned.apk` and labelled
+"unsigned" in the release notes by analogy with the Windows build. That label was accurate and
+the artifact was still useless: nobody could install any of them. Confirmed after the fact with
+`apksigner verify`, which reported `DOES NOT VERIFY — Missing META-INF/MANIFEST.MF`.
+
+**How it works now.** `.dev-tools/sign-apk.mjs` (`npm run sign:apk`) zipaligns and then signs the
+Gradle output with APK Signature Scheme v2 + v3, and **fails the build if the result does not
+verify** — so a silently-unsigned artifact cannot reach a release again. `minSdk` is 24, so v1
+(JAR) signing is not required; v2+v3 is what every supported Android version verifies against.
+
+**The keystore is the single irreplaceable artifact in this release process.**
+
+- It lives at `~/.envryn/envryn-release.jks`, deliberately **outside the repository**, so it
+  cannot be committed by accident. `.gitignore` also refuses `*.jks`/`*.keystore` as defence in
+  depth.
+- Android permanently binds an installed app's identity to its signing key. An update signed
+  with a **different** key cannot install over an existing installation, and there is **no
+  recovery path** — not through Google, not through the OS. Losing this file means every
+  existing user must uninstall (destroying nothing but the app itself; the vault survives, see
+  the README) before they can install any future version.
+- **Back it up somewhere durable and offline**, along with its password. Treat it exactly like
+  the root of a credential you cannot rotate — because that is what it is.
+
+Self-signed is the correct and complete answer here. Android does not require a CA-chained
+certificate for sideloading; it only requires that a package carry *a* valid, consistent
+signature. There is no paid upgrade path that would improve this, and no equivalent of
+SmartScreen reputation to earn. Only Google Play distribution would add further requirements,
+and that is out of scope for this project.
