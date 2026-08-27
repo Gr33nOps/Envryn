@@ -6,10 +6,25 @@
 //! must not change how paired peers recognise this device. See
 //! docs/CRYPTOGRAPHY.md section 6.
 //!
-//! The private key is sealed with [`crate::platform::dpapi_protect`] --
-//! reusing the exact same platform primitive the vault's platform-unlock slot
-//! uses, rather than inventing a second way to ask Windows to protect a
-//! secret.
+//! Where DPAPI (or an equivalent) exists, the private key is sealed with
+//! [`crate::platform::dpapi_protect`] -- reusing the exact same platform
+//! primitive the vault's platform-unlock slot uses, rather than inventing a
+//! second way to ask the OS to protect a secret.
+//!
+//! **On a platform with no such primitive (Android today), the key is
+//! stored as plain bytes inside this app's own private, sandboxed data
+//! directory, protected only by OS-level app-isolation -- not left
+//! unprotected.** This was a real bug, not a deliberate scope decision: every
+//! sync/pairing command calls [`DeviceIdentity::load_or_create`] before doing
+//! anything else, and until this was fixed, that unconditionally tried to
+//! seal or unseal via DPAPI and failed with [`Error::PlatformUnavailable`] on
+//! every non-Windows platform -- meaning pairing was completely unusable on
+//! Android, not merely less protected, despite `sync::pairing`'s own module
+//! doc always having described QR pairing as "Windows <-> Android." Losing
+//! this key only lets an attacker impersonate this device to peers that
+//! already trust it; it is not the vault's own encryption key, which is
+//! wrapped from the master password via `crypto::kdf` on every platform
+//! identically and is unaffected by any of this.
 
 use std::path::Path;
 
@@ -93,10 +108,25 @@ impl Fingerprint {
     }
 }
 
+/// Every identity file written before this fix had no `sealed` field at all,
+/// and every one of them *was* DPAPI-sealed (Android/non-Windows support did
+/// not exist yet to write anything else) -- so a missing field must default
+/// to `true`, not `false`, or an upgrade would try to use already-sealed
+/// bytes as a raw secret key and reject every existing installation's
+/// identity as corrupt.
+fn sealed_defaults_to_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize)]
 struct IdentityFile {
     device_id: String,
-    /// DPAPI-protected 32-byte Ed25519 secret key.
+    /// Whether `sealed_secret_key` went through `platform::dpapi_protect`
+    /// (true) or is the raw 32-byte secret key (false, non-Windows only).
+    #[serde(default = "sealed_defaults_to_true")]
+    sealed: bool,
+    /// The 32-byte Ed25519 secret key -- DPAPI-protected when `sealed` is
+    /// true, raw bytes when it is false.
     sealed_secret_key: Vec<u8>,
     /// Public; stored alongside so the fingerprint is available without
     /// unsealing the private key.
@@ -123,9 +153,18 @@ impl DeviceIdentity {
     /// identity here would orphan every device that already trusts the real
     /// one, with no warning to the user that anything happened.
     pub fn load_or_create(path: &Path) -> Result<Self> {
+        Self::load_or_create_with_sealing(path, platform::dpapi_available())
+    }
+
+    /// `seal` is injected rather than read from [`platform::dpapi_available`]
+    /// directly so both branches -- sealed (Windows) and unsealed
+    /// (Android/non-Windows) -- can be exercised by tests on any host, not
+    /// only by cross-compiling. [`Self::load_or_create`] is the only real
+    /// caller and always supplies the true platform value.
+    fn load_or_create_with_sealing(path: &Path, seal: bool) -> Result<Self> {
         match std::fs::read(path) {
             Ok(bytes) => Self::from_file(&bytes),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Self::create(path),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Self::create(path, seal),
             Err(_) => Err(Error::Internal("could not read the device identity file")),
         }
     }
@@ -133,8 +172,14 @@ impl DeviceIdentity {
     fn from_file(bytes: &[u8]) -> Result<Self> {
         let file: IdentityFile = serde_json::from_slice(bytes)
             .map_err(|_| Error::InvalidInput("corrupt device identity"))?;
-        let secret_bytes = platform::dpapi_unprotect(&file.sealed_secret_key)
-            .map_err(|_| Error::PlatformUnavailable)?;
+        let secret_bytes = if file.sealed {
+            platform::dpapi_unprotect(&file.sealed_secret_key)
+                .map_err(|_| Error::PlatformUnavailable)?
+        } else {
+            // Not sealed by design on this platform (see the module doc) --
+            // the bytes on disk already are the raw secret key.
+            zeroize::Zeroizing::new(file.sealed_secret_key.clone())
+        };
         let mut secret = [0u8; 32];
         if secret_bytes.len() != 32 {
             return Err(Error::InvalidInput("corrupt device identity"));
@@ -157,15 +202,21 @@ impl DeviceIdentity {
         })
     }
 
-    fn create(path: &Path) -> Result<Self> {
+    fn create(path: &Path, seal: bool) -> Result<Self> {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
         let public_key = signing_key.verifying_key().to_bytes();
-        let sealed_secret_key = platform::dpapi_protect(&signing_key.to_bytes())?;
+        let raw_secret = signing_key.to_bytes();
+        let sealed_secret_key = if seal {
+            platform::dpapi_protect(&raw_secret)?
+        } else {
+            raw_secret.to_vec()
+        };
         let created_ms = now_ms();
         let device_id = uuid::Uuid::now_v7().to_string();
 
         let file = IdentityFile {
             device_id: device_id.clone(),
+            sealed: seal,
             sealed_secret_key,
             public_key,
             created_ms,
@@ -305,5 +356,68 @@ mod tests {
         let path = dir.path().join("id.json");
         std::fs::write(&path, b"not json").unwrap();
         assert!(DeviceIdentity::load_or_create(&path).is_err());
+    }
+
+    /// **The actual regression.** Every sync/pairing command loads the
+    /// device identity before doing anything else, and until this was fixed,
+    /// that path unconditionally sealed/unsealed via DPAPI and failed with
+    /// `Error::PlatformUnavailable` ("platform feature unavailable") on any
+    /// non-Windows platform -- so pairing was entirely unusable on Android,
+    /// confirmed from a real screenshot of the "Join an existing vault"
+    /// screen showing exactly that message under the pairing-code field.
+    /// `seal: false` is what `load_or_create` now supplies whenever
+    /// `platform::dpapi_available()` is false, which is every build on
+    /// Android since no non-Windows DPAPI equivalent is implemented yet.
+    #[test]
+    fn an_unsealed_identity_creates_and_reloads_identically() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("id.json");
+
+        let first = DeviceIdentity::load_or_create_with_sealing(&path, false).unwrap();
+        let fp1 = first.fingerprint();
+        let id1 = first.device_id.clone();
+        drop(first);
+
+        let second = DeviceIdentity::load_or_create_with_sealing(&path, false).unwrap();
+        assert_eq!(second.device_id, id1);
+        assert_eq!(second.fingerprint(), fp1);
+    }
+
+    /// The exact failure this regression test replaces: creating unsealed
+    /// but then trying to reload as if the platform *did* have DPAPI (or
+    /// vice versa) must not silently succeed with the wrong key material --
+    /// `dpapi_unprotect` on plain, unsealed bytes must fail cleanly rather
+    /// than fabricate a plausible-looking but wrong signing key.
+    #[cfg(windows)]
+    #[test]
+    fn unsealed_bytes_are_not_mistaken_for_sealed_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("id.json");
+        DeviceIdentity::load_or_create_with_sealing(&path, false).unwrap();
+
+        // Force the `sealed` flag on without actually sealing the bytes --
+        // simulating a corrupted or hand-edited file, not a real code path.
+        let raw = std::fs::read(&path).unwrap();
+        let mut file: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        file["sealed"] = serde_json::Value::Bool(true);
+        std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+
+        assert!(DeviceIdentity::load_or_create(&path).is_err());
+    }
+
+    /// An identity file written before this fix has no `sealed` field at
+    /// all. It must still load -- and, critically, must be treated as
+    /// sealed (matching what every pre-fix file actually is), not silently
+    /// reinterpreted as raw key bytes.
+    #[test]
+    fn a_pre_fix_identity_file_with_no_sealed_field_defaults_to_sealed() {
+        let value = serde_json::json!({
+            "device_id": "pre-fix-device",
+            "sealed_secret_key": vec![1u8; 32],
+            "public_key": vec![2u8; 32],
+            "created_ms": 0,
+        });
+        let file: IdentityFile = serde_json::from_value(value).unwrap();
+        assert!(file.sealed, "a missing `sealed` field must default to true");
     }
 }

@@ -134,6 +134,36 @@ unsigned APK is not degraded, it is **completely uninstallable**. `v0.1.1-beta` 
 the artifact was still useless: nobody could install any of them. Confirmed after the fact with
 `apksigner verify`, which reported `DOES NOT VERIFY — Missing META-INF/MANIFEST.MF`.
 
+**The Android release sequence, in order:**
+
+```powershell
+npm run sync:android-icons   # MUST run before build -- see why below
+cargo tauri android build --apk --ci
+npm run sign:apk             # unsigned APKs cannot install at all -- see below
+```
+
+`sync:android-icons` exists for the same "the generated project forgets what
+this repo already fixed" reason as signing does: `cargo tauri android init`
+scaffolds `src-tauri/gen/android/` from Tauri's own template, which ships its
+own placeholder launcher icon (an orange/teal "8" mark), not the branded set
+already sitting in `src-tauri/icons/android/`. `v0.1.5-beta` and every
+release before it shipped an APK that ran correctly but showed that
+placeholder on the home screen and app switcher instead of Envryn's mark.
+`.dev-tools/sync-android-icons.mjs` copies the real icons over.
+
+**It must run before `android build`, not after.** Gradle packages whatever
+PNGs are sitting in `res/mipmap-*/` at build time; signing only wraps the
+already-built APK afterward and cannot change what's inside it. Confirmed
+empirically, not assumed: across three separate `cargo tauri android build`
+runs on three different version bumps, the wrong (placeholder) icon files in
+`gen/android/.../res/` never changed timestamp -- proving the build step
+itself never touches them, so a sync run *after* the build has already
+happened has no effect on that build's APK at all. Running it first, once
+`gen/android` exists, is enough for every following build in the same
+checkout, since the build step doesn't overwrite it back to the placeholder
+either -- but run it every time to be certain, especially after any
+`cargo tauri android init`.
+
 **How it works now.** `.dev-tools/sign-apk.mjs` (`npm run sign:apk`) zipaligns and then signs the
 Gradle output with APK Signature Scheme v2 + v3, and **fails the build if the result does not
 verify** — so a silently-unsigned artifact cannot reach a release again. `minSdk` is 24, so v1
