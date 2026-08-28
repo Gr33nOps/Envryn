@@ -15,19 +15,11 @@ name: CI
 # silently compile the `stub` fallbacks instead and test none of that real
 # platform code.
 #
-# All three jobs below run on a repository-level self-hosted Windows
-# runner (label `envryn-self-hosted`), not GitHub-hosted `windows-latest`/
-# `ubuntu-latest` -- this is a zero-budget project and GitHub-hosted Actions
-# minutes are billed. The runner is registered against this repository
-# only (not an org-wide or shared runner), is not installed as an
-# always-on service, and this workflow's triggers are unchanged
-# (`push`/`pull_request` against `main` only, no `pull_request_target`),
-# so a fork PR still cannot run code on it automatically -- not a concern
-# in practice today since this is a private repo with a single
-# collaborator. The frontend and Semgrep jobs moving from `ubuntu-latest`
-# to the same Windows runner is a side effect of there being exactly one
-# self-hosted runner, not a deliberate platform change -- both jobs' steps
-# are already shell-agnostic (no bash-specific syntax).
+# Rust runs on GitHub-hosted Windows so the actual Windows-only code paths
+# are compiled and tested. The platform-neutral frontend and Semgrep jobs
+# run on hosted Linux. GitHub-hosted Actions are free for this public repo,
+# and avoiding a maintainer workstation as a runner keeps CI available and
+# prevents untrusted pull-request code from executing on a personal device.
 
 on:
   push:
@@ -48,15 +40,9 @@ concurrency:
 jobs:
   rust:
     name: Rust (fmt, clippy, test, deny, audit)
-    runs-on: [self-hosted, envryn-self-hosted]
-    # This runner is the maintainer's own desktop, not a dedicated CI box --
-    # it also runs an ordinary desktop workload (browser, editors, etc.),
-    # so free memory at any given moment is not what a GitHub-hosted
-    # runner would guarantee. `cargo clippy --workspace --all-targets`
-    # compiling this workspace's heavier crates (tauri-utils, candle) at
-    # full default parallelism hit a genuine `rustc-LLVM ERROR: out of
-    # memory` here. Capping build parallelism paces the same compile
-    # rather than skipping or weakening anything it checks.
+    runs-on: windows-latest
+    # Keep memory use predictable while compiling the heavier Tauri and AI
+    # dependency trees without weakening any checks.
     env:
       CARGO_BUILD_JOBS: "4"
     steps:
@@ -140,6 +126,27 @@ jobs:
       - name: security configuration invariants
         run: npm run test:security-invariants
 
+      - name: Install checksum-verified security scanners
+        shell: pwsh
+        run: |
+          $toolsDir = Join-Path $env:RUNNER_TEMP "envryn-security-tools"
+          New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+          $gitleaksZip = Join-Path $toolsDir "gitleaks.zip"
+          Invoke-WebRequest -Uri "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_windows_x64.zip" -OutFile $gitleaksZip
+          if ((Get-FileHash -Algorithm SHA256 $gitleaksZip).Hash.ToLower() -ne "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e") {
+            throw "Gitleaks download checksum mismatch"
+          }
+          Expand-Archive -LiteralPath $gitleaksZip -DestinationPath $toolsDir -Force
+
+          $osvPath = Join-Path $toolsDir "osv-scanner.exe"
+          Invoke-WebRequest -Uri "https://github.com/google/osv-scanner/releases/download/v2.5.1/osv-scanner_windows_amd64.exe" -OutFile $osvPath
+          if ((Get-FileHash -Algorithm SHA256 $osvPath).Hash.ToLower() -ne "25e42f5ef6711fd8c0fb45390972205891dd44c6bd02ac93f0f63e8e98d9bfb6") {
+            throw "OSV-Scanner download checksum mismatch"
+          }
+
+          $toolsDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: secret scan
         run: gitleaks git --config .gitleaks.toml --redact --no-banner
 
@@ -148,32 +155,21 @@ jobs:
 
   semgrep:
     name: Semgrep
-    runs-on: [self-hosted, envryn-self-hosted]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      # No actions/setup-python here, deliberately, after it failed twice
-      # against this self-hosted runner (both a floating "3.x" and a
-      # pinned "3.12" hit the same error): its Windows install path shells
-      # out to a bare "python-<ver>-amd64.exe", relying on the working
-      # directory being searched the way cmd.exe does -- but this runner's
-      # default shell is PowerShell 7, which (correctly, per PowerShell's
-      # own security model) does not resolve bare executable names from
-      # the current directory, so the call fails with "is not recognized
-      # as an internal or external command" before Python is ever
-      # installed. This reproduces on any self-hosted Windows runner using
-      # pwsh as its default shell, independent of which Python version is
-      # requested -- not something a version pin can fix. A system Python
-      # is already present on this runner's own PATH, so the action is
-      # skipped rather than fought; `pip install semgrep` and the scan
-      # itself are unchanged.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
       - run: pip install semgrep
 
       - run: semgrep --config .semgrep/ crates/ src-tauri/ apps/ui/src --error
 
   frontend:
     name: Frontend (lint, typecheck, build)
-    runs-on: [self-hosted, envryn-self-hosted]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
