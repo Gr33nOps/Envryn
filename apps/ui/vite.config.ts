@@ -53,6 +53,9 @@ export default defineConfig({
       reporter: ["lcov", "text"],
       include: ["src/**/*.{ts,tsx}"],
       exclude: [
+        "src/**/*.test.ts",
+        "src/**/*.test.tsx",
+        "src/test-setup.ts",
         "src/routeTree.gen.ts",
         // Generated directly from Rust by ts-rs -- see
         // packages/contract/index.ts's own doc comment. Nothing here is
