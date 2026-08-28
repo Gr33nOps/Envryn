@@ -163,8 +163,11 @@ Other useful commands:
 ```sh
 cargo test --workspace              # Rust test suite
 cargo clippy --workspace --all-targets -- -D warnings
-npm run typecheck                   # frontend
-npm run lint                        # frontend
+npm test --workspace @envryn/ui     # frontend unit/component tests
+npm run test:e2e                    # desktop/mobile browser journeys + a11y
+npm run test:bundle-budget          # run after build; prevents bundle bloat
+npm run typecheck                   # frontend type checking
+npm run lint                        # frontend linting
 ```
 
 A local pre-commit/pre-push security gate (formatting, linting, the full
@@ -194,6 +197,8 @@ Full detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Security documentation
 
+- [Quality testing](docs/QUALITY_TESTING.md) — unit, browser journey,
+  responsive, accessibility, CI, and physical-device coverage.
 - [Security and privacy testing](docs/SECURITY_TESTING.md) — free local scanners, APK analysis, fuzzing, and the release gate.
 - [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — what Envryn defends
   against, and what it explicitly does not

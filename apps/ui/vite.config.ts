@@ -62,6 +62,15 @@ export default defineConfig({
         // hand-written, so coverage on it would not mean anything.
         "**/*.d.ts",
       ],
+      // This baseline prevents coverage from silently dropping. Browser E2E
+      // separately covers route composition, which V8 unit coverage cannot
+      // combine into this report.
+      thresholds: {
+        statements: 20,
+        branches: 25,
+        functions: 15,
+        lines: 20,
+      },
     },
   },
 });
