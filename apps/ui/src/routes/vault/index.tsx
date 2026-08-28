@@ -91,14 +91,14 @@ function AllSecrets() {
         </div>
 
         <Panel className="overflow-visible">
-          <div className="flex flex-col gap-2.5 border-b border-border px-3.5 py-3 md:flex-row md:items-center">
+          <div className="secret-controls flex flex-col gap-2.5 border-b border-border px-3.5 py-3 md:flex-row md:items-center">
             <SearchField
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Filter this list by name, project, or provider"
               className="min-w-0 flex-1 md:max-w-[390px]"
             />
-            <div className="flex items-center gap-2 md:ml-auto">
+            <div className="secret-filter-row flex items-center gap-2 md:ml-auto">
               <label className="relative flex items-center">
                 <select
                   aria-label="Filter by environment"
@@ -170,7 +170,7 @@ function AllSecrets() {
           ) : (
             <SecretList items={items} />
           )}
-          <div className="flex items-center justify-between border-t border-border bg-background/35 px-3.5 py-2 text-[10.5px] text-subtle-foreground">
+          <div className="vault-list-footer flex items-center justify-between border-t border-border bg-background/35 px-3.5 py-2 text-[10.5px] text-subtle-foreground">
             <span>Encrypted values stay on this device.</span>
             <div className="flex items-center gap-3">
               <button

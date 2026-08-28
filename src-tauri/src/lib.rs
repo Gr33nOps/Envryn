@@ -33,7 +33,11 @@ use sync::{PairingState, SyncListenState};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::expect_used)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(envryn_android_clipboard::init());
+
+    builder
         .manage(VaultState::default())
         .manage(PairingState::default())
         .manage(SyncListenState::default())

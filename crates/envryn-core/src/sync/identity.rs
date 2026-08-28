@@ -291,6 +291,13 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Fuzzing-only entry point for the on-disk identity parser. Kept behind a
+/// feature so arbitrary bytes are never part of the production API surface.
+#[cfg(feature = "fuzzing")]
+pub fn fuzz_parse_identity(bytes: &[u8]) {
+    let _ = DeviceIdentity::from_file(bytes);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

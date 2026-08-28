@@ -137,6 +137,15 @@ jobs:
           cargo install cargo-audit --locked
           cargo audit
 
+      - name: security configuration invariants
+        run: npm run test:security-invariants
+
+      - name: secret scan
+        run: gitleaks git --config .gitleaks.toml --redact --no-banner
+
+      - name: OSV dependency scan
+        run: osv-scanner scan source -r . --config osv-scanner.toml
+
   semgrep:
     name: Semgrep
     runs-on: [self-hosted, envryn-self-hosted]

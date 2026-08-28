@@ -32,7 +32,6 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
 envryn-core = { path = "../crates/envryn-core" }
-
 tauri = { version = "2", features = [] }
 serde.workspace = true
 serde_json.workspace = true
@@ -58,6 +57,9 @@ tokio = { version = "1", features = ["time"] }
 # that live in this crate rather than envryn-core (VaultStatus, AppSettings,
 # sync/pairing summaries, AiStatus, ...). See docs/ARCHITECTURE.md.
 ts-rs.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+envryn-android-clipboard = { path = "../crates/envryn-android-clipboard" }
 
 [dev-dependencies]
 # Real Tauri IPC dispatch against a `MockRuntime`, not a mock of our own --

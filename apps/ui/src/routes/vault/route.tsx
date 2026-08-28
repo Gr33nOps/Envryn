@@ -9,11 +9,13 @@ import { SecretFormModal } from "@/components/envryn/SecretForm";
 import { SearchPalette } from "@/components/envryn/SearchPalette";
 import { EnvImportModal } from "@/components/envryn/EnvImportModal";
 import { StructuredExtractModal } from "@/components/envryn/StructuredExtractModal";
+import { MobileNavigation } from "@/components/envryn/MobileNavigation";
+import { Wordmark } from "@/components/envryn/Logo";
 import { VaultUIContext } from "@/components/envryn/vault-context";
 import { type Secret } from "@/lib/envryn-data";
 import { useClearVaultCache, useRevealSecret, useSecretList } from "@/lib/use-vault";
 import { copyValue, forgetClipboardTimer } from "@/lib/vault-actions";
-import { vaultLock } from "@/lib/ipc";
+import { isTauri, settingsGet, syncListenStart, syncListenStop, vaultLock } from "@/lib/ipc";
 
 export const Route = createFileRoute("/vault")({
   component: VaultLayout,
@@ -21,7 +23,8 @@ export const Route = createFileRoute("/vault")({
 
 function TopBar({ onSearch }: Readonly<{ onSearch: () => void }>) {
   return (
-    <header className="titlebar flex h-[50px] shrink-0 items-center gap-3 border-b border-border bg-background px-4">
+    <header className="vault-topbar titlebar flex h-[50px] shrink-0 items-center gap-3 border-b border-border bg-background px-4">
+      <Wordmark className="mobile-wordmark" size={25} />
       <button
         type="button"
         className="topbar-search group flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface px-2.5 text-left transition-colors hover:border-border-strong hover:bg-surface-2 md:max-w-[420px]"
@@ -51,6 +54,21 @@ function VaultLayout() {
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();
 
+  // Stay reachable for the whole unlocked vault session. Previously the
+  // listener and mDNS advertisement existed only while the Sync page was
+  // mounted, which meant a paired device disappeared as soon as its user
+  // viewed any other page. The backend also stops the listener itself as
+  // soon as the vault locks; this cleanup handles normal navigation/unmount.
+  React.useEffect(() => {
+    if (!isTauri()) return;
+    void syncListenStart().catch(() => {
+      // Outbound sync remains usable if this device cannot bind a listener.
+      // The Sync page will report the peer as offline if neither direction
+      // can establish a connection.
+    });
+    return () => void syncListenStop();
+  }, []);
+
   // The client-side half of locking: drop cached records, forget any pending
   // clipboard state, and leave the screen. Shared between a manual lock and
   // the backend's own idle auto-lock, which has already done the Rust-side
@@ -73,6 +91,48 @@ function VaultLayout() {
     void vaultLock();
     finishLocking("Vault locked");
   }, [finishLocking]);
+
+  // Android has no implementation of Windows' system-wide idle timer. Keep
+  // the same security promise in the mobile shell by measuring interaction
+  // inside Envryn, and lock immediately whenever the activity is backgrounded
+  // or the phone screen turns off (both surface as document.hidden).
+  React.useEffect(() => {
+    if (!isTauri() || !/Android/i.test(navigator.userAgent)) return;
+
+    let disposed = false;
+    let timer: number | undefined;
+    const events: Array<keyof WindowEventMap> = ["pointerdown", "keydown", "input", "scroll"];
+
+    const start = async () => {
+      const settings = await settingsGet().catch(() => ({ auto_lock_minutes: 5 }));
+      if (disposed) return;
+      const delay = Math.max(1, settings.auto_lock_minutes) * 60_000;
+      const arm = () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(lockVault, delay);
+      };
+      const onVisibility = () => {
+        if (document.hidden) lockVault();
+        else arm();
+      };
+
+      for (const event of events) window.addEventListener(event, arm, { passive: true });
+      document.addEventListener("visibilitychange", onVisibility);
+      arm();
+
+      return () => {
+        for (const event of events) window.removeEventListener(event, arm);
+        document.removeEventListener("visibilitychange", onVisibility);
+      };
+    };
+
+    const cleanup = start();
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      void cleanup.then((fn) => fn?.());
+    };
+  }, [lockVault]);
 
   // The vault can also lock itself: idle auto-lock (src-tauri/src/autolock.rs)
   // runs entirely in Rust and has no way to call back into React directly, so
@@ -159,6 +219,7 @@ function VaultLayout() {
           {selected && <SecretPanel secret={selected} />}
         </div>
       </div>
+      <MobileNavigation onLock={lockVault} />
       <SecretFormModal
         open={formOpen}
         onOpenChange={setFormOpen}

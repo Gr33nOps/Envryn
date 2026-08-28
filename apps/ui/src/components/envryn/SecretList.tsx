@@ -108,9 +108,9 @@ export function SecretList({
   }, []);
 
   return (
-    <div className="overflow-hidden">
+    <div className="secret-list overflow-hidden">
       <div
-        className="grid items-center gap-3 border-b border-border bg-background/45 px-3.5 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-subtle-foreground"
+        className="secret-list-header grid items-center gap-3 border-b border-border bg-background/45 px-3.5 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-subtle-foreground"
         style={{ gridTemplateColumns: gridCols }}
       >
         <div>Name</div>
@@ -147,7 +147,7 @@ export function SecretList({
                   }
                 }}
                 className={cn(
-                  "group relative grid min-h-[64px] cursor-pointer items-center gap-3 border-b border-border/55 px-3.5 text-[12.5px] transition-colors last:border-0",
+                  "secret-row group relative grid min-h-[64px] cursor-pointer items-center gap-3 border-b border-border/55 px-3.5 text-[12.5px] transition-colors last:border-0",
                   active ? "bg-primary-muted/75" : "hover:bg-surface-2/60",
                 )}
                 style={{ gridTemplateColumns: gridCols }}
@@ -182,8 +182,9 @@ export function SecretList({
                 {columns.map((column) => (
                   <div
                     key={column}
+                    data-column={column}
                     className={cn(
-                      "truncate text-[12px] text-muted-foreground",
+                      "secret-column truncate text-[12px] text-muted-foreground",
                       column === "updated" && "text-right",
                       column === "environment" &&
                         secret.environment === "Production" &&
@@ -195,7 +196,7 @@ export function SecretList({
                 ))}
                 <div
                   className={cn(
-                    "flex items-center justify-end gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+                    "secret-row-actions flex items-center justify-end gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
                     active ? "opacity-100" : "opacity-0",
                   )}
                 >

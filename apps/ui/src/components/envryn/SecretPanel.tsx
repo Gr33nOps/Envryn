@@ -71,7 +71,7 @@ export function SecretPanel({ secret }: Readonly<{ secret: Secret }>) {
   }
 
   return (
-    <aside className="flex w-[320px] shrink-0 flex-col border-l border-border bg-surface xl:w-[344px]">
+    <aside className="secret-panel flex w-[320px] shrink-0 flex-col border-l border-border bg-surface xl:w-[344px]">
       <div className="flex h-9 items-center justify-between gap-2 border-b border-border px-3">
         <span className="truncate font-mono text-[12.5px] font-medium">{secret.name}</span>
         <IconButton label="Close (Esc)" onClick={() => select(null)}>

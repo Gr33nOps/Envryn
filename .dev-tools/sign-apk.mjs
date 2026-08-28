@@ -24,7 +24,7 @@
  * accident, and must be backed up separately.
  *
  * Usage:
- *   node .dev-tools/sign-apk.mjs [--out <path>]
+ *   node .dev-tools/sign-apk.mjs [--in <unsigned-apk>] [--out <path>]
  *
  * Environment overrides (all optional):
  *   ENVRYN_KEYSTORE       path to the .jks            (default ~/.envryn/envryn-release.jks)
@@ -96,10 +96,14 @@ if (!password) {
 }
 const alias = process.env.ENVRYN_KEY_ALIAS ?? "envryn";
 
-const unsigned = join(
-  repoRoot,
-  "src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk",
-);
+const inputIndex = process.argv.indexOf("--in");
+const unsigned =
+  inputIndex !== -1 && process.argv[inputIndex + 1]
+    ? resolve(process.argv[inputIndex + 1])
+    : join(
+        repoRoot,
+        "src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk",
+      );
 if (!existsSync(unsigned)) {
   fail(`no unsigned APK at ${unsigned}\n  Run: cargo tauri android build --apk --ci`);
 }
@@ -155,8 +159,9 @@ try {
       `file:${storePassFile}`,
       "--key-pass",
       `file:${keyPassFile}`,
-      // minSdk is 24, so v1 (JAR) signing is not required; v2+v3 is what every
-      // supported Android version actually verifies against.
+      // minSdk is 29, so v1 (JAR) signing is not required. Request both v2
+      // and v3; current apksigner may omit the older v2 block when every
+      // supported OS can verify the stronger v3 scheme.
       "--v2-signing-enabled",
       "true",
       "--v3-signing-enabled",
@@ -183,8 +188,8 @@ console.log(verified);
 if (!verified.includes("Verifies")) {
   fail("the signed APK did not verify -- refusing to treat this as a releasable artifact");
 }
-if (!/v2 scheme \(APK Signature Scheme v2\): true/.test(verified)) {
-  fail("v2 signing is missing -- modern Android will reject this APK");
+if (!/v3 scheme \(APK Signature Scheme v3\): true/.test(verified)) {
+  fail("v3 signing is missing -- refusing to publish a weaker Android signature");
 }
 
 console.log(`\nSigned APK ready: ${out}`);

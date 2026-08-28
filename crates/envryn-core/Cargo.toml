@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+fuzzing = []
+
 [[bin]]
 # Test-only fixture for src/ai/worker_client.rs -- see the fixture's own doc
 # comment. Built for every `cargo build`, same as any bin target; the cost is

@@ -137,10 +137,14 @@ the artifact was still useless: nobody could install any of them. Confirmed afte
 **The Android release sequence, in order:**
 
 ```powershell
-npm run sync:android-icons   # MUST run before build -- see why below
 cargo tauri android build --apk --ci
 npm run sign:apk             # unsigned APKs cannot install at all -- see below
 ```
+
+Tauri's `beforeBuildCommand` runs `build:native-ui`, which applies both
+Android generated-project patches automatically before compiling the UI.
+The patch commands can still be run directly for diagnosis, but a normal
+build no longer depends on remembering them manually.
 
 `sync:android-icons` exists for the same "the generated project forgets what
 this repo already fixed" reason as signing does: `cargo tauri android init`
@@ -161,13 +165,36 @@ itself never touches them, so a sync run *after* the build has already
 happened has no effect on that build's APK at all. Running it first, once
 `gen/android` exists, is enough for every following build in the same
 checkout, since the build step doesn't overwrite it back to the placeholder
-either -- but run it every time to be certain, especially after any
+either. `build:native-ui` now runs it every time, including after a fresh
 `cargo tauri android init`.
 
+**`patch-android-mdns.mjs` exists because device-sync discovery was completely
+broken on Android through `v0.1.6-beta`**, reported by a real user pairing a
+phone to a PC: pairing itself worked (a direct, manually-entered TCP
+connection -- no multicast involved), but Sync always said "No trusted
+devices found on this network." Root cause, confirmed by reading the `mdns-sd`
+crate's own source (no matches for "android" or "MulticastLock" anywhere in
+it): `crates/envryn-core/src/sync/discovery.rs` sends and receives real UDP
+multicast on `224.0.0.251:5353`, and Android silently drops *incoming*
+multicast packets for an app unless it holds a `WifiManager.MulticastLock` --
+a JNI-level Android API `mdns-sd` has no way to reach on its own, being a
+plain cross-platform socket library. The fix is Kotlin, not Rust: the script
+adds three manifest permissions (`ACCESS_WIFI_STATE`,
+`CHANGE_WIFI_MULTICAST_STATE`, `ACCESS_NETWORK_STATE`) and patches
+`MainActivity.kt` to acquire the lock in `onCreate` and hold it for the app's
+lifetime. Same "generated project forgets what this repo already fixed"
+problem as the icon sync, and the same reason it must run before
+`android build`: `MainActivity.kt`/`AndroidManifest.xml` are scaffolded once
+by `android init`, not touched again by `android build`, so a real device
+never sees the lock-acquiring code unless this ran first. `build:native-ui`
+runs it automatically. Idempotent -- safe to run whether or not the project
+was already patched.
+
 **How it works now.** `.dev-tools/sign-apk.mjs` (`npm run sign:apk`) zipaligns and then signs the
-Gradle output with APK Signature Scheme v2 + v3, and **fails the build if the result does not
-verify** — so a silently-unsigned artifact cannot reach a release again. `minSdk` is 24, so v1
-(JAR) signing is not required; v2+v3 is what every supported Android version verifies against.
+Gradle output with APK Signature Scheme v3 (and v2 where the supported OS range requires it), and
+**fails the build if the result does not verify** — so a silently-unsigned artifact cannot reach
+a release again. `minSdk` is 29, so v1 (JAR) signing is not required; every supported Android
+version verifies v3.
 
 **The keystore is the single irreplaceable artifact in this release process.**
 

@@ -269,6 +269,17 @@ pub fn run_sync_session<S: Read + Write>(
     Ok(result)
 }
 
+/// Fuzzing-only entry point for every inbound JSON frame used by sync. Each
+/// attempt includes the real four-byte length prefix and allocation limit.
+#[cfg(feature = "fuzzing")]
+pub fn fuzz_parse_wire_message(bytes: &[u8]) {
+    use std::io::Cursor;
+
+    let _ = read_json::<_, ManifestMessage>(&mut Cursor::new(bytes));
+    let _ = read_json::<_, RequestMessage>(&mut Cursor::new(bytes));
+    let _ = read_json::<_, RecordsMessage>(&mut Cursor::new(bytes));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

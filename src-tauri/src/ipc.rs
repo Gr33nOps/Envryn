@@ -35,6 +35,9 @@ use zeroize::Zeroizing;
 
 use crate::settings;
 
+#[cfg(target_os = "android")]
+use envryn_android_clipboard::SensitiveClipboardExt;
+
 /// Error shape crossing to the UI.
 ///
 /// A code the UI can branch on plus an already-safe message. Deliberately not
@@ -418,7 +421,16 @@ pub fn conflict_discard(state: State<'_, VaultState>, conflict_id: String) -> Ip
 /// immediately after a `secret_reveal`), so there is nothing to hand back.
 #[tauri::command]
 pub fn clipboard_copy(app: tauri::AppHandle, value: String) -> IpcResult<()> {
+    #[cfg(windows)]
     envryn_core::platform::set_clipboard_text_excluded(&value)?;
+
+    #[cfg(target_os = "android")]
+    app.sensitive_clipboard()
+        .write_sensitive_text(value.clone())
+        .map_err(|_| internal("Clipboard is unavailable."))?;
+
+    #[cfg(not(any(windows, target_os = "android")))]
+    return Err(Error::PlatformUnavailable.into());
 
     let clear_after =
         std::time::Duration::from_secs(u64::from(settings::load(&app).clipboard_clear_seconds));
@@ -431,9 +443,21 @@ pub fn clipboard_copy(app: tauri::AppHandle, value: String) -> IpcResult<()> {
     // test against the real OS clipboard -- this command's own `AppHandle`
     // parameter keeps it out of `tauri::test::MockRuntime`'s reach, so the
     // logic that actually matters is tested one layer down instead.
+    #[cfg(target_os = "android")]
+    let clear_app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(clear_after).await;
+        #[cfg(windows)]
         let _ = envryn_core::platform::clear_clipboard_if_matches(&value);
+
+        #[cfg(target_os = "android")]
+        if clear_app
+            .sensitive_clipboard()
+            .read_text()
+            .is_ok_and(|current| current == value)
+        {
+            let _ = clear_app.sensitive_clipboard().clear();
+        }
     });
 
     Ok(())

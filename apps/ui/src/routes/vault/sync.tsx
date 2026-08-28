@@ -78,20 +78,6 @@ function Sync() {
     }
   }
 
-  // Listening lets a peer reach *this* device too, not only the other way
-  // around. Tied to this page's lifetime rather than the whole app's --
-  // `envryn_core::vault::Vault::trusted_fingerprints`'s own doc comment
-  // already commits sync to "something the user starts from inside the
-  // unlocked app," not a background service.
-  React.useEffect(() => {
-    if (!ipc.isTauri()) return;
-    void ipc.syncListenStart().catch(() => {
-      // Non-fatal: this device can still sync out even if it can't accept
-      // incoming connections (e.g. the port could not be opened).
-    });
-    return () => void ipc.syncListenStop();
-  }, []);
-
   const refreshPeers = React.useCallback(async (): Promise<ipc.DiscoveredPeer[]> => {
     if (!ipc.isTauri()) return [];
     try {

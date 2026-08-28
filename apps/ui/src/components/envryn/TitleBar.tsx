@@ -62,7 +62,7 @@ export function TitleBar() {
     <div
       data-tauri-drag-region
       onDoubleClick={() => void withWindow((win) => win.toggleMaximize())}
-      className="flex h-8 shrink-0 select-none items-center justify-between border-b border-border bg-surface"
+      className="desktop-titlebar flex h-8 shrink-0 select-none items-center justify-between border-b border-border bg-surface"
     >
       <div className="flex h-full shrink-0 items-center pl-3">
         <Wordmark size={17} />

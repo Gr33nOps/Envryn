@@ -1,0 +1,57 @@
+# OSV scans Cargo.lock without Cargo's target graph, so it reports Linux-only
+# GTK dependencies even though Envryn ships Windows and Android. These are the
+# same reviewed exceptions as deny.toml; everything else remains a hard fail.
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0411"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0412"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0413"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0414"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0415"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0416"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0417"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0418"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0419"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0420"
+reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+reason = "glib is reachable only through Tauri's unshipped Linux GTK backend"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+reason = "Unmaintained paste crate; no known vulnerability; transitive through candle"
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+reason = "Unmaintained proc-macro helper in the unshipped GTK dependency graph"
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0075"
+reason = "Unmaintained Unicode data crate, transitive through Tauri urlpattern"
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0080"
+reason = "Unmaintained Unicode data crate, transitive through Tauri urlpattern"
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0081"
+reason = "Unmaintained Unicode data crate, transitive through Tauri urlpattern"
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0098"
+reason = "Unmaintained Unicode data crate, transitive through Tauri urlpattern"
+[[IgnoredVulns]]
+id = "RUSTSEC-2025-0100"
+reason = "Unmaintained Unicode data crate, transitive through Tauri urlpattern"

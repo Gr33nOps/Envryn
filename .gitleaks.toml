@@ -1,0 +1,24 @@
+title = "Envryn secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Documented synthetic test fixtures"
+paths = [
+  '''apps/ui/src/.*\.test\.ts(x)?$''',
+  '''crates/.*?/tests?/.*''',
+  '''^SECURITY_REMEDIATION_REPORT\.md$''',
+  '''^src/lib/envryn-data\.ts$''',
+]
+regexes = [
+  '''sk-live-abc''',
+  '''whsec_abc''',
+  '''adversarial-clipboard-value-[0-9]+''',
+  '''ghp_1234567890abcdef1234567890abcdef1234''',
+  '''eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.dGhpc2lzYXNpZ25hdHVyZQ''',
+  '''dcd819ff094852c38faba6873d8ff0c9d51eadb2844539e52042ae5d647bbfdb''',
+  '''c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539''',
+  '''aca679832ded61145239ce7f5c5ebddb1c57ada786c9c23733899c3888e0596f''',
+  '''f7c9b2dba4a296b1aa76c16a34b8225c0c118978400d4bb66bff0902d702f5b8''',
+]

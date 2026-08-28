@@ -151,7 +151,7 @@ function PairingModalFooter({
 
 function TrustedDevices() {
   const devicesQuery = useDevices();
-  const devices = devicesQuery.data ?? [];
+  const devices = React.useMemo(() => devicesQuery.data ?? [], [devicesQuery.data]);
   const renameDevice = useRenameDevice();
   const revokeDevice = useRevokeDevice();
 
@@ -280,7 +280,7 @@ function TrustedDevices() {
           </div>
 
           {detail ? (
-            <aside className="flex min-h-[390px] flex-col rounded-lg border border-border bg-surface">
+            <aside className="device-detail-panel flex min-h-[390px] flex-col rounded-lg border border-border bg-surface">
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <div className="flex items-center gap-2.5">
                   <span className="inline-flex size-7 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">

@@ -11,10 +11,11 @@
 //! **Scope note.** Sync only ever runs while this device's own vault is
 //! unlocked -- there is no background listener that starts at app launch and
 //! runs against a locked vault (`envryn_core::vault::Vault::trusted_fingerprints`'s
-//! own doc comment already commits to this). `sync_listen_start` begins
-//! accepting connections and advertising over mDNS; the accept loop checks
-//! the vault's lock state on every iteration and stops itself the moment it
-//! locks, rather than relying on every caller to remember to stop it.
+//! own doc comment already commits to this). The unlocked-vault UI calls
+//! `sync_listen_start`, which accepts connections and advertises over mDNS
+//! for that whole unlocked session. The accept loop checks the vault's lock
+//! state on every iteration and stops itself the moment it locks, rather than
+//! relying on every caller to remember to stop it.
 //!
 //! **Verification note.** The pairing and sync wire protocols themselves are
 //! exercised with real loopback TCP and TLS in `envryn_core::sync`'s own
@@ -247,9 +248,17 @@ pub async fn sync_now(
 }
 
 /// Handle to a running `sync_listen_start` background thread, so
-/// `sync_listen_stop` can signal it and a lock event can find out it should.
+/// `sync_listen_stop` can signal it and repeated starts can be idempotent.
+/// Idempotence matters because React may mount an unlocked-vault layout more
+/// than once during development and route transitions must not tear down a
+/// listener that a newer mount has already replaced.
+struct SyncListenerHandle {
+    running: Arc<AtomicBool>,
+    port: u16,
+}
+
 #[derive(Default)]
-pub struct SyncListenState(Mutex<Option<Arc<AtomicBool>>>);
+pub struct SyncListenState(Mutex<Option<SyncListenerHandle>>);
 
 #[tauri::command]
 pub fn sync_listen_start(
@@ -266,8 +275,8 @@ pub fn sync_listen_start(
         .0
         .lock()
         .map_err(|_| internal("sync listener state unavailable"))?;
-    if guard.is_some() {
-        return Err(invalid("Already listening for sync connections."));
+    if let Some(handle) = guard.as_ref() {
+        return Ok(handle.port);
     }
 
     let identity = load_identity(&app)?;
@@ -279,7 +288,10 @@ pub fn sync_listen_start(
         .port();
 
     let running = Arc::new(AtomicBool::new(true));
-    *guard = Some(running.clone());
+    *guard = Some(SyncListenerHandle {
+        running: running.clone(),
+        port,
+    });
     drop(guard);
 
     let path = vault_path(&app)?;
@@ -295,8 +307,8 @@ pub fn sync_listen_stop(listen_state: State<'_, SyncListenState>) -> IpcResult<(
         .0
         .lock()
         .map_err(|_| internal("sync listener state unavailable"))?;
-    if let Some(flag) = guard.take() {
-        flag.store(false, Ordering::SeqCst);
+    if let Some(handle) = guard.take() {
+        handle.running.store(false, Ordering::SeqCst);
     }
     Ok(())
 }
@@ -358,7 +370,14 @@ fn run_listen_loop(
     let _ = discovery.stop_advertising();
     if let Some(state) = app.try_state::<SyncListenState>() {
         if let Ok(mut guard) = state.0.lock() {
-            *guard = None;
+            // Do not let an older, stopping thread erase a newer listener
+            // installed after a stop/start transition.
+            if guard
+                .as_ref()
+                .is_some_and(|handle| Arc::ptr_eq(&handle.running, &running))
+            {
+                *guard = None;
+            }
         }
     }
 }

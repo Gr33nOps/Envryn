@@ -15,6 +15,7 @@ zeroize = "1"
 
 [dependencies.envryn-core]
 path = "../crates/envryn-core"
+features = ["fuzzing"]
 
 [[bin]]
 name = "fuzz_aead_open"
@@ -26,6 +27,20 @@ bench = false
 [[bin]]
 name = "fuzz_backup_restore"
 path = "fuzz_targets/fuzz_backup_restore.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sync_wire"
+path = "fuzz_targets/fuzz_sync_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_device_identity"
+path = "fuzz_targets/fuzz_device_identity.rs"
 test = false
 doc = false
 bench = false

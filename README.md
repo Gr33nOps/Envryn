@@ -194,6 +194,7 @@ Full detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Security documentation
 
+- [Security and privacy testing](docs/SECURITY_TESTING.md) — free local scanners, APK analysis, fuzzing, and the release gate.
 - [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — what Envryn defends
   against, and what it explicitly does not
 - [`docs/CRYPTOGRAPHY.md`](docs/CRYPTOGRAPHY.md) — the exact primitives and
@@ -207,9 +208,7 @@ Full detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
   internal security audit, including confirmed false positives and what
   still needs human judgment
 
-Found a real security issue? Please open an issue describing the class of
-problem without public exploit details, or reach out directly — there is no
-dedicated security contact address set up yet.
+Found a real security issue? Use [private vulnerability reporting](https://github.com/Gr33nOps/Envryn/security/advisories/new); do not put exploit details or sensitive data in a public issue.
 
 ## Project status
 
