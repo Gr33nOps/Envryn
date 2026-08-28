@@ -42,6 +42,43 @@ jobs:
           # checkout cannot provide.
           fetch-depth: 0
 
+      # The GitHub App decorates commits from the repository-bound project.
+      # Print only actionable issue metadata (never the token) so a private
+      # SonarCloud project can still be diagnosed from its Actions run.
+      - name: Inspect repository-bound SonarCloud security issues
+        shell: pwsh
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $credential = [Convert]::ToBase64String(
+            [Text.Encoding]::ASCII.GetBytes("$($env:SONAR_TOKEN):")
+          )
+          $headers = @{ Authorization = "Basic $credential" }
+          $params = @{
+            componentKeys = "Gr33nOps_local-vault-for-devs"
+            branch = "main"
+            resolved = "false"
+            impactSoftwareQualities = "SECURITY"
+            ps = "100"
+          }
+          $query = ($params.GetEnumerator() | ForEach-Object {
+            "$([Uri]::EscapeDataString($_.Key))=$([Uri]::EscapeDataString($_.Value))"
+          }) -join "&"
+          $request = @{
+            Uri = "https://sonarcloud.io/api/issues/search?$query"
+            Headers = $headers
+          }
+          $result = Invoke-RestMethod @request
+
+          Write-Output "Open security issues: $($result.total)"
+          $result.issues | ForEach-Object {
+            $description = "{0} | {1} | {2}:{3} | {4}" -f @(
+              $_.key, $_.rule, $_.component, $_.line, $_.message
+            )
+            Write-Output $description
+          }
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
