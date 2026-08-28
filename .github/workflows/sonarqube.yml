@@ -84,7 +84,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       # Real per-file coverage for apps/ui, not a stand-in -- consumed below
       # via sonar.javascript.lcov.reportPaths (sonar-project.properties).

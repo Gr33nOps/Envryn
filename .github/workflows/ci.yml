@@ -56,7 +56,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       # tauri::generate_context!() reads tauri.conf.json at compile time and
       # requires the frontendDist path to physically exist -- discovered by
@@ -166,7 +166,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install semgrep
+      - run: pip install --only-binary=:all: semgrep==1.175.0
 
       - run: semgrep --config .semgrep/ crates/ src-tauri/ apps/ui/src --error
 
@@ -181,7 +181,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci
+      - run: npm ci --ignore-scripts
 
       - run: npm run lint
 

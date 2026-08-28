@@ -19,3 +19,9 @@ android {
 dependencies {
     implementation(project(":tauri-android"))
 }
+
+// Resolve the exact same dependency graph on every developer machine and CI
+// runner. Refresh intentionally with Gradle's `--write-locks` flag.
+dependencyLocking {
+    lockAllConfigurations()
+}
