@@ -3,25 +3,23 @@ name: Release build
 # Manual-only, on purpose: this workflow builds installer artifacts and uploads them as a
 # workflow run artifact for review -- it does not publish a GitHub Release (that stays a
 # deliberate, separate, human action) and it never runs on a push or pull_request, so a PR
-# (including a fork PR, once this repo has outside contributors) cannot trigger a build on the
-# self-hosted runner just by existing. See RELEASE_SIGNING.md for the code-signing plan this
-# leaves a slot for, and SECURITY_REMEDIATION_REPORT.md/ci.yml's own comments for why this repo
-# runs on a repository-scoped self-hosted Windows runner rather than paid GitHub-hosted ones.
+# (including a fork PR, once this repo has outside contributors) cannot trigger a build just by
+# existing. It runs on GitHub-hosted Windows, which is free for this public repository and does
+# not expose a maintainer workstation to workflow code. See RELEASE_SIGNING.md for the signing
+# slot this workflow preserves.
 
 on:
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build MSI + NSIS installers
-    runs-on: [self-hosted, envryn-self-hosted]
-    # Same reasoning as ci.yml's rust job: this runner is the maintainer's own desktop, not a
-    # dedicated CI box, and this build compiles the full workspace including candle/tokenizers
-    # for the real (non-placeholder) AI-worker sidecar on top of the main app -- genuinely more
-    # memory pressure than ci.yml's job, which only compiles a placeholder sidecar. Capped
-    # further here for that reason; observed directly this same session: an 8 GiB fixed pagefile
-    # plus ordinary desktop load (browser, Photoshop, WSL) produced a real "paging file is too
-    # small" failure compiling a similarly-sized dependency tree at default parallelism.
+    runs-on: windows-latest
+    # The real AI-worker sidecar adds a heavy candle/tokenizers build, so keep peak memory use
+    # predictable even on the hosted runner.
     env:
       CARGO_BUILD_JOBS: "2"
     steps:
