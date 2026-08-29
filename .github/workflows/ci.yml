@@ -187,6 +187,8 @@ jobs:
 
       - run: npm run typecheck
 
+      - run: npm run test:docs
+
       - run: npm run test:coverage --workspace @envryn/ui
 
       - run: npm run build
