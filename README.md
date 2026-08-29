@@ -10,12 +10,12 @@ Keep API keys, tokens, database credentials, SSH keys, and secure notes encrypte
 
 [![CI](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml/badge.svg)](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Gr33nOps/Envryn/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/Gr33nOps/Envryn/security/code-scanning)
-[![Latest release](https://img.shields.io/github/v/release/Gr33nOps/Envryn?include_prereleases&label=release&color=16b364)](https://github.com/Gr33nOps/Envryn/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/Gr33nOps/Envryn?include_prereleases&label=release&color=16b364)](https://github.com/Gr33nOps/Envryn/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
 [![Windows](https://img.shields.io/badge/Windows-supported-0a84ff)](#install)
 [![Android](https://img.shields.io/badge/Android-beta-3ddc84)](#install)
 
-[Download](https://github.com/Gr33nOps/Envryn/releases/latest) · [Security](.github/SECURITY.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md)
+[Download](https://github.com/Gr33nOps/Envryn/releases) · [Security](.github/SECURITY.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -77,7 +77,7 @@ Start with the [threat model](docs/THREAT_MODEL.md), [cryptography notes](docs/C
 
 ## Install
 
-Download the newest beta from [GitHub Releases](https://github.com/Gr33nOps/Envryn/releases/latest).
+Download the newest beta from [GitHub Releases](https://github.com/Gr33nOps/Envryn/releases).
 
 ### Windows
 
