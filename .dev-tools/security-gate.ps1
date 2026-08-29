@@ -29,7 +29,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Rust vulnerability scan failed" }
 
   if (-not $SkipDependencyNetwork) {
-    osv-scanner scan source -r . --config osv-scanner.toml
+    & (Join-Path $PSScriptRoot "osv-source-scan.ps1")
     if ($LASTEXITCODE -ne 0) { throw "OSV dependency scan failed" }
     npm audit --omit=dev --audit-level=high
     if ($LASTEXITCODE -ne 0) { throw "npm production dependency audit failed" }

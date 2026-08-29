@@ -59,6 +59,8 @@ vault-data/
 apps/ui/coverage/
 lcov.info
 target/llvm-cov/
+playwright-report/
+test-results/
 
 # Android signing material. The real keystore lives outside this repo
 # entirely (~/.envryn/), so these patterns are defence in depth rather than

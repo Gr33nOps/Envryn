@@ -1,232 +1,196 @@
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="Envryn" width="88" height="88">
+<img src="docs/assets/logo.png" alt="Envryn logo" width="88" height="88">
 
 # Envryn
 
-**A local-first secrets vault for developers.**
-API keys, tokens, database credentials, SSH keys, and other credentials —
-encrypted, stored only on your own machine, and never sent anywhere by default.
+**A private, local-first secrets vault for developers.**
+
+Keep API keys, tokens, database credentials, SSH keys, and secure notes encrypted on your own devices. No account. No cloud vault. No telemetry.
 
 [![CI](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml/badge.svg)](https://github.com/Gr33nOps/Envryn/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/Gr33nOps/Envryn?include_prereleases&label=release&color=2ea043)](https://github.com/Gr33nOps/Envryn/releases)
+[![CodeQL](https://github.com/Gr33nOps/Envryn/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/Gr33nOps/Envryn/security/code-scanning)
+[![Latest release](https://img.shields.io/github/v/release/Gr33nOps/Envryn?include_prereleases&label=release&color=16b364)](https://github.com/Gr33nOps/Envryn/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/platform-Windows-0a84ff)](#installing)
-[![Platform: Android (experimental)](https://img.shields.io/badge/platform-Android%20(experimental)-3ddc84)](#installing)
-[![Status: beta](https://img.shields.io/badge/status-beta-orange)](#project-status)
+[![Windows](https://img.shields.io/badge/Windows-supported-0a84ff)](#install)
+[![Android](https://img.shields.io/badge/Android-beta-3ddc84)](#install)
+
+[Download](https://github.com/Gr33nOps/Envryn/releases/latest) · [Security](.github/SECURITY.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
-<br>
+## See Envryn in action
 
-## Contents
+<table>
+  <tr>
+    <td width="58%"><img src="docs/assets/screenshots/desktop-vault.png" alt="Envryn desktop vault with secrets organized by project and environment"></td>
+    <td width="21%"><img src="docs/assets/screenshots/mobile-vault.png" alt="Envryn mobile vault with touch-friendly navigation"></td>
+    <td width="21%"><img src="docs/assets/screenshots/mobile-sync.png" alt="Envryn mobile sync screen with a trusted device online"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Desktop vault</strong></td>
+    <td align="center"><strong>Mobile vault</strong></td>
+    <td align="center"><strong>Local sync</strong></td>
+  </tr>
+</table>
 
-[Why Envryn](#why-envryn) ·
-[Features](#features) ·
-[Installing](#installing) ·
-[Uninstalling](#uninstalling-and-removing-your-data) ·
-[Updating](#manual-updates-no-auto-updater-in-v01x) ·
-[Development](#development) ·
-[Architecture](#architecture-in-brief) ·
-[Security docs](#security-documentation) ·
-[Project status](#project-status)
-
----
+The gallery uses fabricated metadata created by the repeatable screenshot test. No real credentials appear in these images.
 
 ## Why Envryn
 
-Most "secrets managers" are either a plaintext `.env` file you hope nobody
-commits, or a cloud service you have to trust with everything you store in
-it. Envryn is neither:
+`.env` files are convenient, but they are easy to commit, copy, or leave behind. Cloud secrets managers solve part of that problem by asking you to trust another service with your credentials. Envryn takes a different path:
 
-- **Local-first.** Your vault is a single encrypted file on your own disk.
-  There is no server, no account, and no cloud sync unless you explicitly
-  pair a second device of your own over your local network.
-- **Encrypted at rest, for real.** XChaCha20-Poly1305 for records, Argon2id
-  for your master password, HKDF-SHA256 for subkey derivation. See
-  [`docs/CRYPTOGRAPHY.md`](docs/CRYPTOGRAPHY.md) for the exact construction
-  — not a marketing paragraph, the actual primitives and why each was chosen.
-- **Fails closed.** The optional local-AI subsystem, sync, and every other
-  non-essential feature can be deleted from the build entirely and the vault
-  still works — locking, unlocking, storing, and retrieving secrets never
-  depends on any of them. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-- **Honest about its limits.** Envryn has been through a real internal
-  security audit ([`AUDIT_REPORT.md`](AUDIT_REPORT.md)) covering static
-  analysis, dependency scanning, secret scanning, and manual review. It has
-  **not** had an independent third-party audit, and no software is
-  unhackable — see [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) for what
-  is and isn't defended against.
+- **Your vault stays local.** The encrypted vault file lives on your device.
+- **Sync is direct.** Approved devices sync over your local network without a relay server.
+- **There is no account.** Envryn does not need an email address, subscription, or hosted control plane.
+- **Security decisions live in Rust.** The interface never gets to bypass vault policy.
+- **Optional AI stays local.** The Windows app can run a small on-device model, and the vault works fully without it.
+- **The limits are documented.** Envryn is beta software and has not received an independent third-party audit.
 
-## Features
+## What it can do
 
-- Store API keys, tokens, environment variables, database credentials, SSH
-  keys, OAuth secrets, webhooks, and free-form secure notes
-- Organize by project and environment (Development / Staging / Production)
-- Deterministic credential-type detection for ~25 well-known providers
-  (Stripe, GitHub, AWS, OpenAI, Slack, and more), no network call involved
-- Optional **local-only AI** for name suggestions, classification, and
-  natural-language search — runs a small model entirely on-device via
-  [candle](https://github.com/huggingface/candle); off by default, and the
-  one-time model download is the *only* network access it ever makes (see
-  [`docs/AI_SECURITY.md`](docs/AI_SECURITY.md) and
-  [`docs/AI_DATA_ACCESS.md`](docs/AI_DATA_ACCESS.md))
-- Direct device-to-device sync over your local network, with explicit
-  pairing and a human-verified confirmation code — never a third-party relay
-- Encrypted, password-protected backup and restore
-- Auto-lock on idle, clipboard auto-clear, and optional Windows Hello unlock
-- A native, custom-decorated desktop window — no browser, no Electron
+- Store API keys, tokens, environment variables, database credentials, SSH keys, OAuth secrets, webhooks, and notes
+- Organize secrets by project and Development, Staging, or Production environment
+- Detect many common credential formats without a network request
+- Import `.env` content and extract structured fields
+- Pair Windows and Android devices with a human-verified code
+- Sync encrypted records directly over the local network
+- Create encrypted, password-protected backups
+- Lock on idle or when the Android app moves to the background
+- Clear copied secrets after a configurable delay
+- Unlock with Windows Hello when platform protection is enabled
 
-## Installing
+## Security at a glance
 
-Download the latest release from
-**[Releases](https://github.com/Gr33nOps/Envryn/releases)**.
+Envryn uses:
 
-**Windows** (primary platform): either the `.msi` or the `-setup.exe`
-(NSIS) installs the same app.
+- XChaCha20-Poly1305 authenticated encryption for vault records
+- Argon2id for master-password key derivation
+- HKDF-SHA256 for domain-separated subkeys
+- Mutually authenticated TLS for paired-device sync
+- Windows DPAPI for optional platform protection
+- Android screenshot blocking, backup blocking, and sensitive clipboard labels
 
-**Android** (experimental): a universal `.apk`, signed with Envryn's own
-release key. Android shows it as from an unknown developer, so you'll need to
-allow installs from an unknown source — but it will install. This build has
-been verified to compile and run its full test suite, but hasn't yet been
-through the same device-level testing as the Windows build — treat it as
-early. Android has no local AI; that feature is Windows-only.
+Security claims are backed by unit tests, integration tests, browser journeys, accessibility checks, fuzz targets, CodeQL, SonarQube Cloud, Semgrep, Gitleaks, OSV-Scanner, `cargo-audit`, `cargo-deny`, and npm audit.
 
-> If you installed the `v0.1.4-beta` APK or earlier and got "package appears
-> to be invalid", that was our bug, not yours: those APKs were published
-> genuinely unsigned, which Android refuses outright. Use `v0.1.5-beta` or
-> later.
+Start with the [threat model](docs/THREAT_MODEL.md), [cryptography notes](docs/CRYPTOGRAPHY.md), and [security testing guide](docs/SECURITY_TESTING.md). To report a vulnerability, read the [security policy](.github/SECURITY.md) and use GitHub private vulnerability reporting.
 
-> Envryn is in beta. Use it for real credentials once you're comfortable —
-> most people start with lower-stakes or easily-rotated ones while they get
-> a feel for it.
+## Install
 
-## Uninstalling and removing your data
+Download the newest beta from [GitHub Releases](https://github.com/Gr33nOps/Envryn/releases/latest).
 
-**Uninstalling Envryn does not delete your vault.** This is deliberate: an uninstall should
-never be a silent, irreversible way to lose your secrets. Both installers only remove the
-program files they placed; your encrypted vault lives in a completely separate, standard Windows
-per-user data folder that neither installer's uninstaller touches.
+### Windows
 
-If you want your data gone too, not just the app, remove it yourself after uninstalling:
+Choose either installer:
 
-1. Press `Win+R`, type `%APPDATA%`, press Enter.
-2. Delete the `dev.envryn.vault` folder you find there. This holds your encrypted vault database
-   (`envryn.db` and its `-wal`/`-shm` files), your device identity, your settings, and — if you
-   ever enabled the local AI feature — the downloaded model files. (This folder exists even if
-   you never created a vault — Envryn creates it within seconds of any launch to store your
-   auto-lock/clipboard preferences, which have to be readable before a vault exists. If you never
-   created a vault, it holds nothing sensitive.)
-3. Optionally, also check `%LOCALAPPDATA%\dev.envryn.vault` (press `Win+R`, type
-   `%LOCALAPPDATA%`, Enter). If present, this holds the embedded browser engine's own cache and
-   metrics data — never your secrets (Envryn's UI never holds key material; see
-   [`docs/SECURITY_INVARIANTS.md`](docs/SECURITY_INVARIANTS.md)) — but delete it too if you want
-   every trace gone.
+- `Envryn_<version>_x64-setup.exe` for the usual setup experience
+- `Envryn_<version>_x64_en-US.msi` for Windows Installer deployments
 
-Because your vault is encrypted at rest with your master password (see
-[`docs/CRYPTOGRAPHY.md`](docs/CRYPTOGRAPHY.md)), a normal file deletion is enough — there is no
-plaintext copy sitting elsewhere on disk to separately shred. If your threat model specifically
-includes forensic recovery of deleted files from your own drive (a different, much narrower
-concern than losing the master password), that's a general Windows/full-disk-encryption question
-independent of Envryn, not something this app can solve for you after the fact.
+Both install the same application. Windows packages are not code-signed yet, so SmartScreen may show an unknown publisher warning. Verify the file against `CHECKSUMS.txt` before running it.
 
-## Manual updates (no auto-updater in v0.1.x)
+### Android
 
-Envryn does not check for or install updates automatically — see
-[`docs/UPDATE_POLICY.md`](docs/UPDATE_POLICY.md) for why that's a deliberate choice for now, not
-a missing feature. To update:
+Install `Envryn_<version>_android-universal.apk` on Android 10 or newer. Android will ask you to allow installation from an unknown source because Envryn is distributed directly through GitHub.
 
-1. Get the new installer **only** from this repository's
-   [Releases page](https://github.com/Gr33nOps/Envryn/releases) — never a link from anywhere
-   else.
-2. Verify its SHA-256 checksum against the value published in that release's notes **before**
-   running it (PowerShell: `Get-FileHash .\the-installer-file -Algorithm SHA256`).
-3. Run the new installer directly over your existing install. It upgrades in place and does not
-   touch your vault, which lives outside the install directory (see "Uninstalling" above).
+The Android APK is signed with the same Envryn release identity across updates. Android does not include the optional local AI worker.
 
-## Development
+### Verify a download
 
-Requires [Node.js](https://nodejs.org) 20+ and the
-[Rust toolchain](https://rustup.rs) with the
-[Tauri prerequisites](https://tauri.app/start/prerequisites/) for Windows.
+On PowerShell:
 
-```sh
-git clone https://github.com/Gr33nOps/Envryn.git envryn
-cd envryn
-npm install
-
-npm run tauri:dev      # run the app in development mode
-npm run tauri:build    # produce a real installer (.msi and .exe)
+```powershell
+Get-FileHash .\Envryn_<version>_x64-setup.exe -Algorithm SHA256
 ```
 
-Other useful commands:
+Compare the result with the matching entry in the release's `CHECKSUMS.txt`. Release downloads also include a CycloneDX software bill of materials.
 
-```sh
-cargo test --workspace              # Rust test suite
-cargo clippy --workspace --all-targets -- -D warnings
-npm run typecheck                   # frontend
-npm run lint                        # frontend
+## Update or uninstall
+
+Envryn does not update itself in the `0.1.x` beta series. Download a newer installer from this repository and install it over the existing version. Your vault is stored separately and remains in place.
+
+Uninstalling the app does not delete your vault. This protects users from losing secrets during an uninstall or reinstall.
+
+To remove the Windows vault data too:
+
+1. Uninstall Envryn.
+2. Press `Win+R`, enter `%APPDATA%`, and remove `dev.envryn.vault`.
+3. Optionally remove `%LOCALAPPDATA%\dev.envryn.vault`, which contains WebView cache data rather than vault secrets.
+
+Read [the update policy](docs/UPDATE_POLICY.md) for the reasoning and recovery guidance.
+
+## Build from source
+
+### Prerequisites
+
+- Node.js 20 or newer
+- Rust stable
+- Windows with the [Tauri prerequisites](https://tauri.app/start/prerequisites/)
+- Android Studio and the Android SDK for Android builds
+
+```powershell
+git clone https://github.com/Gr33nOps/Envryn.git
+cd Envryn
+npm ci
+npm run tauri:dev
 ```
 
-A local pre-commit/pre-push security gate (formatting, linting, the full
-test suite) runs automatically once you've cloned the repo — see
-`.githooks/`.
+Useful checks:
 
-## Architecture, in brief
-
+```powershell
+cargo test --workspace
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+npm run lint
+npm run typecheck
+npm run test:coverage --workspace @envryn/ui
+npm run test:e2e
+npm run test:bundle-budget
+npm run test:security-invariants
+npm run screenshots:readme
 ```
-apps/ui/            React + TanStack Router frontend (untrusted by design —
-                     every sensitive operation is enforced in Rust, never
-                     assumed safe because the UI asked nicely)
-crates/envryn-core/  Vault, crypto, sync, and platform logic. No Tauri
-                     dependency — testable and reasoned about on its own.
+
+The repository includes pre-commit and pre-push hooks under `.githooks/`. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and pull request expectations.
+
+## Architecture
+
+```text
+apps/ui/             React and TanStack Router interface
+crates/envryn-core/  Vault, cryptography, storage, sync, and platform policy
 crates/envryn-ai-worker/
-                     The optional local-AI inference process. No dependency
-                     on envryn-core; killing this process leaves a fully
-                     functional vault.
-src-tauri/           The Tauri shell: IPC commands, window/platform glue,
-                     and nothing that a security decision should live in.
-packages/contract/   TypeScript types generated directly from the real Rust
-                     IPC types (ts-rs) — the frontend can't drift from what
-                     the backend actually sends.
+                     Optional local inference process with no vault dependency
+src-tauri/            Tauri commands and native application shell
+packages/contract/   TypeScript bindings generated from Rust IPC types
 ```
 
-Full detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+The UI is treated as untrusted. Sensitive operations cross a typed Tauri boundary and are enforced by the Rust core. The local AI worker runs as a separate process and receives only the minimum sanitized input for a requested operation.
 
-## Security documentation
+Read [the architecture guide](docs/ARCHITECTURE.md) for data flows and design decisions.
 
-- [Security and privacy testing](docs/SECURITY_TESTING.md) — free local scanners, APK analysis, fuzzing, and the release gate.
-- [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) — what Envryn defends
-  against, and what it explicitly does not
-- [`docs/CRYPTOGRAPHY.md`](docs/CRYPTOGRAPHY.md) — the exact primitives and
-  key hierarchy
-- [`docs/SECURITY_INVARIANTS.md`](docs/SECURITY_INVARIANTS.md) — properties
-  the codebase is designed to never violate
-- [`SECURITY_ARCHITECTURE.md`](SECURITY_ARCHITECTURE.md) /
-  [`SECURITY_CHECKLIST.md`](SECURITY_CHECKLIST.md) — the security posture
-  and review checklist
-- [`AUDIT_REPORT.md`](AUDIT_REPORT.md) — findings and remediation from the
-  internal security audit, including confirmed false positives and what
-  still needs human judgment
+## Documentation
 
-Found a real security issue? Use [private vulnerability reporting](https://github.com/Gr33nOps/Envryn/security/advisories/new); do not put exploit details or sensitive data in a public issue.
+- [Documentation index](docs/README.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Cryptography](docs/CRYPTOGRAPHY.md)
+- [Threat model](docs/THREAT_MODEL.md)
+- [Security invariants](docs/SECURITY_INVARIANTS.md)
+- [Security and privacy testing](docs/SECURITY_TESTING.md)
+- [Quality testing](docs/QUALITY_TESTING.md)
+- [Dependency policy](docs/DEPENDENCY_POLICY.md)
+- [AI security](docs/AI_SECURITY.md)
+- [AI data access](docs/AI_DATA_ACCESS.md)
+- [Release process](docs/RELEASE_PROCESS.md)
 
 ## Project status
 
-Beta. Core vault functionality (create, lock/unlock, store, search, backup,
-restore, device sync) is real, tested, and has been through a full internal
-audit and a real production-build install/uninstall cycle. Rougher edges:
+Envryn is in beta. The core vault, backup, sync protocol, Windows app, and Android app are functional and tested. Important limitations remain:
 
-- Windows is the primary, most-tested platform; no code signing yet, so
-  Windows SmartScreen will warn on first run
-- Android is experimental: it builds and passes the full test suite, but
-  hasn't had the same device-level verification as Windows yet
-- Local AI is an optional, early feature — quality reflects the small
-  on-device model it deliberately uses to stay GPU-free
-- No auto-updater by design for now; update by downloading the latest
-  release
+- Windows installers do not have a trusted publisher signature yet.
+- Android has less physical-device coverage than Windows.
+- The local AI feature is optional and intentionally uses a small model.
+- There is no automatic updater.
+- The project has completed an internal security review, not an independent audit.
 
----
+If you find a bug, [open an issue](https://github.com/Gr33nOps/Envryn/issues/new/choose). If you want to help, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE)
+Envryn is available under the [MIT License](LICENSE).
