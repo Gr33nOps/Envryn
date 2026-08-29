@@ -65,10 +65,19 @@ Do not publish a new signing identity by accident. Android updates must continue
 
 1. Commit the version and release documentation.
 2. Push `main` and wait for all checks.
-3. Create an annotated tag such as `v0.1.9-beta` at the verified commit.
+3. Create a signed annotated tag such as `git tag -s v0.1.9-beta -m "Envryn 0.1.9 beta"` at the verified commit.
 4. Create a GitHub prerelease from the prepared notes.
 5. Upload every artifact and checksum.
-6. Download or inspect the published asset list and verify the release points to the intended commit.
+6. Confirm the release workflow generated GitHub artifact attestations for the Windows installers and checksum manifest.
+7. Download or inspect the published asset list and verify the release points to the intended commit.
+
+Users can verify a CI-built Windows artifact with:
+
+```powershell
+gh attestation verify .\Envryn_<version>_x64-setup.exe --repo Gr33nOps/Envryn
+```
+
+The attestation links an artifact to its GitHub Actions build and commit. It does not replace checksum verification or Windows Authenticode signing.
 
 ## 6. Roll back
 

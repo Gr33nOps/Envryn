@@ -246,15 +246,21 @@ mod tests {
         );
     }
 
-    /// A browse with nothing advertised must return promptly and empty
-    /// rather than hanging for the full timeout.
+    /// A browse with nothing advertised by this process must return promptly.
+    ///
+    /// Other Envryn instances can legitimately be present on the developer's
+    /// LAN, so this test must not assume the multicast network is empty.
     #[test]
-    fn browsing_with_nothing_advertised_finds_nothing() {
+    fn browsing_without_a_local_advertisement_returns_promptly() {
         let _guard = DISCOVERY_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let disco = Discovery::new().unwrap();
-        let peers = disco.browse(Duration::from_millis(500)).unwrap();
-        assert!(peers.is_empty());
+        let started = std::time::Instant::now();
+        let _peers = disco.browse(Duration::from_millis(500)).unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "browse should respect its timeout even when other devices are visible"
+        );
     }
 }

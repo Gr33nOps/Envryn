@@ -56,10 +56,11 @@ Use this checklist for every public beta. The detailed commands and rationale li
 
 - [ ] The release commit is pushed to `main`.
 - [ ] All required GitHub checks pass.
-- [ ] An annotated `v<version>-beta` tag points to the verified commit.
+- [ ] A signed annotated `v<version>-beta` tag points to the verified commit.
 - [ ] The GitHub release is marked as a prerelease.
 - [ ] Release notes explain the user-facing changes and limitations.
 - [ ] Every expected asset is uploaded exactly once.
+- [ ] GitHub artifact attestations exist for CI-built Windows installers and the checksum manifest.
 - [ ] Published asset names and checksums are inspected after upload.
 
 ## Rollback triggers
