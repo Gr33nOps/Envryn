@@ -10,7 +10,7 @@ Run from the repository root:
 npm run security:scan
 ```
 
-The gate verifies hardening invariants, scans Git history with Gitleaks, runs the project's Semgrep rules, enforces Rust dependency/license/source policy with `cargo-deny`, checks Rust advisories with `cargo-audit`, checks all lockfiles with OSV-Scanner, and audits production npm dependencies. Reviewed target-specific exceptions live in `deny.toml` and `osv-scanner.toml`; new findings still fail the command.
+The gate verifies hardening invariants, scans Git history with Gitleaks, runs the project's Semgrep rules, enforces Rust dependency/license/source policy with `cargo-deny`, checks Rust advisories with `cargo-audit`, checks Cargo/npm locks and the Android release-runtime dependency slice with OSV-Scanner, and audits production npm dependencies. Android Gradle Plugin emulator/test-host tooling is deliberately excluded because it is not packaged in the APK. Reviewed target-specific exceptions live in `deny.toml` and `osv-scanner.toml`; new shipped-runtime findings still fail the command.
 
 ## Android APK analysis
 

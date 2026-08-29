@@ -1,0 +1,8 @@
+* @Gr33nOps
+
+/.github/ @Gr33nOps
+/crates/envryn-core/src/crypto/ @Gr33nOps
+/crates/envryn-core/src/sync/ @Gr33nOps
+/src-tauri/capabilities/ @Gr33nOps
+/docs/THREAT_MODEL.md @Gr33nOps
+/docs/CRYPTOGRAPHY.md @Gr33nOps

@@ -1,4 +1,4 @@
-# Envryn — Architecture
+# Envryn - Architecture
 
 ---
 
@@ -39,7 +39,7 @@ IPC contract has exactly one definition. Hand-maintaining the same shape twice i
 sides drift.
 
 **`sync/` is implemented** (identity, pairing, discovery, mutual-TLS transport, and the
-manifest-exchange protocol) — see `CRYPTOGRAPHY.md` sections 6-8 for the cryptographic detail
+manifest-exchange protocol) - see `CRYPTOGRAPHY.md` sections 6-8 for the cryptographic detail
 and `THREAT_MODEL.md` section 7 for what has and has not been verified. `ai/` and
 `crates/envryn-ai-worker` remain not started (Phase 3).
 
@@ -95,13 +95,13 @@ vault_meta      crypto_version, kdf_params, wrapped_vmk_password,
                 wrapped_vmk_platform, device_id
 ```
 
-Rows are opaque. `secrets.sealed` holds the entire record — name, project, environment, tags,
-notes and payload — as one AEAD blob. The remaining columns exist only so sync can order and
+Rows are opaque. `secrets.sealed` holds the entire record - name, project, environment, tags,
+notes and payload - as one AEAD blob. The remaining columns exist only so sync can order and
 reconcile records without decrypting them, and so duplicates can be found by keyed fingerprint.
 
 `trusted_devices` follows the same pattern: the device's display name and pairing history live
 inside `sealed`, under the Record Key, not in a plaintext column. The one exception is
-`fingerprint` itself — deliberately plaintext, because it is not a secret (the same role an SSH
+`fingerprint` itself - deliberately plaintext, because it is not a secret (the same role an SSH
 host key fingerprint plays: it is read aloud and compared on screen during pairing) and
 `sync::transport`'s TLS verifier needs the whole trusted set in memory to check every incoming
 handshake, which is cheaper to build from a plain column than by unsealing every row up front
@@ -112,7 +112,7 @@ explains why, and a schema test fails if one is added. The accepted residual lea
 count and modification timing, recorded in `THREAT_MODEL.md` as V-13.
 
 **The payload is a typed union, not a string.** The current UI models `value` as a flat string
-([envryn-data.ts](../src/lib/envryn-data.ts)), but SSH and database credentials are inherently
+([envryn-data.ts](../apps/ui/src/lib/envryn-data.ts)), but SSH and database credentials are inherently
 multi-field:
 
 ```rust
@@ -137,18 +137,18 @@ the form.
 
 ### Hybrid logical clocks
 
-**Implemented and tested** — `storage::Hlc` (`crates/envryn-core/src/storage/hlc.rs`). Every
-mutable row carries `(wall_ms, counter, device_id)`. Wall-clock alone is unusable — phone and
+**Implemented and tested** - `storage::Hlc` (`crates/envryn-core/src/storage/hlc.rs`). Every
+mutable row carries `(wall_ms, counter, device_id)`. Wall-clock alone is unusable - phone and
 desktop clocks disagree, and a clock that jumps backwards would silently lose edits; `Hlc::tick`
 guarantees monotonicity even when the wall clock itself moves backwards. Conflict *detection*
 (as opposed to the deterministic-winner tiebreak) is decided by a per-record `VersionVector`
-(`storage::version_vector`), not the scalar Hlc alone — see `CRYPTOGRAPHY.md` section 8 for why a
+(`storage::version_vector`), not the scalar Hlc alone - see `CRYPTOGRAPHY.md` section 8 for why a
 scalar comparison cannot tell "the peer was simply behind" apart from "a genuine fork," and for
 how `record_conflicts` now preserves the losing side instead of discarding it (`THREAT_MODEL.md`
-S-09, `SECURITY_INVARIANTS.md` INV-109 — both now implemented).
+S-09, `SECURITY_INVARIANTS.md` INV-109 - both now implemented).
 
 Deletions are tombstones (a `deleted` flag; content cleared, row kept), not immediate row
-removal — a deletion racing a sync cannot be resurrected by a concurrent edit, since the
+removal - a deletion racing a sync cannot be resurrected by a concurrent edit, since the
 delete's HLC (and its version vector) advance like any other write. Tombstones are purged once
 past a 90-day retention window (`storage::TOMBSTONE_RETENTION_MS`), opportunistically on unlock
 rather than a background timer.
