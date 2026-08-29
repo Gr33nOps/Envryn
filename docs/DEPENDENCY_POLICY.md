@@ -1,4 +1,4 @@
-# Envryn — Dependency Policy
+# Envryn - Dependency Policy
 
 Envryn stores credentials. A dependency in the Rust core runs with access to the vault master
 key; a dependency in the UI runs inside the WebView. Both are part of the attack surface, and
@@ -11,11 +11,11 @@ neither gets added casually.
 Answer these in the pull request. If the answers are weak, write the code instead.
 
 1. What does it do that we would otherwise write ourselves?
-2. How much code would we write instead? *(Under ~100 lines of non-cryptographic logic — write it.)*
+2. How much code would we write instead? *(Under ~100 lines of non-cryptographic logic - write it.)*
 3. Is it maintained? Recent releases, responsive to advisories.
 4. How many transitive dependencies does it pull in?
 5. Does it contain native code, and does that code process untrusted input?
-6. Does it perform I/O — filesystem, network, process spawning?
+6. Does it perform I/O - filesystem, network, process spawning?
 7. What is its licence? Permissive only (MIT / Apache-2.0 / BSD / ISC).
 8. Could it reach key material or plaintext?
 
@@ -30,7 +30,7 @@ These are blocked in `deny.toml`, and adding one requires amending this document
 
 - **Any HTTP client outside the model-download module.** `reqwest`, `ureq`, `hyper` as a client,
   and anything similar. INV-010 says Envryn makes no outbound connection except model download
-  and LAN sync — that is enforced by the dependency graph, not by discipline.
+  and LAN sync - that is enforced by the dependency graph, not by discipline.
 - **Telemetry, analytics, and crash-reporting SDKs.** Any of them.
 - **Alternative cryptographic implementations.** One implementation per primitive, listed in
   `CRYPTOGRAPHY.md`.
@@ -40,17 +40,17 @@ These are blocked in `deny.toml`, and adding one requires amending this document
 
 ## 3. Requires explicit review
 
-- Anything in `crates/envryn-core` — it runs with key access.
+- Anything in `crates/envryn-core` - it runs with key access.
 - Anything with native code or build scripts that download.
 - Anything that spawns processes or touches the filesystem outside the vault directory.
 - Anything in the inference runtime, tokenizer, model loader, or GPU acceleration path
-  (spec section 26 — large native surfaces processing untrusted input).
+  (spec section 26 - large native surfaces processing untrusted input).
 - Archive and decompression libraries, which have a long history of path-traversal and
   memory-safety bugs and are reached by *downloaded* data.
 
 ## 4. Lower bar
 
-UI-only dependencies that do not touch IPC — component libraries, icons, date formatting.
+UI-only dependencies that do not touch IPC - component libraries, icons, date formatting.
 They still must be permissive-licensed and maintained, and they still ship to users. The bar is
 lower because a WebView dependency cannot reach the VMK; it is not absent, because it can still
 alter what the user sees before they approve something.
@@ -60,7 +60,7 @@ alter what the user sees before they approve something.
 ## 5. Pinning and updates
 
 Both lockfiles (`Cargo.lock`, and the JS lockfile) are committed, including for the library
-crates — reproducible builds matter more here than dependency-resolution flexibility.
+crates - reproducible builds matter more here than dependency-resolution flexibility.
 
 Model checksums and the inference runtime version are pinned in application code, not fetched
 at runtime. A checksum fetched over the network is not a checksum; it is a second thing to
@@ -83,22 +83,22 @@ their own commits so a regression bisects cleanly rather than hiding inside a fe
 
 The `cargo metadata` assertion deserves emphasis: it is what makes AI-INV-001, 002, 004 and 005
 structural. The AI worker cannot receive a key because the types that represent keys are not in
-its dependency graph at all — and CI fails the moment someone changes that, before review.
+its dependency graph at all - and CI fails the moment someone changes that, before review.
 
-**Status as of Phase 4 (M22): every row above is a real, working, manually-run check — none of
+**Status as of Phase 4 (M22): every row above is a real, working, manually-run check - none of
 them run in CI, because no CI pipeline exists in this repo yet** (`ARCHITECTURE.md` section 9).
 Concretely: `deny.toml` exists at the repo root and `cargo deny check` exits 0 (advisories, bans,
 licenses, and sources all pass; the "known vulnerabilities" row is covered by `cargo deny check`'s
 own advisories sub-check rather than a separate `cargo audit` invocation, since both read the
-same RUSTSEC database — `cargo audit` was also run standalone and confirms the same 18
+same RUSTSEC database - `cargo audit` was also run standalone and confirms the same 18
 already-reviewed findings). The Semgrep rule is real and lives at
 `.semgrep/network-egress.yml`, verified to have zero findings against the current codebase and to
 correctly catch synthetic violations of both `ureq`- and `reqwest`-shaped network calls. The
 "AI worker does not depend on the vault crate" row is `cargo tree -p envryn-ai-worker -i
 envryn-core` returning no match, checked by hand, not a scripted assertion with its own exit
-code — a small gap from what this table implies, worth closing if a CI pipeline is ever added.
+code - a small gap from what this table implies, worth closing if a CI pipeline is ever added.
 "No telemetry endpoints in the bundle" has no dedicated check beyond `deny.toml`'s ban on
-`sentry`/`sentry-core` and the `npm`-side dependency review in section 4 — no separate egress
+`sentry`/`sentry-core` and the `npm`-side dependency review in section 4 - no separate egress
 test or string scan exists. `npm audit` was not run in this pass (no npm dependency changed in
 Phase 4).
 
@@ -108,18 +108,18 @@ Phase 4).
 
 Every crate here is expected to be present. Anything else in `crates/envryn-core` is a review point.
 
-**Cryptography** — `argon2`, `chacha20poly1305`, `hkdf`, `sha2`, `hmac`, `ed25519-dalek`,
+**Cryptography** - `argon2`, `chacha20poly1305`, `hkdf`, `sha2`, `hmac`, `ed25519-dalek`,
 `x25519-dalek`, `spake2`, `rustls`, `getrandom`, `zeroize`, `secrecy`
 
-**Storage** — `rusqlite` (bundled SQLCipher), `serde`, `serde_json`
+**Storage** - `rusqlite` (bundled SQLCipher), `serde`, `serde_json`
 
-**Sync** — `tokio`, `rustls`, `rcgen` (self-signed device certificates), an mDNS crate
+**Sync** - `tokio`, `rustls`, `rcgen` (self-signed device certificates), an mDNS crate
 
-**Platform** — `windows` (DPAPI, Hello, display affinity), `jni` (Android Keystore, FLAG_SECURE)
+**Platform** - `windows` (DPAPI, Hello, display affinity), `jni` (Android Keystore, FLAG_SECURE)
 
-**Tauri** — `tauri`, `tauri-plugin-biometric`, `tauri-plugin-barcode-scanner`
+**Tauri** - `tauri`, `tauri-plugin-biometric`, `tauri-plugin-barcode-scanner`
 
-**Contract generation** — `ts-rs` (build-time-only proc-macro/trait crate: derives `TS` and, in
+**Contract generation** - `ts-rs` (build-time-only proc-macro/trait crate: derives `TS` and, in
 `cargo test`, writes `packages/contract/bindings/*.ts` from the real Rust types -- see
 `docs/ARCHITECTURE.md`). Review: (1) generates the TypeScript side of the IPC contract from Rust
 types, which would otherwise be ~30 hand-maintained interfaces, already caught drifting from the

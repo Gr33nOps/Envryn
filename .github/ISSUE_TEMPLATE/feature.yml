@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest a focused improvement to Envryn
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Start with the user problem rather than a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would a good solution feel like?
+      description: Describe the workflow, outcome, or behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried instead?
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Areas this may affect
+      options:
+        - label: Windows
+        - label: Android
+        - label: Device sync
+        - label: Vault format or cryptography
+        - label: Local AI
+        - label: Accessibility
+        - label: Documentation
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy expectation
+      options:
+        - label: I understand that Envryn should remain local-first and should not require a hosted account or cloud vault.
+          required: true

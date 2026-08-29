@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
@@ -43,6 +43,17 @@ requireInvariant(
   packageJson.scripts?.["build:native-ui"]?.includes("patch:android-mdns"),
   "every native build must apply the Android platform hardening patch",
 );
+
+for (const workflow of readdirSync(join(root, ".github", "workflows"), {
+  withFileTypes: true,
+})) {
+  if (!workflow.isFile() || !/\.ya?ml$/i.test(workflow.name)) continue;
+  const source = read(`.github/workflows/${workflow.name}`);
+  requireInvariant(
+    !/(?:^|\n)\s*(?:-\s*)?(?:run:\s*)?npx(?:\s|$)/m.test(source),
+    `${workflow.name} must execute npm-locked binaries directly instead of npx`,
+  );
+}
 
 const patchSource = read(".dev-tools/patch-android-mdns.mjs");
 for (const marker of [
