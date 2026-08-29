@@ -154,7 +154,7 @@ jobs:
         run: gitleaks git --config .gitleaks.toml --redact --no-banner
 
       - name: OSV dependency scan
-        run: osv-scanner scan source -r . --config osv-scanner.toml
+        run: ./.dev-tools/osv-source-scan.ps1
 
   semgrep:
     name: Semgrep
@@ -187,6 +187,8 @@ jobs:
 
       - run: npm run typecheck
 
+      - run: npm run test:docs
+
       - run: npm run test:coverage --workspace @envryn/ui
 
       - run: npm run build
@@ -207,7 +209,9 @@ jobs:
       - run: npm ci --ignore-scripts
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        # Execute the dependency installed and integrity-checked by npm ci.
+        # npx may download an unpinned package when the local binary is absent.
+        run: ./node_modules/.bin/playwright install --with-deps chromium
 
       - run: npm run test:e2e
 

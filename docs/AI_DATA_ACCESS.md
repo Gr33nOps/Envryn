@@ -1,4 +1,4 @@
-# Envryn — AI Data Access
+# Envryn - AI Data Access
 
 This document is the **register of every AI feature and exactly what data it may see.**
 
@@ -12,14 +12,14 @@ has no approved data access, and the gateway will refuse it.
 
 | Level | AI receives | Default? |
 |---|---|---|
-| **0** | No vault data at all. Only the user's typed question. | — |
-| **1** | Metadata only: name, type, project, environment, tags, dates. **No values.** | **Yes — the default** |
+| **0** | No vault data at all. Only the user's typed question. | - |
+| **1** | Metadata only: name, type, project, environment, tags, dates. **No values.** | **Yes - the default** |
 | **2** | One specific secret value, for one operation, for the shortest possible lifetime. | Ask every time |
 | **3** | Several user-selected records, including values. | Ask every time |
 | **Forbidden** | Whole decrypted vault, automatically. | **Never implemented** |
 
 The Forbidden level is not a policy that could be relaxed by a setting. There is no code path
-that constructs it — see `AI_SECURITY.md` for how that is enforced by the type system.
+that constructs it - see `AI_SECURITY.md` for how that is enforced by the type system.
 
 ---
 
@@ -50,11 +50,11 @@ is down -- see `ai_parse_search_intent`'s own note.
 
 | Feature | Level | Input required | Why that input | Plaintext secret? | Persistence | Confirmation |
 |---|---|---|---|---|---|---|
-| **Secret classification** | 2 | The single pasted value | Prefix and shape determine the type; metadata alone cannot identify an unknown credential | **Yes** | None. Cleared after response. | Suggestion only — user accepts the type |
+| **Secret classification** | 2 | The single pasted value | Prefix and shape determine the type; metadata alone cannot identify an unknown credential | **Yes** | None. Cleared after response. | Suggestion only - user accepts the type |
 | **Smart naming** | 2 | The single pasted value + detected provider | Naming convention follows from provider and type | **Yes** | None | User accepts / edits / ignores |
 | **`.env` import** | 1 | Variable **names** only, from the deterministic parser | Classification of `DATABASE_URL` follows from the name; the value adds nothing | **No** | None | Preview shown; nothing saved before Import |
 | **Structured extraction** | 3 | The pasted block the user explicitly submitted | The block *is* the input; fields must be read out of it | **Yes** | None | Full field preview before save |
-| **Natural-language search** | 0 | The search query string | Only the query is parsed into filters | **No** | None | None — read-only; vault engine runs the query |
+| **Natural-language search** | 0 | The search query string | Only the query is parsed into filters | **No** | None | None - read-only; vault engine runs the query |
 
 **Frontend wiring, honestly scoped.** Classification is wired into the create-secret form (a
 "Suggest type" action next to the value field, `apps/ui/src/components/envryn/SecretForm.tsx`)
@@ -111,7 +111,7 @@ frontend flow.
 ## 3. Rules that apply to every row
 
 **Deterministic first (spec section 19).** Classification runs a rules engine before the model.
-Known prefixes and shapes are matched in Rust — instantly, privately, and with no model
+Known prefixes and shapes are matched in Rust - instantly, privately, and with no model
 installed. The AI is the *fallback* for values the rules do not recognise, never the primary path.
 The same principle governs `.env` parsing (a real parser, not the model) and exact duplicate
 detection (keyed HMAC, not the model).
@@ -121,7 +121,7 @@ name, project, environment, and type. Revealing a value is always a separate, ex
 
 **Level 2 and 3 show a data-access indicator (spec section 56).** Before plaintext is handed to the
 model, the user sees what will be analysed and that it stays on the device. Level 0 and 1
-operations show **no** such warning — warning on every metadata operation would train users to
+operations show **no** such warning - warning on every metadata operation would train users to
 click through, which makes the Level 2 warning worthless.
 
 **Partly implemented in the UI.** The Level 3 flow (structured extraction,
@@ -137,7 +137,7 @@ remaining frontend work, not implemented as done.
 
 **Nothing is persisted.** No AI operation writes prompt content, model input, or model output to
 disk. AI *suggestions the user accepted* become ordinary vault data and are stored and synced
-as such (spec section 53) — but as vault records, not as AI history.
+as such (spec section 53) - but as vault records, not as AI history.
 
 **Budgets are enforced by the gateway, not by the model (spec section 48).** Implemented in
 `crates/envryn-core/src/ai/budgets.rs`, checked before anything reaches
@@ -154,7 +154,7 @@ called once a budget is exceeded, not just that the caller sees an error).
 | Max prompt length | ~8,192 tokens, approximated as a byte budget (`MAX_PROMPT_BYTES`) | Implemented as an approximation, not an exact count -- this crate holds no tokenizer until a model is loaded; see `budgets.rs`'s own doc comment for why the approximation is deliberately conservative (never permits *more* than the documented token count) |
 | Max model response | 1,024 tokens | Implemented (`MAX_RESPONSE_TOKENS`), enforced both as the `max_tokens` passed to the engine and as a hard cap the caller does not exceed regardless of what a misbehaving worker claims to have generated |
 
-Exceeding a budget is a clean refusal with an explanation, never a silent truncation — a silently
+Exceeding a budget is a clean refusal with an explanation, never a silent truncation - a silently
 truncated `.env` import would drop credentials without telling anyone.
 
 ---
