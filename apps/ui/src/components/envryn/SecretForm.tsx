@@ -1,10 +1,17 @@
 import * as React from "react";
-import { Eye, EyeOff, Sparkles } from "lucide-react";
+import { Eye, EyeOff, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Field, IconButton, Input, Modal, Select } from "@/components/envryn/ui";
+import { isAndroidClient } from "@/lib/platform";
 import { secretTypes, typeFields, type Environment, type Secret } from "@/lib/envryn-data";
 import { useCreateSecret, useProjects, useUpdateSecret } from "@/lib/use-vault";
-import { KIND_TO_TYPE } from "@/lib/vault-repository";
+import {
+  buildSecretPayload,
+  KIND_TO_TYPE,
+  payloadEditableFields,
+  payloadPrimaryValue,
+  tauriVaultRepository,
+} from "@/lib/vault-repository";
 import * as ipc from "@/lib/ipc";
 import { IpcError } from "@/lib/ipc";
 
@@ -14,6 +21,31 @@ function valueFieldHint(editing: boolean, isNote: boolean): string {
   if (editing) return "Leave blank to keep the value you already stored.";
   if (isNote) return "Write anything you want to keep private.";
   return "Paste the key, password, or token here.";
+}
+
+function saveValidationError({
+  name,
+  editing,
+  type,
+  value,
+  existingPayload,
+  customFields,
+}: Readonly<{
+  name: string;
+  editing: boolean;
+  type: string;
+  value: string;
+  existingPayload: ipc.SecretPayload | null;
+  customFields: Array<{ label: string; value: string }>;
+}>): string | null {
+  if (!name.trim()) return "Add a name so you can find this later.";
+  if (!editing && type !== "Custom" && !value) return "Paste the value you want to store.";
+  if (editing && !existingPayload)
+    return "Wait for the existing secret to finish loading before saving.";
+  if (type === "Custom" && !customFields.some((field) => field.label.trim())) {
+    return "Add at least one named custom field.";
+  }
+  return null;
 }
 
 function ValueFieldLabel({
@@ -57,6 +89,7 @@ export function SecretFormModal({
   secret?: Secret | null | undefined;
   preset?: Partial<Secret> | undefined;
 }>) {
+  const isAndroid = isAndroidClient();
   const projects = useProjects();
   const createSecret = useCreateSecret();
   const updateSecret = useUpdateSecret();
@@ -69,6 +102,11 @@ export function SecretFormModal({
   const [value, setValue] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [tags, setTags] = React.useState("");
+  const [provider, setProvider] = React.useState("");
+  const [fields, setFields] = React.useState<Record<string, string>>({});
+  const [customFields, setCustomFields] = React.useState<{ label: string; value: string }[]>([]);
+  const [existingPayload, setExistingPayload] = React.useState<ipc.SecretPayload | null>(null);
+  const [loadingDetails, setLoadingDetails] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [suggesting, setSuggesting] = React.useState(false);
@@ -76,7 +114,13 @@ export function SecretFormModal({
   const [showValue, setShowValue] = React.useState(false);
 
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setValue("");
+      setExistingPayload(null);
+      setFields({});
+      setCustomFields([]);
+      return;
+    }
     setType(secret?.type ?? preset?.type ?? "API Key");
     setName(secret?.name ?? "");
     setProject(secret?.project ?? preset?.project ?? "");
@@ -87,9 +131,46 @@ export function SecretFormModal({
     setValue("");
     setNotes(secret?.notes ?? "");
     setTags((secret?.tags ?? []).join(", "));
+    setProvider(secret?.provider ?? "");
+    setFields({});
+    setCustomFields(
+      secret?.type === "Custom" || preset?.type === "Custom" ? [{ label: "", value: "" }] : [],
+    );
+    setExistingPayload(null);
+    setLoadingDetails(Boolean(secret));
     setSaving(false);
     setError(null);
     setShowValue(false);
+
+    if (!secret) return;
+    let cancelled = false;
+    void tauriVaultRepository
+      .revealSecretRecord(secret.id)
+      .then((record) => {
+        if (cancelled) return;
+        setType(KIND_TO_TYPE[record.payload.kind]);
+        setName(record.name);
+        setProject(record.project);
+        setEnvironment(record.environment === "Unassigned" ? "—" : record.environment);
+        setNotes(record.notes ?? "");
+        setTags(record.tags.filter((tag) => tag.toLowerCase() !== "imported").join(", "));
+        setProvider(record.provider ?? "");
+        setFields(payloadEditableFields(record.payload));
+        setCustomFields(record.payload.kind === "Custom" ? record.payload.fields : []);
+        setExistingPayload(record.payload);
+        setValue(record.payload.kind === "Note" ? record.payload.body : "");
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : "Could not load this secret.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDetails(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open, secret, preset]);
 
   const extra = typeFields[type] ?? [];
@@ -106,9 +187,10 @@ export function SecretFormModal({
     if (!value.trim()) return;
     setSuggesting(true);
     try {
-      const deterministic = await ipc.classifyDeterministic(value);
+      const deterministic = await ipc.classifyDeterministic(value, name);
       if (deterministic) {
         setType(KIND_TO_TYPE[deterministic.kind]);
+        if (deterministic.provider) setProvider(deterministic.provider);
         toast(
           deterministic.provider
             ? `Looks like a ${deterministic.provider} credential`
@@ -122,7 +204,12 @@ export function SecretFormModal({
         return;
       }
       const result = await ipc.aiClassifyPastedValue(value);
+      if (result.confidence < 0.65) {
+        toast("Couldn't identify this credential reliably. Choose the closest type manually.");
+        return;
+      }
       setType(KIND_TO_TYPE[result.kind]);
+      if (result.provider) setProvider(result.provider);
       toast(
         result.provider
           ? `Local AI: looks like a ${result.provider} credential`
@@ -152,7 +239,7 @@ export function SecretFormModal({
         toast("Enable local AI in Settings to get name suggestions.");
         return;
       }
-      const deterministic = await ipc.classifyDeterministic(value).catch(() => null);
+      const deterministic = await ipc.classifyDeterministic(value, name).catch(() => null);
       const result = await ipc.aiSuggestName(value, deterministic?.provider ?? null);
       setName(result.name);
       toast("Suggested a name based on this value.");
@@ -164,12 +251,16 @@ export function SecretFormModal({
   }
 
   async function save() {
-    if (!name.trim()) {
-      setError("Add a name so you can find this later.");
-      return;
-    }
-    if (!editing && !value) {
-      setError("Paste the value you want to store.");
+    const validationError = saveValidationError({
+      name,
+      editing,
+      type,
+      value,
+      existingPayload,
+      customFields,
+    });
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
@@ -180,6 +271,18 @@ export function SecretFormModal({
 
     setSaving(true);
     try {
+      const storedValue = value || (existingPayload ? payloadPrimaryValue(existingPayload) : "");
+      const payload = buildSecretPayload(
+        type as Secret["type"],
+        storedValue,
+        name,
+        fields,
+        type === "Custom"
+          ? customFields
+              .filter((field) => field.label.trim())
+              .map((field) => ({ label: field.label.trim(), value: field.value }))
+          : undefined,
+      );
       if (editing && secret) {
         await updateSecret.mutateAsync({
           id: secret.id,
@@ -190,6 +293,8 @@ export function SecretFormModal({
             type: type as Secret["type"],
             notes,
             tags: parsedTags,
+            provider,
+            payload,
             // Only send a value when the user actually typed one, so leaving
             // the field blank means "keep the existing secret" rather than
             // silently overwriting it with an empty string.
@@ -205,6 +310,8 @@ export function SecretFormModal({
           value,
           notes,
           tags: parsedTags,
+          provider,
+          payload,
         });
       }
       // Drop the plaintext from component state as soon as it is stored.
@@ -234,7 +341,12 @@ export function SecretFormModal({
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="primary" loading={saving} onClick={() => void save()}>
+          <Button
+            variant="primary"
+            loading={saving || loadingDetails}
+            disabled={loadingDetails}
+            onClick={() => void save()}
+          >
             {editing ? "Save changes" : "Save secret"}
           </Button>
         </>
@@ -243,7 +355,7 @@ export function SecretFormModal({
       <div className="space-y-4">
         <Field
           label={
-            !editing && type !== "Note" && value.trim() ? (
+            !isAndroid && !editing && type !== "Note" && value.trim() ? (
               <span className="flex items-center justify-between">
                 <span>Name</span>
                 <button
@@ -278,7 +390,14 @@ export function SecretFormModal({
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="What kind is it?">
-            <Select value={type} onChange={(event) => setType(event.target.value)}>
+            <Select
+              value={type}
+              onChange={(event) => {
+                setType(event.target.value);
+                setFields({});
+                setCustomFields(event.target.value === "Custom" ? [{ label: "", value: "" }] : []);
+              }}
+            >
               {secretTypes.map((item) => (
                 <option key={item}>{item}</option>
               ))}
@@ -312,7 +431,7 @@ export function SecretFormModal({
         <Field
           label={
             <ValueFieldLabel
-              showSuggestType={!editing && type !== "Note" && Boolean(value.trim())}
+              showSuggestType={!isAndroid && !editing && type !== "Note" && Boolean(value.trim())}
               isNote={type === "Note"}
               suggesting={suggesting}
               onSuggestType={() => void suggestType()}
@@ -320,8 +439,73 @@ export function SecretFormModal({
           }
           hint={valueFieldHint(editing, type === "Note")}
         >
-          {type === "Note" ? (
+          {type === "Custom" ? (
+            <div className="space-y-2">
+              {customFields.map((field, index) => (
+                <div
+                  key={index}
+                  className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_32px] gap-2"
+                >
+                  <Input
+                    value={field.label}
+                    onChange={(event) =>
+                      setCustomFields((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, label: event.target.value } : item,
+                        ),
+                      )
+                    }
+                    placeholder="Field name"
+                    aria-label={`Custom field ${index + 1} name`}
+                  />
+                  <Input
+                    mono
+                    type={showValue ? "text" : "password"}
+                    value={field.value}
+                    onChange={(event) =>
+                      setCustomFields((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, value: event.target.value } : item,
+                        ),
+                      )
+                    }
+                    placeholder="Value"
+                    aria-label={`Custom field ${index + 1} value`}
+                  />
+                  <IconButton
+                    label={`Remove custom field ${index + 1}`}
+                    disabled={customFields.length === 1}
+                    onClick={() =>
+                      setCustomFields((current) =>
+                        current.filter((_, itemIndex) => itemIndex !== index),
+                      )
+                    }
+                  >
+                    <Trash2 />
+                  </IconButton>
+                </div>
+              ))}
+              <div className="flex items-center justify-between">
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    setCustomFields((current) => [...current, { label: "", value: "" }])
+                  }
+                >
+                  <Plus />
+                  Add field
+                </Button>
+                <IconButton
+                  label={showValue ? "Hide values" : "Show values"}
+                  onClick={() => setShowValue((visible) => !visible)}
+                >
+                  {showValue ? <EyeOff /> : <Eye />}
+                </IconButton>
+              </div>
+            </div>
+          ) : type === "Note" ? (
             <textarea
+              aria-label="Note body"
               rows={4}
               value={value}
               onChange={(event) => setValue(event.target.value)}
@@ -350,12 +534,21 @@ export function SecretFormModal({
         </Field>
 
         {extra.length > 0 && (
-          <div className="rounded-md border border-border bg-surface-2/45 p-3">
-            <p className="mb-2 text-[11px] font-medium text-muted-foreground">Optional details</p>
-            <p className="mb-2 text-[10.5px] text-subtle-foreground">
-              Separate fields for {extra.join(", ").toLowerCase()} arrive with the structured form.
-              For now the whole value is stored as one entry.
-            </p>
+          <div className="grid grid-cols-1 gap-3 rounded-md border border-border bg-surface-2/45 p-3 sm:grid-cols-2">
+            {extra.map((label) => (
+              <Field key={label} label={label}>
+                <Input
+                  mono={label !== "Provider"}
+                  type={label === "Passphrase" ? "password" : label === "Port" ? "number" : "text"}
+                  value={label === "Provider" ? provider : (fields[label] ?? "")}
+                  onChange={(event) => {
+                    if (label === "Provider") setProvider(event.target.value);
+                    else setFields((current) => ({ ...current, [label]: event.target.value }));
+                  }}
+                  placeholder={label === "Port" ? "5432" : "Optional"}
+                />
+              </Field>
+            ))}
           </div>
         )}
 

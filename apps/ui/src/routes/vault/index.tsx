@@ -127,8 +127,26 @@ function AllSecrets() {
             items={filters}
             value={filter}
             onChange={setFilter}
-            className="overflow-x-auto px-3.5"
+            className="desktop-category-tabs overflow-x-auto px-3.5"
           />
+          <label className="mobile-category-filter">
+            <span>Secret category</span>
+            <div className="relative">
+              <select
+                aria-label="Filter by secret category"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                className="filter-select"
+              >
+                {filters.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-subtle-foreground" />
+            </div>
+          </label>
           {items.length === 0 ? (
             secrets.length === 0 ? (
               <EmptyState

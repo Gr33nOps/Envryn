@@ -3,6 +3,7 @@ import { Check, CircleAlert, RefreshCw, TriangleAlert } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { toast } from "sonner";
 import * as ipc from "@/lib/ipc";
+import { syncDiscoveredPeer } from "@/lib/sync-peer";
 import { useDevices } from "@/lib/use-vault";
 import { Button, DetailRow, Panel, StatusLabel } from "@/components/envryn/ui";
 
@@ -109,11 +110,10 @@ function Sync() {
 
       for (const device of devices) {
         const peer = found.find((p) => p.device_id === device.deviceId);
-        const address = peer?.addresses[0];
-        if (!peer || !address) continue;
+        if (!peer || peer.addresses.length === 0) continue;
         attempted += 1;
         try {
-          const summary = await ipc.syncNow(address, peer.port);
+          const summary = await syncDiscoveredPeer(peer, ipc.syncNow);
           results[device.id] = "ok";
           totalApplied += summary.records_applied;
           totalConflicts += summary.conflicts;

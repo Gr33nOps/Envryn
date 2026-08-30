@@ -78,9 +78,9 @@ export const secretTypes: SecretType[] = [
 export const typeFields: Record<string, string[]> = {
   "API Key": ["Provider"],
   Environment: ["Variable Name"],
-  Token: ["Expiration"],
+  Token: [],
   Database: ["Host", "Port", "Database", "Username"],
-  SSH: ["Host", "Username", "Passphrase", "Fingerprint"],
+  SSH: ["Host", "Username", "Passphrase"],
   OAuth: ["Client ID"],
   Webhook: ["Endpoint"],
   Note: [],
@@ -107,6 +107,16 @@ export const categories = {
     label: "Secure notes",
     description: "Private text such as recovery codes, instructions, or other sensitive notes.",
     types: ["Note"] as SecretType[],
+  },
+  environments: {
+    label: "Environment variables",
+    description: "Named environment variables used by applications, tools, and deployment systems.",
+    types: ["Environment"] as SecretType[],
+  },
+  custom: {
+    label: "Custom credentials",
+    description: "Credentials with a structure that does not fit another supported type.",
+    types: ["Custom"] as SecretType[],
   },
 };
 

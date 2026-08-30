@@ -2,6 +2,8 @@ import * as React from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Archive,
+  Braces,
+  CodeXml,
   Database,
   FileLock2,
   FolderClosed,
@@ -36,6 +38,8 @@ const moreItems = [
   { categoryId: "databases", label: "Databases", icon: Database },
   { categoryId: "ssh", label: "SSH keys", icon: Terminal },
   { categoryId: "notes", label: "Secure notes", icon: FileLock2 },
+  { categoryId: "environments", label: "Environments", icon: CodeXml },
+  { categoryId: "custom", label: "Custom", icon: Braces },
   { to: "/vault/sync", label: "Sync", icon: RefreshCw },
   { to: "/vault/backup", label: "Backup", icon: Archive },
   { to: "/vault/settings", label: "Settings", icon: Settings },

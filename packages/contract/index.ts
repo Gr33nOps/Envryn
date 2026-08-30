@@ -36,6 +36,7 @@ export type { ConflictSummary } from "./bindings/ConflictSummary";
 export type { DeterministicMatch } from "./bindings/DeterministicMatch";
 
 export type { VaultStatus } from "./bindings/VaultStatus";
+export type { VaultProject } from "./bindings/VaultProject";
 export type { RestoreSummary } from "./bindings/RestoreSummary";
 export type { AppSettings } from "./bindings/AppSettings";
 export type { OwnIdentity } from "./bindings/OwnIdentity";

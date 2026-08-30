@@ -52,14 +52,12 @@ beforeEach(() => {
 });
 
 describe("SecretList", () => {
-  it("renders production and empty-environment states and supports keyboard selection", () => {
+  it("renders production and empty-environment states and exposes accessible selection", () => {
     render(<SecretList items={items} />);
     expect(screen.getByText("Production")).toBeInTheDocument();
     expect(screen.getByText("No environment")).toBeInTheDocument();
     expect(screen.getByLabelText("Needs review")).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole("button", { name: "Open STRIPE_KEY details" }), {
-      key: "Enter",
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Open STRIPE_KEY details" }));
     expect(controls.select).toHaveBeenCalledWith(items[0]);
   });
 

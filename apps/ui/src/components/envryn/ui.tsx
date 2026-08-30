@@ -90,14 +90,18 @@ export function IconButton({
 
 /* ------------------------------------------------------------------- Input */
 
+const FieldLabelContext = React.createContext<string | undefined>(undefined);
+
 export const Input = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean; mono?: boolean }
 >(function Input({ className, invalid, mono, ...props }, ref) {
+  const fieldLabelId = React.useContext(FieldLabelContext);
   return (
     <input
       ref={ref}
       aria-invalid={invalid || undefined}
+      aria-labelledby={props["aria-label"] ? undefined : (props["aria-labelledby"] ?? fieldLabelId)}
       className={cn(
         "h-7 w-full rounded-md border border-input bg-surface px-2 text-[12.5px] text-foreground transition-colors placeholder:text-subtle-foreground hover:border-border-strong focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25 disabled:opacity-45",
         mono && "font-mono text-[12px] tracking-tight",
@@ -131,10 +135,13 @@ export function Field({
   children: React.ReactNode;
   className?: string | undefined;
 }>) {
+  const labelId = React.useId();
   return (
     <div className={cn("space-y-1", className)}>
-      <label className="block text-[11px] font-medium text-muted-foreground">{label}</label>
-      {children}
+      <div id={labelId} className="block text-[11px] font-medium text-muted-foreground">
+        {label}
+      </div>
+      <FieldLabelContext.Provider value={labelId}>{children}</FieldLabelContext.Provider>
       <FieldMessage error={error} hint={hint} />
     </div>
   );
@@ -166,9 +173,13 @@ export function Select({
   children,
   ...props
 }: Readonly<React.SelectHTMLAttributes<HTMLSelectElement>>) {
+  const fieldLabelId = React.useContext(FieldLabelContext);
   return (
     <div className="relative">
       <select
+        aria-labelledby={
+          props["aria-label"] ? undefined : (props["aria-labelledby"] ?? fieldLabelId)
+        }
         className={cn(
           "h-7 w-full appearance-none rounded-md border border-input bg-surface px-2 pr-7 text-[12.5px] text-foreground transition-colors hover:border-border-strong focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25",
           className,
@@ -185,12 +196,15 @@ export function Select({
 export function Switch({
   checked,
   onCheckedChange,
+  label,
 }: Readonly<{
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
+  label: string;
 }>) {
   return (
     <SwitchPrimitive.Root
+      aria-label={label}
       checked={checked}
       onCheckedChange={onCheckedChange}
       className="h-4 w-7 shrink-0 rounded-full border border-border bg-surface-3 transition-colors data-[state=checked]:border-transparent data-[state=checked]:bg-primary"
@@ -338,17 +352,37 @@ export function Modal({
   footer?: React.ReactNode;
   width?: string;
 }>) {
+  // Android WebView can preserve desktop utility transforms inside a portal
+  // even after its responsive styles have switched. Give Android dialogs
+  // their geometry directly so a sheet can never be centred half off-screen.
+  const isAndroid = typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/55 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
         <DialogPrimitive.Content
+          style={
+            isAndroid
+              ? {
+                  top: "auto",
+                  right: 0,
+                  bottom: 0,
+                  left: 0,
+                  width: "100vw",
+                  maxWidth: "100vw",
+                  margin: 0,
+                  transform: "none",
+                  translate: "none",
+                }
+              : undefined
+          }
           className={cn(
             "envryn-modal fixed left-1/2 top-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-98",
             width,
           )}
         >
-          <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-2.5">
+          <div className="envryn-modal-header flex items-start justify-between gap-4 border-b border-border px-4 py-2.5">
             <div>
               <DialogPrimitive.Title className="text-[13px] font-medium">
                 {title}
@@ -369,9 +403,9 @@ export function Modal({
               </button>
             </DialogPrimitive.Close>
           </div>
-          {children && <div className="px-4 py-3.5">{children}</div>}
+          {children && <div className="envryn-modal-body px-4 py-3.5">{children}</div>}
           {footer && (
-            <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-2.5">
+            <div className="envryn-modal-footer flex items-center justify-end gap-2 border-t border-border px-4 py-2.5">
               {footer}
             </div>
           )}

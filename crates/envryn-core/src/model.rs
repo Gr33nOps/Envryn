@@ -329,6 +329,17 @@ pub struct TrustedDevice {
     pub last_sync_ms: Option<i64>,
 }
 
+/// A named project can exist before it contains a secret. The name is stored
+/// only inside an authenticated encrypted blob; the database sees an opaque
+/// project list and cannot reveal repository or customer names while locked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VaultProject {
+    pub id: String,
+    pub name: String,
+    pub created_ms: i64,
+}
+
 /// Validation limits.
 ///
 /// Bounded so that a malformed or hostile import cannot produce a record that

@@ -17,7 +17,7 @@ The gate verifies hardening invariants, scans Git history with Gitleaks, runs th
 With Docker running:
 
 ```powershell
-npm run security:scan-apk -- .\target\release\Envryn_0.1.8_android-universal.apk
+npm run security:scan-apk -- .\target\release\Envryn_0.1.9_android-universal.apk
 ```
 
 This starts MobSF bound only to `127.0.0.1`, uses an ephemeral random API key, stores the JSON report under ignored `target/security/`, and removes the container afterward.

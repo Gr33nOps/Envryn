@@ -1,8 +1,7 @@
 import * as React from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, FolderClosed, Plus } from "lucide-react";
-import { useProjects } from "@/lib/use-vault";
-import { useVaultUI } from "@/components/envryn/vault-context";
+import { useCreateProject, useProjects } from "@/lib/use-vault";
 import { Button, Field, Input, Modal } from "@/components/envryn/ui";
 
 export const Route = createFileRoute("/vault/projects/")({
@@ -16,32 +15,40 @@ function environmentDotClass(name: string): string {
 }
 
 /**
- * There is no `project_create` command -- `useProjects` derives the list
- * entirely from secrets' own `project` field (see that hook's doc comment).
- * "New project" therefore means: name it here, then land on the normal Add
- * Secret form with that name already filled in, so the project exists the
- * same way every other project does -- by holding a secret.
+ * Projects are first-class encrypted vault metadata, so an empty project is
+ * created immediately and can be opened before it contains any secrets.
  */
 function NewProjectModal({
   open,
   onOpenChange,
-  onNamed,
+  onCreated,
 }: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onNamed: (name: string) => void;
+  onCreated: (projectId: string) => void;
 }>) {
   const [name, setName] = React.useState("");
+  const [error, setError] = React.useState<string | null>(null);
+  const createProject = useCreateProject();
 
   React.useEffect(() => {
-    if (open) setName("");
+    if (open) {
+      setName("");
+      setError(null);
+    }
   }, [open]);
 
-  function submit() {
+  async function submit() {
     const trimmed = name.trim();
     if (!trimmed) return;
-    onOpenChange(false);
-    onNamed(trimmed);
+    setError(null);
+    try {
+      const project = await createProject.mutateAsync(trimmed);
+      onOpenChange(false);
+      onCreated(project.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create this project.");
+    }
   }
 
   return (
@@ -53,18 +60,27 @@ function NewProjectModal({
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="primary" disabled={!name.trim()} onClick={submit}>
-            Continue
+          <Button
+            variant="primary"
+            disabled={!name.trim()}
+            loading={createProject.isPending}
+            onClick={() => void submit()}
+          >
+            Create project
           </Button>
         </>
       }
     >
-      <Field label="Project name" hint="You'll add its first secret next.">
+      <Field
+        label="Project name"
+        hint="You can add secrets after the project opens."
+        error={error ?? undefined}
+      >
         <Input
           autoFocus
           value={name}
           onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && submit()}
+          onKeyDown={(event) => event.key === "Enter" && void submit()}
           placeholder="e.g. Rescripto"
         />
       </Field>
@@ -74,7 +90,7 @@ function NewProjectModal({
 
 function Projects() {
   const projects = useProjects();
-  const { openAdd } = useVaultUI();
+  const navigate = useNavigate();
   const [newProjectOpen, setNewProjectOpen] = React.useState(false);
   return (
     <div className="min-h-full bg-background">
@@ -98,7 +114,13 @@ function Projects() {
         <NewProjectModal
           open={newProjectOpen}
           onOpenChange={setNewProjectOpen}
-          onNamed={(name) => openAdd({ project: name })}
+          onCreated={(projectId) =>
+            void navigate({
+              to: "/vault/projects/$projectId",
+              params: { projectId },
+              search: { env: undefined },
+            })
+          }
         />
 
         <div className="mb-3 flex items-center justify-between border-y border-border/70 py-2.5 text-[11.5px] text-muted-foreground">

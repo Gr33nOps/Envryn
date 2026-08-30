@@ -28,7 +28,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use envryn_core::ai::classify::{self, DeterministicMatch};
+use envryn_core::ai::classify;
 use envryn_core::ai::gateway::{AiError, AiGateway};
 use envryn_core::ai::model_download::{self, DownloadProgress, ModelFiles, QWEN2_5_1_5B_INSTRUCT};
 use envryn_core::ai::schemas::{
@@ -43,8 +43,21 @@ use crate::ipc::{internal, invalid, IpcError, IpcResult};
 use crate::settings;
 
 #[tauri::command]
-pub fn classify_deterministic(value: String) -> Option<DeterministicMatch> {
-    classify::classify(&value)
+pub fn classify_deterministic(value: String, name: Option<String>) -> Option<ClassificationOutput> {
+    if let Some(result) = classify::classify(&value) {
+        return Some(ClassificationOutput {
+            kind: result.kind,
+            provider: result.provider.map(str::to_string),
+            confidence: 1.0,
+        });
+    }
+    name.as_deref()
+        .and_then(classify::classify_name)
+        .map(|(kind, provider)| ClassificationOutput {
+            kind,
+            provider: (!provider.is_empty()).then_some(provider),
+            confidence: 0.9,
+        })
 }
 
 impl From<AiError> for IpcError {
@@ -196,10 +209,18 @@ impl Drop for InFlightGuard<'_> {
 }
 
 fn require_enabled(app: &AppHandle) -> IpcResult<()> {
-    if settings::load(app).ai_enabled {
-        Ok(())
-    } else {
-        Err(invalid("Local AI is turned off. Enable it in Settings."))
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        return Err(invalid("Local AI is not available on Android."));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        if settings::load(app).ai_enabled {
+            Ok(())
+        } else {
+            Err(invalid("Local AI is turned off. Enable it in Settings."))
+        }
     }
 }
 

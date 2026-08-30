@@ -2,6 +2,7 @@ import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowRight, Download, KeyRound, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { isAndroidClient } from "@/lib/platform";
 import {
   Button,
   Field,
@@ -297,6 +298,7 @@ function AiSettingsGroup({
         description="Credential classification, naming suggestions, and natural-language search. Off by default."
         control={
           <Switch
+            label="Enable local AI"
             checked={settings?.ai_enabled ?? false}
             onCheckedChange={(checked) => !starting && void toggleAi(checked)}
           />
@@ -340,6 +342,7 @@ const AUTO_LOCK_OPTIONS = [1, 5, 15, 30, 60];
 const CLIPBOARD_OPTIONS = [10, 30, 60, 120];
 
 function Settings() {
+  const isAndroid = isAndroidClient();
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [platformAvailable, setPlatformAvailable] = React.useState(false);
   const [platformEnabled, setPlatformEnabled] = React.useState(false);
@@ -348,7 +351,9 @@ function Settings() {
 
   React.useEffect(() => {
     settingsGet()
-      .then(setSettings)
+      .then((loaded) => {
+        setSettings(loaded);
+      })
       .catch(() => toast("Could not load settings"));
     vaultStatus()
       .then((status) => {
@@ -412,6 +417,7 @@ function Settings() {
                 description="Lock after this long with no keyboard or mouse activity anywhere on this PC."
                 control={
                   <Select
+                    aria-label="Auto-lock the vault"
                     value={String(settings?.auto_lock_minutes ?? 5)}
                     onChange={(event) =>
                       void updateSettings({ auto_lock_minutes: Number(event.target.value) })
@@ -431,6 +437,7 @@ function Settings() {
                 description="Remove secret values from the clipboard after this long."
                 control={
                   <Select
+                    aria-label="Clear clipboard after copying"
                     value={String(settings?.clipboard_clear_seconds ?? 30)}
                     onChange={(event) =>
                       void updateSettings({ clipboard_clear_seconds: Number(event.target.value) })
@@ -455,6 +462,7 @@ function Settings() {
                         {platformEnabled ? "On" : "Off"}
                       </span>
                       <Switch
+                        label="Unlock with this Windows account"
                         checked={platformEnabled}
                         onCheckedChange={(checked) => void togglePlatformProtection(checked)}
                       />
@@ -492,7 +500,7 @@ function Settings() {
               />
             </Group>
 
-            <AiSettingsGroup settings={settings} updateSettings={updateSettings} />
+            {!isAndroid && <AiSettingsGroup settings={settings} updateSettings={updateSettings} />}
 
             <Group
               label="Backup"
@@ -520,7 +528,11 @@ function Settings() {
             <Group label="About">
               <SettingsRow
                 label="Envryn"
-                control={<span className="text-[12px] text-muted-foreground">Version 0.1.8</span>}
+                control={
+                  <span className="text-[12px] text-muted-foreground">
+                    Version {__ENVRYN_VERSION__}
+                  </span>
+                }
               />
               <SettingsRow
                 label="Security documentation"

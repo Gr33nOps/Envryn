@@ -18,6 +18,7 @@ import {
 
 const SECRETS_KEY = ["secrets"] as const;
 const DEVICES_KEY = ["devices"] as const;
+const PROJECTS_KEY = ["projects"] as const;
 
 export function useSecrets() {
   return useQuery({
@@ -57,34 +58,69 @@ export function useRevokeDevice() {
 }
 
 /**
- * Projects, derived from the records that reference them.
- *
- * There is no separate project table: a project exists exactly as long as
- * something is filed under it. That avoids a whole class of drift where the
- * sidebar lists a project the vault no longer contains.
+ * First-class encrypted projects plus legacy names inferred from records.
+ * The merge keeps vaults created by older releases compatible while allowing
+ * a new empty project to exist before its first secret is added.
  */
 export function useProjects(): Project[] {
   const secrets = useSecretList();
+  const explicitProjects = useQuery({
+    queryKey: PROJECTS_KEY,
+    queryFn: () => tauriVaultRepository.listProjects(),
+  }).data;
 
   return React.useMemo(() => {
-    const byProject = new Map<string, Map<Environment, number>>();
+    const byProject = new Map<string, { id: string; environments: Map<Environment, number> }>();
+
+    for (const project of explicitProjects ?? []) {
+      byProject.set(project.name.toLowerCase(), {
+        id: project.id,
+        environments: new Map(),
+      });
+    }
 
     for (const secret of secrets) {
-      const environments = byProject.get(secret.project) ?? new Map();
+      if (!secret.project.trim() || secret.project === "Unassigned") continue;
+      const key = secret.project.toLowerCase();
+      const current = byProject.get(key);
+      const environments = current?.environments ?? new Map();
       environments.set(secret.environment, (environments.get(secret.environment) ?? 0) + 1);
-      byProject.set(secret.project, environments);
+      byProject.set(key, {
+        id: current?.id ?? secret.project.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        environments,
+      });
     }
 
     return [...byProject.entries()]
-      .map(([name, environments]) => ({
-        id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-        name,
+      .map(([key, project]) => ({
+        id: project.id,
+        name:
+          (explicitProjects ?? []).find((item) => item.id === project.id)?.name ??
+          secrets.find((secret) => secret.project.toLowerCase() === key)?.project ??
+          key,
         environments: environmentOrder
-          .filter((env) => environments.has(env))
-          .map((env) => ({ name: env, count: environments.get(env) ?? 0 })),
+          .filter((env) => project.environments.has(env))
+          .map((env) => ({ name: env, count: project.environments.get(env) ?? 0 })),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [secrets]);
+  }, [explicitProjects, secrets]);
+}
+
+export function useCreateProject() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => tauriVaultRepository.createProject(name),
+    onSuccess: () => client.invalidateQueries({ queryKey: PROJECTS_KEY }),
+  });
+}
+
+export function useRenameProject() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      tauriVaultRepository.renameProject(id, name),
+    onSuccess: () => client.invalidateQueries({ queryKey: PROJECTS_KEY }),
+  });
 }
 
 export function useCreateSecret() {
@@ -131,6 +167,7 @@ export function useClearVaultCache() {
   return React.useCallback(() => {
     client.removeQueries({ queryKey: SECRETS_KEY });
     client.removeQueries({ queryKey: DEVICES_KEY });
+    client.removeQueries({ queryKey: PROJECTS_KEY });
   }, [client]);
 }
 

@@ -26,7 +26,9 @@
 
 use std::sync::Mutex;
 
-use envryn_core::model::{NewSecret, SecretId, SecretRecord, SecretSummary, SecretUpdate};
+use envryn_core::model::{
+    NewSecret, SecretId, SecretRecord, SecretSummary, SecretUpdate, VaultProject,
+};
 use envryn_core::vault::Vault;
 use envryn_core::{crypto::kdf, Error};
 use serde::Serialize;
@@ -325,6 +327,25 @@ pub fn secret_list(state: State<'_, VaultState>) -> IpcResult<Vec<SecretSummary>
 #[tauri::command]
 pub fn secret_search(state: State<'_, VaultState>, query: String) -> IpcResult<Vec<SecretSummary>> {
     state.with(|v| v.search(&query))
+}
+
+#[tauri::command]
+pub fn project_list(state: State<'_, VaultState>) -> IpcResult<Vec<VaultProject>> {
+    state.with(|vault| vault.list_projects())
+}
+
+#[tauri::command]
+pub fn project_create(state: State<'_, VaultState>, name: String) -> IpcResult<VaultProject> {
+    state.with(|vault| vault.create_project(&name))
+}
+
+#[tauri::command]
+pub fn project_rename(
+    state: State<'_, VaultState>,
+    id: String,
+    name: String,
+) -> IpcResult<VaultProject> {
+    state.with(|vault| vault.rename_project(&id, &name))
 }
 
 /// Reveal one record's secret material.

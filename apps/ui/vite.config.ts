@@ -4,11 +4,19 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
+
+const tauriConfig = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../../src-tauri/tauri.conf.json", import.meta.url)), "utf8"),
+) as { version: string };
 
 // Envryn is a Tauri desktop/mobile app, not a website: this is a pure
 // client-side SPA with no SSR, no server entry, and no remote asset hosts.
 export default defineConfig({
+  define: {
+    __ENVRYN_VERSION__: JSON.stringify(tauriConfig.version),
+  },
   plugins: [
     // Must precede the React plugin -- it generates routeTree.gen.ts.
     tanstackRouter({ target: "react", autoCodeSplitting: true }),

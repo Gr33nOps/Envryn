@@ -15,7 +15,7 @@ Keep API keys, tokens, database credentials, SSH keys, and secure notes encrypte
 [![Windows](https://img.shields.io/badge/Windows-supported-0a84ff)](#install)
 [![Android](https://img.shields.io/badge/Android-beta-3ddc84)](#install)
 
-[Download](https://github.com/Gr33nOps/Envryn/releases) · [Security](.github/SECURITY.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md)
+[Download](https://github.com/Gr33nOps/Envryn/releases) · [Security](.github/SECURITY.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md) · [Support the project](https://ko-fi.com/zain021xd)
 
 </div>
 
@@ -190,6 +190,10 @@ Envryn is in beta. The core vault, backup, sync protocol, Windows app, and Andro
 - The project has completed an internal security review, not an independent audit.
 
 If you find a bug, [open an issue](https://github.com/Gr33nOps/Envryn/issues/new/choose). If you want to help, read [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Support the project
+
+Envryn is free and open-source software, and it will stay that way. If it is useful to you and you would like to support its continued development, you can [buy me a coffee on Ko-fi](https://ko-fi.com/zain021xd). Donations are entirely optional, but every contribution helps fund testing, security improvements, and future releases.
 
 ## License
 

@@ -116,9 +116,7 @@ describe("KIND_TO_TYPE", () => {
   });
 });
 
-// --- createSecret: exercises toPayload's real branching, including the
-// Custom-kind fallback and the multi-field-kind-becomes-Note behaviour both
-// documented in the source. ---------------------------------------------------
+// --- createSecret: exercises the typed payload branches. ---------------------
 
 function fakeSummary(overrides: Partial<SecretSummary> = {}): SecretSummary {
   return {
@@ -188,7 +186,7 @@ describe("tauriVaultRepository.createSecret", () => {
     );
   });
 
-  it("stores a Database-typed value as a Note, since the form only collects one field", async () => {
+  it("stores a Database-typed value as a structured database payload", async () => {
     secretCreate.mockResolvedValue(fakeSummary({ kind: "Database" }));
     await tauriVaultRepository.createSecret({
       name: "Prod DB",
@@ -200,7 +198,14 @@ describe("tauriVaultRepository.createSecret", () => {
 
     expect(secretCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: { kind: "Note", body: "postgres://user:pass@host/db" },
+        payload: {
+          kind: "Database",
+          host: "",
+          port: 5432,
+          database: "",
+          username: "",
+          password: "postgres://user:pass@host/db",
+        },
       }),
     );
   });
@@ -239,6 +244,18 @@ describe("tauriVaultRepository.createSecret", () => {
     expect(secret.value).toBe("");
   });
 
+  it("does not surface legacy auto-generated imported tags", async () => {
+    secretCreate.mockResolvedValue(fakeSummary({ tags: ["imported", "work", "IMPORTED"] }));
+    const secret = await tauriVaultRepository.createSecret({
+      name: "KEY",
+      type: "API Key",
+      project: "App",
+      environment: "Development",
+      value: "value",
+    } as never);
+    expect(secret.tags).toEqual(["work"]);
+  });
+
   it("throws without ever calling the Rust core when Tauri is unavailable", async () => {
     isTauri.mockReturnValue(false);
     await expect(
@@ -263,6 +280,54 @@ describe("tauriVaultRepository.listSecrets", () => {
     const secrets = await tauriVaultRepository.listSecrets();
     expect(secrets.map((s) => s.id)).toEqual(["a", "b"]);
     expect(secrets[1]?.type).toBe("Database");
+  });
+});
+
+describe("tauriVaultRepository.updateSecret", () => {
+  it("persists every editable metadata field and a structured payload", async () => {
+    secretUpdate.mockResolvedValue(
+      fakeSummary({
+        name: "Production database",
+        kind: "Database",
+        project: "Storefront",
+        environment: "Production",
+        provider: "PostgreSQL",
+        tags: ["backend"],
+        has_notes: true,
+      }),
+    );
+    const payload: SecretPayload = {
+      kind: "Database",
+      host: "db.internal",
+      port: 5432,
+      database: "store",
+      username: "envryn",
+      password: "updated-password",
+    };
+
+    const updated = await tauriVaultRepository.updateSecret("id-1", {
+      name: "Production database",
+      project: "Storefront",
+      environment: "Production",
+      type: "Database",
+      provider: "PostgreSQL",
+      notes: "Rotate quarterly",
+      tags: ["backend"],
+      payload,
+    });
+
+    expect(secretUpdate).toHaveBeenCalledWith("id-1", {
+      name: "Production database",
+      project: "Storefront",
+      environment: "Production",
+      payload,
+      provider: "PostgreSQL",
+      notes: "Rotate quarterly",
+      tags: ["backend"],
+    });
+    expect(updated.environment).toBe("Production");
+    expect(updated.project).toBe("Storefront");
+    expect(updated.provider).toBe("PostgreSQL");
   });
 });
 
