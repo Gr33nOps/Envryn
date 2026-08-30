@@ -1,7 +1,7 @@
 # Envryn - Security Architecture
 
 An audit-scoped summary of Envryn's security architecture, as independently re-verified during
-the 2026-08-26 audit (`AUDIT_REPORT.md`). This is deliberately a synthesis, not a replacement:
+the 2026-08-26 audit (`../audits/AUDIT_REPORT.md`). This is deliberately a synthesis, not a replacement:
 `docs/ARCHITECTURE.md` (general shape), `docs/CRYPTOGRAPHY.md` (normative crypto spec),
 `docs/THREAT_MODEL.md` (assets, boundaries, threat tables), and `docs/SECURITY_INVARIANTS.md`
 (enforcement mechanism per invariant) remain the detailed, normative sources - this document
@@ -72,7 +72,7 @@ independently in the relevant Tauri commands. As of this audit, every password-c
 (vault creation, pairing-join, backup creation, backup restore) also shows a real-time, local
 strength estimate (`apps/ui/src/lib/password-strength.ts`) - advisory only; it does not change the
 enforced minimum. This closes a gap where `THREAT_MODEL.md` V-01 had claimed this existed since
-Phase 1 without the UI actually being built. See `AUDIT_REPORT.md` §4.
+Phase 1 without the UI actually being built. See `../audits/AUDIT_REPORT.md` §4.
 
 ## 3. Record encryption model (normative: `CRYPTOGRAPHY.md` §3)
 
@@ -105,7 +105,7 @@ in full:
 A Semgrep taint rule (borrowed from a web-framework ruleset, not written for this shape of app)
 flagged shape 2 as a potential path-traversal during this audit; tracing every call site by hand
 confirmed no caller-influenced component exists - documented as a false positive in
-`AUDIT_REPORT.md` §3 rather than suppressed silently.
+`../audits/AUDIT_REPORT.md` §3 rather than suppressed silently.
 
 ## 5. Sync trust model (normative: `THREAT_MODEL.md` §7, `CRYPTOGRAPHY.md` §§6-8)
 
@@ -160,4 +160,4 @@ credible, so this one does not.
 
 For enforcement-mechanism detail (which invariant is enforced by the type system vs. a test vs.
 manual review only), see `docs/SECURITY_INVARIANTS.md`. For the full per-area verification this
-audit performed, see `AUDIT_REPORT.md` and `SECURITY_CHECKLIST.md`.
+audit performed, see `../audits/AUDIT_REPORT.md` and `SECURITY_CHECKLIST.md`.

@@ -2,7 +2,7 @@
 
 A scannable, per-area reference. Not a substitute for `docs/THREAT_MODEL.md` or
 `docs/SECURITY_INVARIANTS.md` - those are normative. This is an index into them plus the
-2026-08-26 audit's (`AUDIT_REPORT.md`) independent verification, so a reviewer can see area by
+2026-08-26 audit's (`../audits/AUDIT_REPORT.md`) independent verification, so a reviewer can see area by
 area what is real, what is partial, and what is unverified without reading four documents.
 
 Legend: ✅ verified this audit · 📄 documented + covered by an automated test, not independently
@@ -72,7 +72,7 @@ re-derived here · ⚠️ partial / known limitation · ❌ not implemented · �
 
 ## Import / export / backups
 
-- ✅ `backup_create`/`backup_restore` reviewed directly (§4/§5 of `AUDIT_REPORT.md`). Independent
+- ✅ `backup_create`/`backup_restore` reviewed directly (§4/§5 of `../audits/AUDIT_REPORT.md`). Independent
   keying from the vault's own VMK; restore renames the existing vault file aside with a timestamp
   rather than deleting it.
 - ✅ **Fixed this audit:** backup-password and backup-restore-new-password fields now show the
@@ -112,7 +112,7 @@ re-derived here · ⚠️ partial / known limitation · ❌ not implemented · �
 
 - ✅ GitGuardian's own historical scan of this monitored repo, plus Trivy's + Semgrep's secret
   detectors, all cross-checked manually against the actual flagged content. 3 historical
-  incidents / 2 scanner hits, **all confirmed false positives** - see `AUDIT_REPORT.md` §3 for
+  incidents / 2 scanner hits, **all confirmed false positives** - see `../audits/AUDIT_REPORT.md` §3 for
   the line-by-line trace of each.
 
 ## `unsafe` Rust, panics, race conditions, error handling
@@ -161,10 +161,10 @@ re-derived here · ⚠️ partial / known limitation · ❌ not implemented · �
 - ⚠️ **Finding, fixed this audit:** strength feedback was entirely missing despite
   `THREAT_MODEL.md` V-01 claiming it existed. Now real (`lib/password-strength.ts` + 9 unit
   tests) on all four password-creation screens. The 8-character minimum itself is unchanged - a
-  deliberate scope decision, see `AUDIT_REPORT.md` §7.
+  deliberate scope decision, see `../audits/AUDIT_REPORT.md` §7.
 
 ---
 
-**Not covered by this checklist:** anything in `AUDIT_REPORT.md` §6 (out of this audit's
+**Not covered by this checklist:** anything in `../audits/AUDIT_REPORT.md` §6 (out of this audit's
 reachable scope - needs a second physical device, Developer Mode, or a disruptive firewall test)
 and §7 (needs a human decision or dashboard access this session doesn't have).

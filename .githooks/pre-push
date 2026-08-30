@@ -1,6 +1,6 @@
 #!/bin/sh
 # Full local security gate, run before every push. This is what "the
-# security gate" refers to in AUDIT_REPORT.md and SECURITY_CHECKLIST.md --
+# security gate" refers to in docs/audits/AUDIT_REPORT.md and docs/security/SECURITY_CHECKLIST.md --
 # its job is to catch a regression (AI-generated or otherwise) before it
 # ever reaches the remote, not just rely on CI to notice after the fact.
 #

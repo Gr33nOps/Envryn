@@ -1,11 +1,11 @@
 # Envryn - Installer Configuration Review
 
-> Historical installer review. Use [BETA_RELEASE_CHECKLIST.md](BETA_RELEASE_CHECKLIST.md) and [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md) for the current release gate.
+> Historical installer review. Use the [beta release checklist](../releasing/BETA_RELEASE_CHECKLIST.md) and [release process](../RELEASE_PROCESS.md) for the current release gate.
 
 Static review of what Envryn's two installer types actually do, verified against the pinned
 `tauri-utils 2.9.3` config schema this project builds against (same source used for
-`RELEASE_SIGNING.md`) and the project's own `tauri.conf.json`/`tauri.windows.conf.json`. This is
-the source-level counterpart to `CLEAN_VM_TEST_CHECKLIST.md`, which is where each claim below
+`../releasing/RELEASE_SIGNING.md`) and the project's own `tauri.conf.json`/`tauri.windows.conf.json`. This is
+the source-level counterpart to `../releasing/CLEAN_VM_TEST_CHECKLIST.md`, which is where each claim below
 gets verified by actually running the installers.
 
 ## Install location and elevation
@@ -80,7 +80,7 @@ with no vault ever created. Traced to source, not guessed:
   preferences... deliberately not stored in the vault" (`settings.rs`'s own module doc). No vault
   data, no key material, nothing sealed ever lands here as a result of this code path.
 - Docs and the clean-VM checklist that implied this folder only appears _after_ vault creation
-  were incorrect and have been corrected (`CLEAN_VM_TEST_CHECKLIST.md` §2) - not the code, which
+  were incorrect and have been corrected (`../releasing/CLEAN_VM_TEST_CHECKLIST.md` §2) - not the code, which
   is working as designed.
 
 ## Uninstall behavior
@@ -100,7 +100,7 @@ never be a silent, irreversible way to destroy someone's vault - but it means:
   documented anywhere user-facing; worth a line in the app's own uninstall-adjacent UI or a
   README section before a public release, not fixed in this pass since it's a documentation gap,
   not a code change this review was asked to make.
-- `CLEAN_VM_TEST_CHECKLIST.md` §8 is where this claim gets an actual, dynamic confirmation on a
+- `../releasing/CLEAN_VM_TEST_CHECKLIST.md` §8 is where this claim gets an actual, dynamic confirmation on a
   real machine rather than resting on reading the config alone.
 
 ## What was not changed

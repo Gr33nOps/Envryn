@@ -1,6 +1,6 @@
 # Envryn beta release checklist
 
-Use this checklist for every public beta. The detailed commands and rationale live in [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md).
+Use this checklist for every public beta. The detailed commands and rationale live in the [release process](../RELEASE_PROCESS.md).
 
 ## Release identity
 
