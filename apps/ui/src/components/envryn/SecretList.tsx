@@ -169,7 +169,17 @@ export function SecretList({
             <li key={secret.id}>
               <div
                 title="Select to view details"
+                role="button"
+                tabIndex={0}
+                aria-label={`Select ${secret.name}`}
                 onClick={() => {
+                  setContext(null);
+                  select(active ? null : secret);
+                }}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
                   setContext(null);
                   select(active ? null : secret);
                 }}
