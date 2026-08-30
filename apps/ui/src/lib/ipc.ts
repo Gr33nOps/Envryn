@@ -17,7 +17,6 @@ import type {
   AppSettings,
   ClassificationOutput,
   ConflictSummary,
-  DeterministicMatch,
   DiscoveredPeer,
   EnvNameClassificationOutput,
   ExtractedFieldsOutput,
@@ -36,6 +35,7 @@ import type {
   SyncSummary,
   TrustedDevice,
   VaultStatus,
+  VaultProject,
 } from "@envryn/contract";
 
 export type {
@@ -44,7 +44,6 @@ export type {
   AppSettings,
   ClassificationOutput,
   ConflictSummary,
-  DeterministicMatch,
   DiscoveredPeer,
   EnvNameClassificationOutput,
   EnvNameEntry,
@@ -68,6 +67,7 @@ export type {
   SyncSummary,
   TrustedDevice,
   VaultStatus,
+  VaultProject,
 } from "@envryn/contract";
 
 // --- Errors -----------------------------------------------------------------
@@ -152,6 +152,10 @@ export const secretUpdate = (id: string, update: SecretUpdate) =>
   call<SecretSummary>("secret_update", { id, update });
 export const secretDelete = (id: string) => call<void>("secret_delete", { id });
 export const secretDuplicates = (id: string) => call<string[]>("secret_duplicates", { id });
+export const projectList = () => call<VaultProject[]>("project_list");
+export const projectCreate = (name: string) => call<VaultProject>("project_create", { name });
+export const projectRename = (id: string, name: string) =>
+  call<VaultProject>("project_rename", { id, name });
 
 /**
  * Copy a value to the OS clipboard.
@@ -218,8 +222,8 @@ export const conflictDiscard = (conflictId: string) =>
 // Not AI -- plain known-prefix/shape matching that works with no model
 // installed. See src-tauri/src/ai.rs's module doc for why this one command
 // is not gated by `ai_enabled`.
-export const classifyDeterministic = (value: string) =>
-  call<DeterministicMatch | null>("classify_deterministic", { value });
+export const classifyDeterministic = (value: string, name?: string) =>
+  call<ClassificationOutput | null>("classify_deterministic", { value, name: name || null });
 
 export const aiStatus = () => call<AiStatus>("ai_status");
 export const aiDownloadModel = () => call<void>("ai_download_model");

@@ -4,7 +4,7 @@ import { Plus, ChevronLeft, Pencil, Check, X as XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { type Environment, type Project, type Secret } from "@/lib/envryn-data";
 import * as ipc from "@/lib/ipc";
-import { useProjects, useSecretList, useUpdateSecret } from "@/lib/use-vault";
+import { useProjects, useRenameProject, useSecretList, useUpdateSecret } from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
 import {
@@ -23,7 +23,7 @@ function NotFound({ projectId }: Readonly<{ projectId: string }>) {
     <div className="px-5 py-10">
       <EmptyState
         title="That project no longer exists"
-        body={`Nothing is filed under "${projectId}" any more. A project exists for as long as it holds at least one secret.`}
+        body={`No project with the identifier "${projectId}" is available in this vault.`}
         action={
           <Link to="/vault/projects">
             <Button variant="primary">Back to projects</Button>
@@ -42,13 +42,13 @@ export const Route = createFileRoute("/vault/projects/$projectId")({
 });
 
 /**
- * Renaming a project means bulk-updating the `project` field on every
- * secret filed under it -- there is no project row to rename, per
- * `useProjects`'s own doc comment. The URL's `$projectId` is a slug of the
- * name, so a successful rename also navigates to the new slug.
+ * Renaming updates every filed secret and, for first-class projects, the
+ * encrypted project metadata while preserving its stable route ID. Legacy
+ * projects inferred from records continue to use a name-derived route slug.
  */
 function ProjectTitle({ project, secrets }: Readonly<{ project: Project; secrets: Secret[] }>) {
   const updateSecret = useUpdateSecret();
+  const renameProject = useRenameProject();
   const navigate = useNavigate();
   const [renaming, setRenaming] = React.useState(false);
   const [name, setName] = React.useState(project.name);
@@ -75,12 +75,16 @@ function ProjectTitle({ project, secrets }: Readonly<{ project: Project; secrets
       await Promise.all(
         inProject.map((s) => updateSecret.mutateAsync({ id: s.id, input: { project: trimmed } })),
       );
+      const firstClass = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(project.id);
+      if (firstClass) {
+        await renameProject.mutateAsync({ id: project.id, name: trimmed });
+      }
       setRenaming(false);
       toast(`Renamed to "${trimmed}"`);
       const newId = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       void navigate({
         to: "/vault/projects/$projectId",
-        params: { projectId: newId },
+        params: { projectId: firstClass ? project.id : newId },
         search: { env: undefined },
       });
     } catch (err) {
@@ -141,10 +145,8 @@ function ProjectDetails() {
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState("name");
 
-  // Projects are derived from the records filed under them, so a project
-  // cannot be resolved in a route loader -- it only exists once the record
-  // list has loaded. Resolving here also means deleting the last secret in a
-  // project correctly makes the project disappear.
+  // Projects include encrypted project metadata and legacy names inferred
+  // from records, both of which are loaded through vault queries.
   const project = projects.find((p) => p.id === projectId);
   const [active, setActive] = React.useState<string | null>(env ?? null);
 

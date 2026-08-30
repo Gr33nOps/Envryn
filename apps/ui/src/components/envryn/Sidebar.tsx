@@ -1,6 +1,8 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Archive,
+  Braces,
+  CodeXml,
   Database,
   FileLock2,
   FolderClosed,
@@ -62,6 +64,18 @@ export function navigationGroups(
           label: "Secure notes",
           icon: FileLock2,
           count: countForTypes(categories.notes.types),
+        },
+        {
+          to: "/vault/category/environments",
+          label: "Environments",
+          icon: CodeXml,
+          count: countForTypes(categories.environments.types),
+        },
+        {
+          to: "/vault/category/custom",
+          label: "Custom",
+          icon: Braces,
+          count: countForTypes(categories.custom.types),
         },
       ],
     },

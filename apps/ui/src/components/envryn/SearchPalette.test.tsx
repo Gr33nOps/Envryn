@@ -137,17 +137,24 @@ describe("SearchPalette: typing never triggers a search", () => {
 });
 
 describe("SearchPalette: explicit submission", () => {
-  it("runs the search when the Search button is clicked", async () => {
+  it("runs assisted search when the Interpret button is clicked", async () => {
     open();
     type("production database");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(aiParseSearchIntent).toHaveBeenCalledTimes(1));
     expect(aiParseSearchIntent).toHaveBeenCalledWith("production database");
   });
 
-  it("runs the search when Enter is pressed", async () => {
+  it("opens a local result on Enter without invoking assisted search", async () => {
     open();
     type("production database");
+    fireEvent.keyDown(screen.getByPlaceholderText(/Search your vault/i), { key: "Enter" });
+    expect(aiParseSearchIntent).not.toHaveBeenCalled();
+  });
+
+  it("uses assisted search on Enter when local metadata has no result", async () => {
+    open();
+    type("credentials I used last winter");
     fireEvent.keyDown(screen.getByPlaceholderText(/Search your vault/i), { key: "Enter" });
     await waitFor(() => expect(aiParseSearchIntent).toHaveBeenCalledTimes(1));
   });
@@ -155,7 +162,7 @@ describe("SearchPalette: explicit submission", () => {
   it("disables submission for an empty query", () => {
     open();
     type("   ");
-    expect(screen.getByRole("button", { name: /^Search$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Interpret$/i })).toBeDisabled();
     fireEvent.keyDown(screen.getByPlaceholderText(/Search your vault/i), { key: "Enter" });
     expect(aiParseSearchIntent).not.toHaveBeenCalled();
   });
@@ -165,7 +172,7 @@ describe("SearchPalette: explicit submission", () => {
     aiParseSearchIntent.mockImplementation(() => new Promise((resolve) => (release = resolve)));
     open();
     type("production database");
-    const button = screen.getByRole("button", { name: /Search/i });
+    const button = screen.getByRole("button", { name: /Interpret/i });
     fireEvent.click(button);
     await waitFor(() => expect(screen.getByText(/Searching your vault/i)).toBeInTheDocument());
     fireEvent.click(button);
@@ -194,7 +201,7 @@ describe("SearchPalette: known records are actually found", () => {
     });
     open();
     type("production databases");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText("Primary Postgres URL")).toBeInTheDocument());
     expect(screen.queryByText("Staging Postgres URL")).not.toBeInTheDocument();
     expect(screen.queryByText("Stripe Live Secret Key")).not.toBeInTheDocument();
@@ -210,7 +217,7 @@ describe("SearchPalette: known records are actually found", () => {
     });
     open();
     type("my openrouter key");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText("OpenRouter API Key")).toBeInTheDocument());
     expect(screen.queryByText("Stripe Live Secret Key")).not.toBeInTheDocument();
   });
@@ -225,7 +232,7 @@ describe("SearchPalette: known records are actually found", () => {
     });
     open();
     type("stripe key");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     // "Stripe Live Secret Key" contains both words, but not as the adjacent
     // substring "stripe key" -- a naive includes() check would miss it.
     await waitFor(() => expect(screen.getByText("Stripe Live Secret Key")).toBeInTheDocument());
@@ -237,7 +244,7 @@ describe("SearchPalette: known records are actually found", () => {
     aiParseSearchIntent.mockResolvedValue({ text: "supabase" });
     open();
     type("supabase");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText("Supabase Service Role")).toBeInTheDocument());
   });
 
@@ -251,7 +258,7 @@ describe("SearchPalette: known records are actually found", () => {
     });
     open();
     type("acme-payments");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText("Stripe Live Secret Key")).toBeInTheDocument());
     expect(screen.queryByText("GitHub Deploy Token")).not.toBeInTheDocument();
   });
@@ -269,7 +276,7 @@ describe("SearchPalette: AI failures stay recoverable", () => {
     );
     open();
     type("production database");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText(/not available right now/i)).toBeInTheDocument());
     // The dialog is still mounted and still usable.
     expect(screen.getByPlaceholderText(/Search your vault/i)).toBeInTheDocument();
@@ -279,7 +286,7 @@ describe("SearchPalette: AI failures stay recoverable", () => {
     aiParseSearchIntent.mockRejectedValue(new Error("worker died mid-request"));
     open();
     type("Stripe");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText(/could not be completed/i)).toBeInTheDocument());
     expect(screen.getByText("Stripe Live Secret Key")).toBeInTheDocument();
   });
@@ -288,7 +295,7 @@ describe("SearchPalette: AI failures stay recoverable", () => {
     aiParseSearchIntent.mockRejectedValueOnce(new Error("transient"));
     open();
     type("supabase");
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText(/could not be completed/i)).toBeInTheDocument());
 
     aiParseSearchIntent.mockResolvedValue({
@@ -298,7 +305,7 @@ describe("SearchPalette: AI failures stay recoverable", () => {
       tags: [],
       text: "supabase",
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Search$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Interpret$/i }));
     await waitFor(() => expect(screen.getByText("Supabase Service Role")).toBeInTheDocument());
     expect(screen.queryByText(/could not be completed/i)).not.toBeInTheDocument();
   });

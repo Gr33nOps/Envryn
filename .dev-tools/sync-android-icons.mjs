@@ -22,7 +22,7 @@
  *   node .dev-tools/sync-android-icons.mjs
  */
 
-import { existsSync, copyFileSync, readdirSync } from "node:fs";
+import { existsSync, copyFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 function fail(message) {
@@ -44,19 +44,20 @@ if (!existsSync(genRoot)) {
 }
 
 let copied = 0;
-for (const mipmapDir of readdirSync(srcRoot)) {
-  const srcDir = join(srcRoot, mipmapDir);
-  const genDir = join(genRoot, mipmapDir);
-  // Only copy into densities the generated project actually has -- this
-  // script mirrors existing files, it does not invent new resource dirs.
-  if (!existsSync(genDir)) continue;
+for (const resourceDir of readdirSync(srcRoot)) {
+  const srcDir = join(srcRoot, resourceDir);
+  if (!statSync(srcDir).isDirectory()) continue;
+  const genDir = join(genRoot, resourceDir);
+  // Adaptive icon XML and its color resource may not exist in Tauri's
+  // generated template. Create the resource directory so modern Android
+  // launchers use Envryn's foreground and dark background instead of
+  // silently falling back to the template or a transparent legacy bitmap.
+  mkdirSync(genDir, { recursive: true });
   for (const file of readdirSync(srcDir)) {
     const from = join(srcDir, file);
-    const to = join(genDir, file);
-    if (existsSync(to)) {
-      copyFileSync(from, to);
-      copied += 1;
-    }
+    if (!statSync(from).isFile()) continue;
+    copyFileSync(from, join(genDir, file));
+    copied += 1;
   }
 }
 

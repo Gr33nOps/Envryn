@@ -7,6 +7,8 @@ import { KIND_TO_TYPE, toUiEnvironment } from "@/lib/vault-repository";
 import { cn } from "@/lib/utils";
 import * as ipc from "@/lib/ipc";
 import { IpcError } from "@/lib/ipc";
+import { searchSecrets } from "@/lib/secret-search";
+import { isAndroidClient } from "@/lib/platform";
 
 /**
  * Turn a parsed `SearchFilterOutput` into the same `Secret[]` shape plain
@@ -97,6 +99,7 @@ export function SearchPalette({
   onSelect: (s: Secret) => void;
 }>) {
   const secrets = useSecretList();
+  const isAndroid = isAndroidClient();
   const [q, setQ] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
   const [aiResults, setAiResults] = React.useState<Secret[] | null>(null);
@@ -119,16 +122,7 @@ export function SearchPalette({
     }
   }, [open]);
 
-  const substringResults = React.useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return secrets.slice(0, 6);
-    return secrets.filter((s) =>
-      [s.name, s.project, s.environment, s.type, s.provider ?? "", ...(s.tags ?? [])]
-        .join(" ")
-        .toLowerCase()
-        .includes(t),
-    );
-  }, [q, secrets]);
+  const substringResults = React.useMemo(() => searchSecrets(secrets, q), [q, secrets]);
 
   const trimmed = q.trim();
   const canSearch = trimmed.length > 0 && !aiSearching;
@@ -181,7 +175,20 @@ export function SearchPalette({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/55" />
-        <DialogPrimitive.Content className="search-palette fixed left-1/2 top-[18%] z-50 w-full max-w-[520px] -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-surface shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]">
+        <DialogPrimitive.Content
+          style={
+            isAndroid
+              ? {
+                  inset: 0,
+                  width: "100vw",
+                  maxWidth: "100vw",
+                  transform: "none",
+                  translate: "none",
+                }
+              : undefined
+          }
+          className="search-palette fixed left-1/2 top-[18%] z-50 w-full max-w-[520px] -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-surface shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)]"
+        >
           <DialogPrimitive.Title className="sr-only">Search</DialogPrimitive.Title>
           <div className="flex items-center gap-2 border-b border-border px-3">
             <Search className="size-3.5 shrink-0 text-subtle-foreground" />
@@ -205,17 +212,16 @@ export function SearchPalette({
                 }
                 if (e.key !== "Enter") return;
                 e.preventDefault();
-                // Enter submits the search. Only once a search has run (or
-                // the plain substring list is already showing a highlighted
-                // row for this exact query) does Enter open that row --
-                // otherwise the first Enter would skip searching entirely.
-                if (canSearch && (resultsAreStale || searchedQuery === null)) {
-                  void runSearch();
-                  return;
-                }
+                // Fast local search is the default. Only ask the intent
+                // parser when metadata search genuinely found nothing.
                 if (results[cursor]) {
                   onSelect(results[cursor]);
                   onOpenChange(false);
+                  return;
+                }
+                if (canSearch && (resultsAreStale || searchedQuery === null)) {
+                  void runSearch();
+                  return;
                 }
               }}
               placeholder="Search your vault, then press Enter"
@@ -227,7 +233,7 @@ export function SearchPalette({
               disabled={!canSearch}
               className="shrink-0 rounded-md border border-border bg-surface-2 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted-foreground"
             >
-              {aiSearching ? "Searching..." : "Search"}
+              {aiSearching ? "Interpreting..." : "Interpret"}
             </button>
             <span className="kbd shrink-0">Esc</span>
           </div>
@@ -243,7 +249,7 @@ export function SearchPalette({
               <p className="text-[12.5px]">No results for "{q}"</p>
               <p className="mt-1 text-[11.5px] text-muted-foreground">
                 {resultsAreStale || searchedQuery === null
-                  ? "Press Enter or choose Search to look more thoroughly."
+                  ? "Press Enter or choose Interpret to search by meaning."
                   : "Try another name, project, or tag."}
               </p>
             </div>

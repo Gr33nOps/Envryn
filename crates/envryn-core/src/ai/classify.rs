@@ -194,6 +194,98 @@ pub fn classify(value: &str) -> Option<DeterministicMatch> {
     None
 }
 
+/// Infer a credential kind and likely service name from an environment
+/// variable or configuration key. Unlike value-prefix rules, this does not
+/// need a provider catalogue: semantic suffixes are removed and the remaining
+/// identifier becomes the provider label. This lets uncommon services such as
+/// IGDB and TMDB work without sending the credential value to the model.
+pub fn classify_name(name: &str) -> Option<(SecretKind, String)> {
+    let words: Vec<String> = name
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(|word| word.to_ascii_uppercase())
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+
+    let has = |word: &str| words.iter().any(|candidate| candidate == word);
+    let kind = if has("DATABASE")
+        || has("DB")
+        || has("POSTGRES")
+        || has("MYSQL")
+        || has("MONGODB")
+        || has("REDIS")
+    {
+        SecretKind::Database
+    } else if has("SSH") || (has("PRIVATE") && has("KEY")) {
+        SecretKind::Ssh
+    } else if has("WEBHOOK") {
+        SecretKind::Webhook
+    } else if has("OAUTH") || (has("CLIENT") && (has("ID") || has("SECRET"))) {
+        SecretKind::OAuth
+    } else if has("TOKEN") || has("PAT") || has("BEARER") {
+        SecretKind::Token
+    } else if has("APIKEY") || (has("API") && has("KEY")) || (has("SECRET") && has("KEY")) {
+        SecretKind::ApiKey
+    } else {
+        return None;
+    };
+
+    const SEMANTIC: &[&str] = &[
+        "API",
+        "APIKEY",
+        "KEY",
+        "TOKEN",
+        "SECRET",
+        "CLIENT",
+        "ID",
+        "CLI",
+        "OAUTH",
+        "WEBHOOK",
+        "BEARER",
+        "PAT",
+        "PASSWORD",
+        "PASS",
+        "DATABASE",
+        "DB",
+        "URL",
+        "URI",
+        "HOST",
+        "PORT",
+        "USERNAME",
+        "USER",
+        "PRIVATE",
+        "PUBLIC",
+        "ENV",
+        "MY",
+        "APP",
+        "SERVICE",
+        "CREDENTIAL",
+        "CREDENTIALS",
+    ];
+    let provider_words: Vec<&str> = words
+        .iter()
+        .map(String::as_str)
+        .filter(|word| !SEMANTIC.contains(word))
+        .collect();
+    let provider = provider_words
+        .iter()
+        .map(|word| {
+            if word.len() <= 5 {
+                (*word).to_string()
+            } else {
+                let mut chars = word.chars();
+                let first = chars.next().unwrap_or_default();
+                format!("{}{}", first, chars.as_str().to_ascii_lowercase())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    Some((kind, provider))
+}
+
 fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
     value
         .as_bytes()
@@ -293,6 +385,27 @@ mod tests {
         assert!(classify("my totally ordinary note about lunch").is_none());
         assert!(classify("").is_none());
         assert!(classify("   ").is_none());
+    }
+
+    #[test]
+    fn infers_uncommon_services_from_environment_names() {
+        assert_eq!(
+            classify_name("IGDB_CLIENT_ID"),
+            Some((SecretKind::OAuth, "IGDB".to_string()))
+        );
+        assert_eq!(
+            classify_name("TMDB_API_KEY"),
+            Some((SecretKind::ApiKey, "TMDB".to_string()))
+        );
+        assert_eq!(
+            classify_name("VERCEL_CLI_TOKEN"),
+            Some((SecretKind::Token, "Vercel".to_string()))
+        );
+        assert_eq!(classify_name("ORDINARY_SETTING"), None);
+        assert_eq!(
+            classify_name("DATABASE_URL"),
+            Some((SecretKind::Database, String::new()))
+        );
     }
 
     #[test]

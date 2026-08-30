@@ -827,6 +827,50 @@ fn successive_writes_advance_the_clock() {
     );
 }
 
+// --- Projects ---------------------------------------------------------------
+
+#[test]
+fn empty_projects_persist_without_creating_placeholder_secrets() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    let created = vault.create_project("  Rescripto  ").unwrap();
+    assert_eq!(created.name, "Rescripto");
+    assert_eq!(vault.count().unwrap(), 0);
+    vault.lock();
+
+    let mut vault = Vault::open(&t.path).unwrap();
+    vault.unlock(&pw("p")).unwrap();
+    assert_eq!(vault.list_projects().unwrap(), vec![created]);
+}
+
+#[test]
+fn project_names_are_encrypted_and_case_insensitive_duplicates_are_rejected() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    vault.create_project("DISTINCTIVE_PRIVATE_PROJECT").unwrap();
+    assert!(matches!(
+        vault.create_project("distinctive_private_project"),
+        Err(Error::InvalidInput(_))
+    ));
+    vault.lock();
+
+    let bytes = std::fs::read(&t.path).unwrap();
+    assert!(!bytes
+        .windows(b"DISTINCTIVE_PRIVATE_PROJECT".len())
+        .any(|window| window == b"DISTINCTIVE_PRIVATE_PROJECT"));
+}
+
+#[test]
+fn renaming_a_project_preserves_its_stable_id() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    let created = vault.create_project("Old name").unwrap();
+    let renamed = vault.rename_project(&created.id, "New name").unwrap();
+    assert_eq!(renamed.id, created.id);
+    assert_eq!(renamed.name, "New name");
+    assert_eq!(vault.list_projects().unwrap(), vec![renamed]);
+}
+
 // --- Trusted devices --------------------------------------------------------
 
 #[test]

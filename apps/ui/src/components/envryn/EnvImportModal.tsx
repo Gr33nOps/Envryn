@@ -49,7 +49,7 @@ export function parseEnvText(text: string): { key: string; value: string }[] {
 async function classifyDeterministically(draft: ParsedEntry[]): Promise<string[]> {
   const undetected: string[] = [];
   for (const entry of draft) {
-    const deterministic = await ipc.classifyDeterministic(entry.value).catch(() => null);
+    const deterministic = await ipc.classifyDeterministic(entry.value, entry.key).catch(() => null);
     if (deterministic) {
       entry.type = KIND_TO_TYPE[deterministic.kind];
     } else {
@@ -180,7 +180,10 @@ export function EnvImportModal({
           type: entry.type,
           value: entry.value,
           notes: "",
-          tags: ["imported"],
+          // Import is an action, not a useful permanent category. Do not add
+          // a visible tag to every environment variable unless the user
+          // explicitly chooses one later.
+          tags: [],
         });
         succeeded += 1;
       } catch {
@@ -231,6 +234,7 @@ export function EnvImportModal({
             hint="One KEY=VALUE per line. Comments and blank lines are skipped."
           >
             <textarea
+              aria-label=".env contents"
               autoFocus
               rows={10}
               value={text}
@@ -316,6 +320,7 @@ export function EnvImportModal({
                     </td>
                     <td className="px-2.5 py-1.5">
                       <Select
+                        aria-label={`Type for ${entry.key}`}
                         value={entry.type}
                         onChange={(event) => setType(index, event.target.value as SecretType)}
                         className="h-6.5 text-[11.5px]"

@@ -22,7 +22,7 @@ const MAX_AUTO_LOCK_MINUTES: u32 = 240;
 const MIN_CLIPBOARD_SECONDS: u32 = 5;
 const MAX_CLIPBOARD_SECONDS: u32 = 300;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[serde(default)]
 #[ts(export)]
 pub struct AppSettings {
@@ -85,9 +85,9 @@ pub fn load(app: &tauri::AppHandle) -> AppSettings {
         .clamp()
 }
 
-fn save(app: &tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
+fn save(app: &tauri::AppHandle, settings: &AppSettings) -> Result<(), String> {
     let path = settings_path(app)?;
-    let bytes = serde_json::to_vec_pretty(&settings.clamp()).map_err(|e| e.to_string())?;
+    let bytes = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
@@ -99,6 +99,6 @@ pub fn settings_get(app: tauri::AppHandle) -> AppSettings {
 #[tauri::command]
 pub fn settings_set(app: tauri::AppHandle, settings: AppSettings) -> Result<AppSettings, String> {
     let clamped = settings.clamp();
-    save(&app, clamped)?;
+    save(&app, &clamped)?;
     Ok(clamped)
 }

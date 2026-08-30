@@ -23,7 +23,13 @@ export function LogoMark({
       width={size}
       height={size}
       className={cn("shrink-0 select-none", mono && "brightness-0 invert", className)}
-      style={{ width: size, height: size }}
+      style={{
+        width: size,
+        height: size,
+        boxSizing: "border-box",
+        objectFit: "contain",
+        padding: size <= 28 ? 2 : 0,
+      }}
     />
   );
 }

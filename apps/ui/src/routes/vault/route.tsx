@@ -27,6 +27,7 @@ function TopBar({ onSearch }: Readonly<{ onSearch: () => void }>) {
       <Wordmark className="mobile-wordmark" size={25} />
       <button
         type="button"
+        aria-label="Search the vault"
         className="topbar-search group flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface px-2.5 text-left transition-colors hover:border-border-strong hover:bg-surface-2 md:max-w-[420px]"
         onClick={onSearch}
       >
@@ -50,6 +51,16 @@ function VaultLayout() {
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [extractOpen, setExtractOpen] = React.useState(false);
+
+  // Mutations refresh the list with new objects. Keep an already-open details
+  // panel attached to the refreshed record so saved edits are visible
+  // immediately instead of leaving the stale pre-save summary on screen.
+  React.useEffect(() => {
+    setSelected((current) => {
+      if (!current) return null;
+      return secrets.find((secret) => secret.id === current.id) ?? current;
+    });
+  }, [secrets]);
 
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();

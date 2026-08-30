@@ -19,7 +19,7 @@ use crate::crypto::keys::{KeySlot, SymmetricKey, VaultKeys, VaultMasterKey, KEY_
 use crate::error::{Error, Result};
 use crate::model::{
     self, Environment, NewSecret, SecretId, SecretPayload, SecretRecord, SecretSummary,
-    SecretUpdate, TrustedDevice,
+    SecretUpdate, TrustedDevice, VaultProject,
 };
 use crate::platform;
 use crate::storage::{meta_keys, Hlc, Store, StoredRecord, RECORD_VERSION};
@@ -264,6 +264,83 @@ impl Vault {
 
     pub fn count(&self) -> Result<usize> {
         Ok(self.state()?.index.len())
+    }
+
+    /// List explicitly created projects. Projects inferred from existing
+    /// secret records are merged by the UI so older vaults need no migration.
+    pub fn list_projects(&self) -> Result<Vec<VaultProject>> {
+        let state = self.state()?;
+        let Some(bytes) = self.store.get_meta(meta_keys::PROJECTS)? else {
+            return Ok(Vec::new());
+        };
+        let sealed = Sealed::from_bytes(bytes)?;
+        let plaintext = aead::open(&state.keys.record, &sealed, projects_aad())?;
+        Ok(serde_json::from_slice(&plaintext)?)
+    }
+
+    /// Create a project independently of secrets, allowing an empty project
+    /// to appear immediately instead of redirecting into the secret form.
+    pub fn create_project(&mut self, name: &str) -> Result<VaultProject> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(Error::InvalidInput("a project needs a name"));
+        }
+        if trimmed.len() > model::limits::MAX_PROJECT {
+            return Err(Error::InvalidInput("project name is too long"));
+        }
+        let mut projects = self.list_projects()?;
+        if projects
+            .iter()
+            .any(|project| project.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Err(Error::InvalidInput(
+                "a project with that name already exists",
+            ));
+        }
+        let project = VaultProject {
+            id: uuid::Uuid::now_v7().to_string(),
+            name: trimmed.to_string(),
+            created_ms: now_ms(),
+        };
+        projects.push(project.clone());
+        projects.sort_by_key(|project| project.name.to_lowercase());
+        self.save_projects(&projects)?;
+        Ok(project)
+    }
+
+    /// Rename first-class project metadata while preserving its stable ID.
+    pub fn rename_project(&mut self, id: &str, name: &str) -> Result<VaultProject> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            return Err(Error::InvalidInput("a project needs a name"));
+        }
+        if trimmed.len() > model::limits::MAX_PROJECT {
+            return Err(Error::InvalidInput("project name is too long"));
+        }
+        let mut projects = self.list_projects()?;
+        if projects
+            .iter()
+            .any(|project| project.id != id && project.name.eq_ignore_ascii_case(trimmed))
+        {
+            return Err(Error::InvalidInput(
+                "a project with that name already exists",
+            ));
+        }
+        let project = projects
+            .iter_mut()
+            .find(|project| project.id == id)
+            .ok_or(Error::NotFound)?;
+        project.name = trimmed.to_string();
+        let renamed = project.clone();
+        projects.sort_by_key(|project| project.name.to_lowercase());
+        self.save_projects(&projects)?;
+        Ok(renamed)
+    }
+
+    fn save_projects(&self, projects: &[VaultProject]) -> Result<()> {
+        let plaintext = Zeroizing::new(serde_json::to_vec(projects)?);
+        let sealed = aead::seal(&self.state()?.keys.record, &plaintext, projects_aad())?;
+        self.store.set_meta(meta_keys::PROJECTS, sealed.as_bytes())
     }
 
     /// Search the in-memory index.
@@ -931,6 +1008,10 @@ fn open_record(stored: &StoredRecord, record_key: &SymmetricKey) -> Result<Secre
 /// row undetected.
 fn trusted_device_aad(device_id: &str) -> Vec<u8> {
     format!("envryn/v1/trusted-device/{device_id}").into_bytes()
+}
+
+fn projects_aad() -> &'static [u8] {
+    b"envryn/v1/projects"
 }
 
 fn seal_trusted_device(device: &TrustedDevice, keys: &VaultKeys) -> Result<Sealed> {

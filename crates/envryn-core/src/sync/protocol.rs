@@ -618,6 +618,87 @@ mod tests {
         assert_eq!(vault_a.list_conflicts(shared_id).unwrap().len(), 0);
     }
 
+    /// Release-scale regression: a full 1,000-record vault must converge over
+    /// the real mutual-TLS protocol without truncation, duplicates, or a
+    /// second full transfer. Timings are printed for the Windows QA report but
+    /// are not asserted because CI host performance varies considerably.
+    #[test]
+    fn one_thousand_records_converge_and_idle_resync_is_empty() {
+        use crate::sync::identity::DeviceIdentity;
+
+        let dir = tempfile::tempdir().unwrap();
+        let id_a = DeviceIdentity::load_or_create(&dir.path().join("id_a.json")).unwrap();
+        let id_b = DeviceIdentity::load_or_create(&dir.path().join("id_b.json")).unwrap();
+        let path_a = dir.path().join("a.db");
+        let path_b = dir.path().join("b.db");
+
+        let mut vault_a = Vault::create(&path_a, &pw("pw-a"), fast_kdf()).unwrap();
+        vault_a.set_local_device_id(1).unwrap();
+        let shared_vmk = vault_a.export_vmk_for_pairing(&pw("pw-a")).unwrap();
+        let mut vault_b =
+            Vault::create_with_vmk(&path_b, &pw("pw-b"), fast_kdf(), shared_vmk).unwrap();
+        vault_b.set_local_device_id(2).unwrap();
+
+        let create_started = std::time::Instant::now();
+        for index in 0..1_000 {
+            vault_a
+                .create_secret(NewSecret {
+                    name: format!("PERF_SECRET_{index:04}"),
+                    project: format!("Project {:02}", index % 50),
+                    environment: match index % 3 {
+                        0 => Environment::Development,
+                        1 => Environment::Staging,
+                        _ => Environment::Production,
+                    },
+                    payload: SecretPayload::ApiKey {
+                        value: format!("FAKE_PERFORMANCE_VALUE_{index:04}"),
+                    },
+                    notes: Some(format!("Unicode QA note {index}: café 東京")),
+                    tags: vec!["qa".into(), format!("batch-{}", index % 10)],
+                    provider: Some("Performance QA".into()),
+                })
+                .unwrap();
+        }
+        eprintln!("created 1000 records in {:?}", create_started.elapsed());
+        drop(vault_a);
+        drop(vault_b);
+
+        let sync_started = std::time::Instant::now();
+        let (first_a, first_b) = sync_once(&id_a, &id_b, &path_a, &path_b);
+        let first_elapsed = sync_started.elapsed();
+        eprintln!("synced 1000 records over mutual TLS in {first_elapsed:?}");
+        assert_eq!(first_a.applied, 0);
+        assert_eq!(first_b.applied, 1_000);
+        assert_eq!(first_a.conflicts + first_b.conflicts, 0);
+
+        let mut vault_b = Vault::open(&path_b).unwrap();
+        vault_b.unlock(&pw("pw-b")).unwrap();
+        let summaries = vault_b.list().unwrap();
+        assert_eq!(summaries.len(), 1_000);
+        let sample = summaries
+            .iter()
+            .find(|record| record.name == "PERF_SECRET_0777")
+            .unwrap();
+        let revealed = vault_b.reveal(sample.id).unwrap();
+        assert_eq!(
+            revealed.payload,
+            SecretPayload::ApiKey {
+                value: "FAKE_PERFORMANCE_VALUE_0777".into()
+            }
+        );
+        assert_eq!(revealed.project, "Project 27");
+        assert_eq!(
+            revealed.notes.as_deref(),
+            Some("Unicode QA note 777: café 東京")
+        );
+        drop(vault_b);
+
+        let second_started = std::time::Instant::now();
+        let (second_a, second_b) = sync_once(&id_a, &id_b, &path_a, &path_b);
+        eprintln!("idle resync completed in {:?}", second_started.elapsed());
+        assert_eq!((second_a.applied, second_b.applied), (0, 0));
+    }
+
     /// A second sync with nothing new to exchange must apply zero records --
     /// otherwise every idle sync would re-transfer the whole vault forever.
     #[test]

@@ -188,6 +188,9 @@ pub mod meta_keys {
     /// means "off," matching `PLATFORM_KEY_BLOB`'s own presence-as-boolean
     /// convention.
     pub const HELLO_GATE_ENABLED: &str = "hello_gate_enabled";
+    /// One sealed JSON array of `VaultProject` values. Project names remain
+    /// encrypted even though `vault_meta` itself is readable while locked.
+    pub const PROJECTS: &str = "sealed_projects_v1";
 }
 
 #[cfg(test)]

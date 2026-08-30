@@ -1,9 +1,10 @@
-import type { Device, Environment, Secret, SecretType } from "./envryn-data";
+import type { Device, Environment, Project, Secret, SecretType } from "./envryn-data";
 import * as ipc from "./ipc";
 
 export type CreateSecretInput = Omit<Secret, "id" | "created" | "updated"> & {
-  /** Only meaningful when `type` is "Custom" -- see `toPayload`. */
+  /** Only meaningful when `type` is "Custom". */
   customFields?: { label: string; value: string }[];
+  payload?: ipc.SecretPayload;
 };
 export type UpdateSecretInput = Partial<CreateSecretInput>;
 
@@ -19,7 +20,11 @@ export interface VaultRepository {
   listSecrets(): Promise<Secret[]>;
   searchSecrets(query: string): Promise<Secret[]>;
   revealSecret(id: string): Promise<string>;
+  revealSecretRecord(id: string): Promise<ipc.SecretRecord>;
   listDevices(): Promise<Device[]>;
+  listProjects(): Promise<Project[]>;
+  createProject(name: string): Promise<Project>;
+  renameProject(id: string, name: string): Promise<Project>;
   renameDevice(deviceId: string, name: string): Promise<Device>;
   revokeDevice(deviceId: string): Promise<void>;
   createSecret(input: CreateSecretInput): Promise<Secret>;
@@ -82,13 +87,13 @@ const toRustEnvironment = (env: Environment): ipc.RustEnvironment =>
  * labeled pairs (`StructuredExtractModal.tsx`). The plain create/edit form
  * only ever collects one value, so without `customFields` a Custom secret
  * becomes one field named "Value" -- a real fix, not a new gap: `TYPE_TO_KIND`
- * already mapped "Custom" to the `Custom` kind, but this function had no
- * `case "Custom"` arm at all, so it silently fell through to `Note` instead.
+ * Every supported UI type maps to its native structured Rust payload.
  */
-function toPayload(
+export function buildSecretPayload(
   type: SecretType,
   value: string,
   name: string,
+  fields: Record<string, string> = {},
   customFields?: { label: string; value: string }[],
 ): ipc.SecretPayload {
   const kind = TYPE_TO_KIND[type];
@@ -98,7 +103,36 @@ function toPayload(
     case "Token":
       return { kind: "Token", value };
     case "EnvVar":
-      return { kind: "EnvVar", key: name, value };
+      return { kind: "EnvVar", key: fields["Variable Name"]?.trim() || name, value };
+    case "Database":
+      return {
+        kind: "Database",
+        host: fields["Host"]?.trim() ?? "",
+        port: Number.parseInt(fields["Port"] ?? "", 10) || 5432,
+        database: fields["Database"]?.trim() ?? "",
+        username: fields["Username"]?.trim() ?? "",
+        password: value,
+      };
+    case "Ssh":
+      return {
+        kind: "Ssh",
+        private_key: value,
+        passphrase: fields["Passphrase"]?.trim() || null,
+        host: fields["Host"]?.trim() || null,
+        username: fields["Username"]?.trim() || null,
+      };
+    case "OAuth":
+      return {
+        kind: "OAuth",
+        client_id: fields["Client ID"]?.trim() ?? "",
+        client_secret: value,
+      };
+    case "Webhook":
+      return {
+        kind: "Webhook",
+        endpoint: fields["Endpoint"]?.trim() ?? "",
+        secret: value,
+      };
     case "Custom":
       return {
         kind: "Custom",
@@ -109,6 +143,57 @@ function toPayload(
       return { kind: "Note", body: value };
     default:
       return { kind: "Note", body: value };
+  }
+}
+
+export function payloadPrimaryValue(payload: ipc.SecretPayload): string {
+  switch (payload.kind) {
+    case "ApiKey":
+    case "Token":
+    case "EnvVar":
+      return payload.value;
+    case "Database":
+      return payload.password;
+    case "Ssh":
+      return payload.private_key;
+    case "OAuth":
+      return payload.client_secret;
+    case "Webhook":
+      return payload.secret;
+    case "Note":
+      return payload.body;
+    case "Custom":
+      return payload.fields[0]?.value ?? "";
+  }
+}
+
+export function payloadEditableFields(payload: ipc.SecretPayload): Record<string, string> {
+  switch (payload.kind) {
+    case "ApiKey":
+    case "Token":
+    case "Note":
+      return {};
+    case "Custom":
+      return Object.fromEntries(payload.fields.map((field) => [field.label, field.value]));
+    case "EnvVar":
+      return { "Variable Name": payload.key };
+    case "Database":
+      return {
+        Host: payload.host,
+        Port: String(payload.port),
+        Database: payload.database,
+        Username: payload.username,
+      };
+    case "Ssh":
+      return {
+        Host: payload.host ?? "",
+        Username: payload.username ?? "",
+        Passphrase: payload.passphrase ?? "",
+      };
+    case "OAuth":
+      return { "Client ID": payload.client_id };
+    case "Webhook":
+      return { Endpoint: payload.endpoint };
   }
 }
 
@@ -173,7 +258,10 @@ function toSecret(summary: ipc.SecretSummary): Secret {
     environment: toUiEnvironment(summary.environment),
     updated: relative(summary.updated_ms),
     created: ABSOLUTE.format(new Date(summary.created_ms)),
-    tags: summary.tags,
+    // Older environment imports automatically added a permanent `imported`
+    // tag to every entry. It was provenance noise rather than a user-chosen
+    // category, so do not keep surfacing that legacy implementation detail.
+    tags: summary.tags.filter((tag) => tag.toLowerCase() !== "imported"),
     ...(summary.provider ? { provider: summary.provider } : {}),
     value: "",
   };
@@ -210,6 +298,10 @@ function toDevice(device: ipc.TrustedDevice): Device {
   };
 }
 
+function toProject(project: ipc.VaultProject): Project {
+  return { id: project.id, name: project.name, environments: [] };
+}
+
 function requireTauri(): void {
   if (!ipc.isTauri()) {
     throw new ipc.IpcError(
@@ -236,9 +328,29 @@ export const tauriVaultRepository: VaultRepository = {
     return payloadToDisplay(record.payload);
   },
 
+  async revealSecretRecord(id) {
+    requireTauri();
+    return ipc.secretReveal(id);
+  },
+
   async listDevices() {
     requireTauri();
     return (await ipc.trustedDeviceList()).map(toDevice);
+  },
+
+  async listProjects() {
+    requireTauri();
+    return (await ipc.projectList()).map(toProject);
+  },
+
+  async createProject(name) {
+    requireTauri();
+    return toProject(await ipc.projectCreate(name));
+  },
+
+  async renameProject(id, name) {
+    requireTauri();
+    return toProject(await ipc.projectRename(id, name));
   },
 
   async renameDevice(deviceId, name) {
@@ -257,10 +369,12 @@ export const tauriVaultRepository: VaultRepository = {
       name: input.name,
       project: input.project,
       environment: toRustEnvironment(input.environment),
-      payload: toPayload(input.type, input.value, input.name, input.customFields),
+      payload:
+        input.payload ??
+        buildSecretPayload(input.type, input.value, input.name, {}, input.customFields),
       notes: input.notes ?? null,
       tags: input.tags ?? [],
-      provider: input.provider ?? null,
+      provider: input.provider?.trim() || null,
     });
     return toSecret(summary);
   },
@@ -273,12 +387,19 @@ export const tauriVaultRepository: VaultRepository = {
     if (input.environment !== undefined) {
       update.environment = toRustEnvironment(input.environment);
     }
-    if (input.value !== undefined && input.type !== undefined) {
-      update.payload = toPayload(input.type, input.value, input.name ?? "", input.customFields);
+    if (input.payload !== undefined) update.payload = input.payload;
+    else if (input.value !== undefined && input.type !== undefined) {
+      update.payload = buildSecretPayload(
+        input.type,
+        input.value,
+        input.name ?? "",
+        {},
+        input.customFields,
+      );
     }
     if (input.notes !== undefined) update.notes = input.notes;
     if (input.tags !== undefined) update.tags = input.tags;
-    if (input.provider !== undefined) update.provider = input.provider;
+    if (input.provider !== undefined) update.provider = input.provider.trim() || null;
 
     return toSecret(await ipc.secretUpdate(id, update));
   },

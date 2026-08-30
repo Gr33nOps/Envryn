@@ -1,12 +1,21 @@
 import * as React from "react";
 import {
   AlertTriangle,
+  Bot,
   Braces,
+  Cloud,
+  CloudCog,
+  CodeXml,
   Copy,
+  CreditCard,
   Database,
   Eye,
   FileLock2,
+  Film,
+  GitBranch,
+  Globe2,
   KeyRound,
+  MessageSquare,
   MoreHorizontal,
   Terminal,
   Webhook,
@@ -34,6 +43,37 @@ const typeIcons: Partial<Record<Secret["type"], LucideIcon>> = {
   Note: FileLock2,
   Custom: Braces,
 };
+
+const providerIcons: Array<{ terms: string[]; icon: LucideIcon }> = [
+  {
+    terms: ["postgres", "mysql", "mariadb", "mongo", "redis", "database", "supabase"],
+    icon: Database,
+  },
+  { terms: ["aws", "azure", "google cloud", "cloudflare", "digitalocean"], icon: Cloud },
+  { terms: ["vercel", "netlify", "render", "railway", "cli"], icon: CloudCog },
+  { terms: ["github", "gitlab", "bitbucket"], icon: GitBranch },
+  {
+    terms: ["openai", "anthropic", "groq", "perplexity", "hugging face", "replicate", "ai"],
+    icon: Bot,
+  },
+  { terms: ["stripe", "paypal", "payment"], icon: CreditCard },
+  { terms: ["slack", "discord", "telegram", "twilio"], icon: MessageSquare },
+  { terms: ["igdb", "tmdb", "movie", "game"], icon: Film },
+  { terms: ["api", "web", "http"], icon: Globe2 },
+  { terms: ["environment", "env", "config"], icon: CodeXml },
+];
+
+function iconForSecret(secret: Pick<Secret, "name" | "provider" | "type">): LucideIcon {
+  const searchable = `${secret.provider ?? ""} ${secret.name}`.toLowerCase();
+  const words = searchable.split(/[^a-z0-9]+/).filter(Boolean);
+  return (
+    providerIcons.find(({ terms }) =>
+      terms.some((term) => (term.length <= 3 ? words.includes(term) : searchable.includes(term))),
+    )?.icon ??
+    typeIcons[secret.type] ??
+    Braces
+  );
+}
 
 function environmentTone(environment: Secret["environment"]) {
   if (environment === "Production") return "warning" as const;
@@ -124,13 +164,10 @@ export function SecretList({
       <ul>
         {items.map((secret) => {
           const active = selected?.id === secret.id;
-          const Icon = typeIcons[secret.type] ?? Braces;
+          const Icon = iconForSecret(secret);
           return (
             <li key={secret.id}>
               <div
-                role="button"
-                tabIndex={0}
-                aria-label={`Open ${secret.name} details`}
                 title="Select to view details"
                 onClick={() => {
                   setContext(null);
@@ -138,13 +175,18 @@ export function SecretList({
                 }}
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  setContext({ secret, x: event.clientX, y: event.clientY });
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    select(active ? null : secret);
+                  // A coordinate-positioned desktop menu is easy to clip on
+                  // a touch screen. Opening the detail surface is the useful
+                  // mobile equivalent of a long press.
+                  const compactViewport =
+                    typeof window.matchMedia === "function" &&
+                    window.matchMedia("(max-width: 767px)").matches;
+                  if (compactViewport) {
+                    setContext(null);
+                    select(secret);
+                    return;
                   }
+                  setContext({ secret, x: event.clientX, y: event.clientY });
                 }}
                 className={cn(
                   "secret-row group relative grid min-h-[64px] cursor-pointer items-center gap-3 border-b border-border/55 px-3.5 text-[12.5px] transition-colors last:border-0",
@@ -153,7 +195,16 @@ export function SecretList({
                 style={{ gridTemplateColumns: gridCols }}
               >
                 {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" />}
-                <div className="flex min-w-0 items-center gap-2.5">
+                <button
+                  type="button"
+                  aria-label={`Open ${secret.name} details`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setContext(null);
+                    select(active ? null : secret);
+                  }}
+                  className="flex min-w-0 items-center gap-2.5 text-left"
+                >
                   <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
                     <Icon className="size-3.5" />
                   </span>
@@ -178,7 +229,7 @@ export function SecretList({
                       <AlertTriangle className="size-3.5 shrink-0 text-warning" />
                     </span>
                   )}
-                </div>
+                </button>
                 {columns.map((column) => (
                   <div
                     key={column}

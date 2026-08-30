@@ -70,6 +70,9 @@ fn build_mock_app() -> App<MockRuntime> {
             ipc::vault_lock,
             ipc::secret_list,
             ipc::secret_search,
+            ipc::project_list,
+            ipc::project_create,
+            ipc::project_rename,
             ipc::secret_reveal,
             ipc::secret_create,
             ipc::secret_update,
@@ -184,6 +187,32 @@ fn classify_deterministic_dispatches_with_no_state_at_all() {
     )
     .expect("classify_deterministic succeeds");
     assert!(miss.is_null(), "an unrecognized value must match nothing");
+}
+
+#[test]
+fn project_create_then_list_round_trips_without_a_placeholder_secret() {
+    let (app, _cleanup) = test_app_with_unlocked_vault();
+    let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .expect("mock webview builds");
+
+    let created = call(
+        &webview,
+        "project_create",
+        serde_json::json!({ "name": "Mobile API" }),
+    )
+    .expect("project_create succeeds");
+    assert_eq!(created["name"], "Mobile API");
+    assert!(created["id"].as_str().is_some_and(|id| !id.is_empty()));
+
+    let projects =
+        call(&webview, "project_list", serde_json::json!({})).expect("project_list succeeds");
+    assert_eq!(projects.as_array().map(Vec::len), Some(1));
+    assert_eq!(projects[0]["name"], "Mobile API");
+
+    let secrets =
+        call(&webview, "secret_list", serde_json::json!({})).expect("secret_list succeeds");
+    assert_eq!(secrets.as_array().map(Vec::len), Some(0));
 }
 
 #[test]

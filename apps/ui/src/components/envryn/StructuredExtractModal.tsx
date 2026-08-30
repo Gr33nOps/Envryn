@@ -183,6 +183,7 @@ export function StructuredExtractModal({
             error={error ?? undefined}
           >
             <textarea
+              aria-label="Text to extract from"
               autoFocus
               rows={8}
               value={block}
@@ -238,12 +239,14 @@ export function StructuredExtractModal({
             {fields.map((field) => (
               <div key={field.id} className="flex items-center gap-1.5">
                 <Input
+                  aria-label={`Field ${field.id} label`}
                   value={field.label}
                   onChange={(event) => updateField(field.id, { label: event.target.value })}
                   placeholder="Label"
                   className="w-[130px] shrink-0"
                 />
                 <Input
+                  aria-label={`Field ${field.id} value`}
                   mono
                   value={field.value}
                   onChange={(event) => updateField(field.id, { value: event.target.value })}
