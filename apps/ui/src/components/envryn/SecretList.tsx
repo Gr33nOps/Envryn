@@ -169,20 +169,6 @@ export function SecretList({
             <li key={secret.id}>
               <div
                 title="Select to view details"
-                role="button"
-                tabIndex={0}
-                aria-label={`Select ${secret.name}`}
-                onClick={() => {
-                  setContext(null);
-                  select(active ? null : secret);
-                }}
-                onKeyDown={(event) => {
-                  if (event.target !== event.currentTarget) return;
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  setContext(null);
-                  select(active ? null : secret);
-                }}
                 onContextMenu={(event) => {
                   event.preventDefault();
                   // A coordinate-positioned desktop menu is easy to clip on
@@ -204,6 +190,15 @@ export function SecretList({
                 )}
                 style={{ gridTemplateColumns: gridCols }}
               >
+                <button
+                  type="button"
+                  aria-label={`Select ${secret.name}`}
+                  onClick={() => {
+                    setContext(null);
+                    select(active ? null : secret);
+                  }}
+                  className="absolute inset-0 z-0"
+                />
                 {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-primary" />}
                 <button
                   type="button"
@@ -213,7 +208,7 @@ export function SecretList({
                     setContext(null);
                     select(active ? null : secret);
                   }}
-                  className="flex min-w-0 items-center gap-2.5 text-left"
+                  className="relative z-10 flex min-w-0 items-center gap-2.5 text-left"
                 >
                   <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-surface-2 text-muted-foreground">
                     <Icon className="size-3.5" />
@@ -245,7 +240,7 @@ export function SecretList({
                     key={column}
                     data-column={column}
                     className={cn(
-                      "secret-column truncate text-[12px] text-muted-foreground",
+                      "secret-column pointer-events-none relative z-10 truncate text-[12px] text-muted-foreground",
                       column === "updated" && "text-right",
                       column === "environment" &&
                         secret.environment === "Production" &&
@@ -257,7 +252,7 @@ export function SecretList({
                 ))}
                 <div
                   className={cn(
-                    "secret-row-actions flex items-center justify-end gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+                    "secret-row-actions relative z-10 flex items-center justify-end gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
                     active ? "opacity-100" : "opacity-0",
                   )}
                 >
