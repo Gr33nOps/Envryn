@@ -44,6 +44,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
+      - name: Install pinned Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
       # --- Code signing goes here once RELEASE_SIGNING.md's plan is actually executed. ---
       # Nothing below is active: no secret it references exists yet, so there is nothing to
       # leak and nothing that can silently start signing with an unintended identity. Adding
