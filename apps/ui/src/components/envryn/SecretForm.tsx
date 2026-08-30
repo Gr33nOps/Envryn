@@ -23,6 +23,31 @@ function valueFieldHint(editing: boolean, isNote: boolean): string {
   return "Paste the key, password, or token here.";
 }
 
+function saveValidationError({
+  name,
+  editing,
+  type,
+  value,
+  existingPayload,
+  customFields,
+}: Readonly<{
+  name: string;
+  editing: boolean;
+  type: string;
+  value: string;
+  existingPayload: ipc.SecretPayload | null;
+  customFields: Array<{ label: string; value: string }>;
+}>): string | null {
+  if (!name.trim()) return "Add a name so you can find this later.";
+  if (!editing && type !== "Custom" && !value) return "Paste the value you want to store.";
+  if (editing && !existingPayload)
+    return "Wait for the existing secret to finish loading before saving.";
+  if (type === "Custom" && !customFields.some((field) => field.label.trim())) {
+    return "Add at least one named custom field.";
+  }
+  return null;
+}
+
 function ValueFieldLabel({
   showSuggestType,
   isNote,
@@ -226,20 +251,16 @@ export function SecretFormModal({
   }
 
   async function save() {
-    if (!name.trim()) {
-      setError("Add a name so you can find this later.");
-      return;
-    }
-    if (!editing && type !== "Custom" && !value) {
-      setError("Paste the value you want to store.");
-      return;
-    }
-    if (editing && !existingPayload) {
-      setError("Wait for the existing secret to finish loading before saving.");
-      return;
-    }
-    if (type === "Custom" && !customFields.some((field) => field.label.trim())) {
-      setError("Add at least one named custom field.");
+    const validationError = saveValidationError({
+      name,
+      editing,
+      type,
+      value,
+      existingPayload,
+      customFields,
+    });
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
