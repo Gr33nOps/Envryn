@@ -11,7 +11,7 @@ weakens anything - it is the plan to execute once a certificate exists.
 
 Every artifact `cargo tauri build` produces - `envryn.exe`, the WiX `.msi`, the NSIS
 `...-setup.exe` - is currently **unsigned** (verified directly with
-`Get-AuthenticodeSignature`, see `SECURITY_REMEDIATION_REPORT.md`'s addendum). Windows
+`Get-AuthenticodeSignature`, see `../audits/SECURITY_REMEDIATION_REPORT.md`'s addendum). Windows
 Authenticode signing embeds a cryptographic signature tying the binary to a certificate issued
 by a CA in Microsoft's Trusted Root Program. It matters for two independent reasons:
 
@@ -110,7 +110,7 @@ Once a certificate/signing-service exists:
    build time) - so the real thumbprint/command never has to be committed to
    `tauri.windows.conf.json` in plaintext, avoiding an unnecessary secret-in-git even though a
    thumbprint alone isn't itself sensitive.
-4. Re-run `Get-AuthenticodeSignature` (exactly as done in `SECURITY_REMEDIATION_REPORT.md`'s
+4. Re-run `Get-AuthenticodeSignature` (exactly as done in `../audits/SECURITY_REMEDIATION_REPORT.md`'s
    addendum) against the built artifacts as a real, automated verification step - "signed" should
    be proven by inspecting the actual binary, not assumed from the build succeeding.
 

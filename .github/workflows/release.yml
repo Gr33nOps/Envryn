@@ -5,7 +5,7 @@ name: Release build
 # deliberate, separate, human action) and it never runs on a push or pull_request, so a PR
 # (including a fork PR, once this repo has outside contributors) cannot trigger a build just by
 # existing. It runs on GitHub-hosted Windows, which is free for this public repository and does
-# not expose a maintainer workstation to workflow code. See RELEASE_SIGNING.md for the signing
+# not expose a maintainer workstation to workflow code. See docs/releasing/RELEASE_SIGNING.md for the signing
 # slot this workflow preserves.
 
 on:
@@ -47,18 +47,18 @@ jobs:
       - name: Install pinned Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
 
-      # --- Code signing goes here once RELEASE_SIGNING.md's plan is actually executed. ---
+      # --- Code signing goes here once docs/releasing/RELEASE_SIGNING.md's plan is actually executed. ---
       # Nothing below is active: no secret it references exists yet, so there is nothing to
       # leak and nothing that can silently start signing with an unintended identity. Adding
       # real signing means uncommenting this block and creating the two secrets named below --
-      # not restructuring this workflow or tauri.conf.json's shape (see RELEASE_SIGNING.md §4-5).
+      # not restructuring this workflow or tauri.conf.json's shape (see docs/releasing/RELEASE_SIGNING.md §4-5).
       #
       # - name: Import code-signing credential
       #   env:
       #     WINDOWS_SIGN_SECRET: ${{ secrets.WINDOWS_SIGN_SECRET }}
       #   run: |
       #     # e.g. az login with a service principal scoped only to Trusted Signing, or
-      #     # Import-PfxCertificate for a token-backed cert -- whichever RELEASE_SIGNING.md's
+      #     # Import-PfxCertificate for a token-backed cert -- whichever docs/releasing/RELEASE_SIGNING.md's
       #     # eventual choice needs. Left unimplemented deliberately: no cert exists to test
       #     # this against yet, and a guessed implementation is worse than an honest gap.
       #

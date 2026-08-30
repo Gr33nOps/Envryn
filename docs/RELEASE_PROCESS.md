@@ -59,7 +59,7 @@ The release should include:
 - SHA-256 checksum file
 - CycloneDX software bill of materials
 
-Do not publish a new signing identity by accident. Android updates must continue using the existing release key. Windows packages remain unsigned until the process in `RELEASE_SIGNING.md` is completed.
+Do not publish a new signing identity by accident. Android updates must continue using the existing release key. Windows packages remain unsigned until the process in `releasing/RELEASE_SIGNING.md` is completed.
 
 ## 5. Publish
 

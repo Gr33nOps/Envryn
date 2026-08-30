@@ -83,7 +83,7 @@ snapshot between them) - they behave differently and both need their own clean-m
       *any* launch, before you create a vault - the auto-lock background timer reads app settings
       (auto-lock minutes, clipboard-clear seconds) on every tick, and creating that folder is a
       side effect of checking for a settings file that may not exist yet. This is expected,
-      deliberate behavior (see `INSTALLER_REVIEW.md`), not a sign anything vault-related has
+      deliberate behavior (see `../audits/INSTALLER_REVIEW.md`), not a sign anything vault-related has
       happened - the folder holds no secret data until you actually create a vault.
 
 ## 3. Vault lifecycle
@@ -160,7 +160,7 @@ snapshot between them) - they behave differently and both need their own clean-m
 - [ ] **This is the important one - check it deliberately, don't skip it:** open File Explorer,
       go to `%APPDATA%`, and confirm the `dev.envryn.vault` folder (and your vault database
       inside it) **is still there** after uninstalling. This is expected, correct behavior - an
-      uninstall should never silently destroy your secrets - see `INSTALLER_REVIEW.md` and the
+      uninstall should never silently destroy your secrets - see `../audits/INSTALLER_REVIEW.md` and the
       README's "Uninstalling and removing your data" section. If the folder is instead gone,
       that is a real, serious bug: report it, don't treat it as a pass.
 
@@ -204,5 +204,5 @@ Right after uninstalling (§8), still on the same VM:
 
 One full pass, on one VM snapshot, is a single sample - not a guarantee across every Windows
 10/11 build, locale, and hardware combination. Treat a clean pass as strong evidence the release
-is ready, not absolute proof, the same way `SECURITY_REMEDIATION_REPORT.md` treats every other
+is ready, not absolute proof, the same way `../audits/SECURITY_REMEDIATION_REPORT.md` treats every other
 check in this project.

@@ -32,7 +32,7 @@ jobs:
     runs-on: windows-latest
     # Report-only: this surfaces new findings on the SonarCloud dashboard
     # without blocking merges on Envryn's 100+ pre-existing code-quality
-    # findings (see AUDIT_REPORT.md) -- turning it into a hard gate is a
+    # findings (see docs/audits/AUDIT_REPORT.md) -- turning it into a hard gate is a
     # separate, deliberate decision, not a side effect of wiring this up.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

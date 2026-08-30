@@ -1,6 +1,6 @@
 # Envryn - Final Pre-Release Security Remediation & Verification Pass
 
-> Historical remediation record. This document explains how earlier findings were handled. The current source code, [security testing guide](docs/SECURITY_TESTING.md), and CI workflows are authoritative when details have changed.
+> Historical remediation record. This document explains how earlier findings were handled. The current source code, [security testing guide](../SECURITY_TESTING.md), and CI workflows are authoritative when details have changed.
 
 **Date:** 2026-08-27
 **Scope:** Full repository at `main` (Rust workspace: `envryn-core`, `envryn-ai-worker`,

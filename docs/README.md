@@ -23,14 +23,17 @@ This is the best starting point if you want to understand how Envryn works, how 
 - [AI security](AI_SECURITY.md)
 - [AI data access](AI_DATA_ACCESS.md)
 
-The historical [audit report](../AUDIT_REPORT.md) and [remediation report](../SECURITY_REMEDIATION_REPORT.md) record how the current controls were developed. When those reports conflict with current code or CI, the current guides and repository configuration are authoritative.
+The historical [audit report](audits/AUDIT_REPORT.md) and [remediation report](audits/SECURITY_REMEDIATION_REPORT.md) record how the current controls were developed. When those reports conflict with current code or CI, the current guides and repository configuration are authoritative.
 
 ## Project operations
 
 - [Contributing](../CONTRIBUTING.md)
 - [Support](../SUPPORT.md)
 - [Security policy](../.github/SECURITY.md)
-- [Release signing](../RELEASE_SIGNING.md)
-- [Beta release checklist](../BETA_RELEASE_CHECKLIST.md)
+- [Release signing](releasing/RELEASE_SIGNING.md)
+- [Beta release checklist](releasing/BETA_RELEASE_CHECKLIST.md)
+- [Clean-VM test checklist](releasing/CLEAN_VM_TEST_CHECKLIST.md)
+- [Security architecture](security/SECURITY_ARCHITECTURE.md)
+- [Security checklist](security/SECURITY_CHECKLIST.md)
 
 If a document is wrong or unclear, please open a documentation issue. Good documentation is part of the product, not an afterthought.
