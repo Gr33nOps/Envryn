@@ -1,0 +1,111 @@
+name: Snyk Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "30 6 * * 1" # Monday 06:30 UTC, after the weekly SonarQube run
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: snyk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Dependencies and source code
+    # GitHub does not expose repository secrets to fork or Dependabot pull
+    # requests. Skip those contexts instead of creating a misleading auth
+    # failure; trusted pushes, schedules, dispatches, and in-repo PRs run fully.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - name: Install pinned Snyk CLI
+        uses: snyk/actions/setup@12140f4059e244892ae643824a95459a102120dd # master, 2026-08-03
+        with:
+          snyk-version: v1.1307.0
+
+      - name: Verify Snyk authentication
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: snyk whoami
+
+      - name: Prepare SARIF output
+        run: mkdir -p snyk-results
+
+      - name: Scan npm dependencies
+        id: open_source
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          for attempt in 1 2 3; do
+            snyk test \
+              --file=package-lock.json \
+              --package-manager=npm \
+              --strict-out-of-sync=true \
+              --prune-repeated-subdependencies \
+              --severity-threshold=high \
+              --sarif-file-output=snyk-results/open-source.sarif && exit 0
+            [[ "$attempt" -eq 3 ]] && exit 1
+            echo "Snyk Open Source attempt $attempt failed; retrying shortly."
+            sleep $((attempt * 10))
+          done
+
+      - name: Scan TypeScript and Rust source
+        id: code
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          for attempt in 1 2 3; do
+            snyk code test \
+              --severity-threshold=high \
+              --sarif-file-output=snyk-results/code.sarif && exit 0
+            [[ "$attempt" -eq 3 ]] && exit 1
+            echo "Snyk Code attempt $attempt failed; retrying shortly."
+            sleep $((attempt * 10))
+          done
+
+      - name: Upload Snyk Open Source results
+        if: always() && hashFiles('snyk-results/open-source.sarif') != ''
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: snyk-results/open-source.sarif
+          category: snyk-open-source
+
+      - name: Upload Snyk Code results
+        if: always() && hashFiles('snyk-results/code.sarif') != ''
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          sarif_file: snyk-results/code.sarif
+          category: snyk-code
+
+      - name: Enforce Snyk high-severity gate
+        if: always()
+        env:
+          OPEN_SOURCE_OUTCOME: ${{ steps.open_source.outcome }}
+          CODE_OUTCOME: ${{ steps.code.outcome }}
+        run: |
+          if [[ "$OPEN_SOURCE_OUTCOME" != "success" || "$CODE_OUTCOME" != "success" ]]; then
+            echo "Snyk reported a high-severity finding or a scan error. Review the job output and GitHub Security results."
+            exit 1
+          fi

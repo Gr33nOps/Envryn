@@ -19,7 +19,7 @@ beforeEach(() => {
 describe("ResizeBorders", () => {
   it("renders all eight edge and corner handles", () => {
     const { container } = render(<ResizeBorders />);
-    expect(container.querySelectorAll("div").length).toBe(8);
+    expect(container.querySelectorAll("div")).toHaveLength(8);
   });
 
   it("starts a resize in the correct direction when a handle is pressed", () => {
