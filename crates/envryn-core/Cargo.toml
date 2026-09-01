@@ -75,7 +75,7 @@ ts-rs.workspace = true
 # Version left unpinned to the patch: Tauri itself depends on `windows = "0.61"`
 # with an overlapping feature set, and Cargo unifies both to one crate instance
 # so that the HWND we receive from Tauri and the HWND type here are identical.
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     # WinRT (not Win32) -- Windows Hello for Apps, platform::hello.
     "Security_Credentials",
     "Storage_Streams",
