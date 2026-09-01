@@ -58,7 +58,7 @@ rustls-pki-types = "1"
 # not a place to economise.
 x509-parser = "0.18"
 tokio = { version = "1", features = ["net", "rt", "io-util", "time", "sync"] }
-mdns-sd = "0.13"
+mdns-sd = "0.21"
 
 # ai/model_download.rs: the one other deliberate exception to "no network"
 # INV-010 permits (explicit user-initiated model download). Blocking, and on
