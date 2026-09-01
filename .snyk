@@ -1,0 +1,11 @@
+# Snyk (https://snyk.io) policy file
+version: v1.25.0
+exclude:
+  code:
+    # These files contain credential-shaped test/demo fixtures. The local
+    # deterministic secret scanner covers them; they are not uploaded for
+    # Snyk Code analysis.
+    - .dev-tools/demo-screenshot.mjs
+    - apps/ui/src/routes/index.tsx
+    - crates/envryn-core/src/ai/classify.rs
+    - crates/envryn-core/tests/vault_lifecycle.rs

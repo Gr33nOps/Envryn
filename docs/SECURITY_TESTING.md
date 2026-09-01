@@ -1,6 +1,6 @@
 # Security and privacy testing
 
-Envryn's security checks are local, reproducible, and free. No vault or source data is uploaded by these commands.
+Envryn's standard security gate is local, reproducible, and free. It does not upload vault or source data.
 
 ## Standard gate
 
@@ -11,6 +11,19 @@ npm run security:scan
 ```
 
 The gate verifies hardening invariants, scans Git history with Gitleaks, runs the project's Semgrep rules, enforces Rust dependency/license/source policy with `cargo-deny`, checks Rust advisories with `cargo-audit`, checks Cargo/npm locks and the Android release-runtime dependency slice with OSV-Scanner, and audits production npm dependencies. Android Gradle Plugin emulator/test-host tooling is deliberately excluded because it is not packaged in the APK. Reviewed target-specific exceptions live in `deny.toml` and `osv-scanner.toml`; new shipped-runtime findings still fail the command.
+
+## Snyk GitHub analysis
+
+The `Snyk Security` GitHub workflow adds two high-severity gates:
+
+- Snyk Open Source checks the committed npm lockfile for vulnerable dependency paths and license issues.
+- Snyk Code performs static analysis across supported TypeScript and Rust source files.
+
+Both scans publish SARIF results to GitHub's Security tab. Snyk Code sends supported source files to Snyk for analysis; `.snyk` excludes four credential-shaped test/demo fixture files from that upload. Those files remain covered by the local deterministic secret scanner and the repository's existing tests.
+
+Standard Snyk Open Source testing does not resolve Cargo manifests. Rust dependencies therefore remain gated by `cargo-audit`, OSV-Scanner, and `cargo-deny` in the existing CI workflow rather than being presented as incomplete Snyk coverage.
+
+The workflow requires the encrypted `SNYK_TOKEN` repository secret. GitHub does not expose repository secrets to fork or Dependabot pull requests, so the Snyk job skips those untrusted contexts instead of failing authentication.
 
 ## Android APK analysis
 
