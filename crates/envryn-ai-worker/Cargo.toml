@@ -18,7 +18,7 @@ rand = "0.8"
 
 candle-core = "0.9"
 candle-transformers = "0.9"
-tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.23", default-features = false, features = ["onig"] }
 
 [lints.rust]
 unsafe_code = "forbid"
