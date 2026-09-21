@@ -231,6 +231,7 @@ fn nothing_readable_is_written_to_disk() {
                 notes: Some("DISTINCTIVE_NOTE_BODY".into()),
                 tags: vec!["DISTINCTIVE_TAG".into()],
                 provider: Some("OpenAI".into()),
+                expires_ms: None,
             })
             .unwrap();
         vault.lock();
@@ -435,6 +436,7 @@ fn search_matches_metadata_but_never_values() {
             notes: None,
             tags: vec!["deployment".into()],
             provider: Some("GitHub".into()),
+            expires_ms: None,
         })
         .unwrap();
 
@@ -468,6 +470,7 @@ fn multi_field_payloads_round_trip() {
             notes: None,
             tags: vec![],
             provider: None,
+            expires_ms: None,
         })
         .unwrap()
         .id;
@@ -750,6 +753,7 @@ fn a_canary_secret_never_appears_in_plaintext_in_a_backup_file() {
             notes: Some(canary.clone()),
             tags: vec![canary.clone()],
             provider: None,
+            expires_ms: None,
         })
         .unwrap();
 

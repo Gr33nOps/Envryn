@@ -131,6 +131,7 @@ function fakeSummary(overrides: Partial<SecretSummary> = {}): SecretSummary {
     created_ms: Date.now(),
     updated_ms: Date.now(),
     rotated_ms: null,
+    expires_ms: null,
     ...overrides,
   };
 }

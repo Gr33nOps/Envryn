@@ -3,6 +3,7 @@ import { X, Copy, Eye, EyeOff, Pencil, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import type { Secret } from "@/lib/envryn-data";
 import { Button, ConfirmDialog, DetailRow, IconButton } from "./ui";
+import { expiryInfo } from "@/lib/vault-repository";
 import { copyValue } from "@/lib/vault-actions";
 import { IpcError } from "@/lib/ipc";
 import { useDeleteSecret, useRevealSecret } from "@/lib/use-vault";
@@ -27,6 +28,13 @@ export function SecretPanel({ secret }: Readonly<{ secret: Secret }>) {
   const [left, setLeft] = React.useState(REVEAL_SECONDS);
 
   const revealed = value !== null;
+  const expiry = expiryInfo(secret.expiresMs);
+  const expiryToneClass =
+    expiry?.tone === "expired"
+      ? "text-destructive"
+      : expiry?.tone === "soon"
+        ? "text-warning"
+        : "text-muted-foreground";
 
   const hide = React.useCallback(() => setValue(null), []);
 
@@ -158,6 +166,18 @@ export function SecretPanel({ secret }: Readonly<{ secret: Secret }>) {
             }
           />
         ) : null}
+
+        {expiry && (
+          <DetailRow
+            label="Expires"
+            value={
+              <span className={`inline-flex items-center gap-1.5 ${expiryToneClass}`}>
+                {expiry.tone !== "ok" && <AlertTriangle className="size-3.5" />}
+                {expiry.tone === "ok" ? expiry.date : `${expiry.label} · ${expiry.date}`}
+              </span>
+            }
+          />
+        )}
 
         <div className="grid grid-cols-2 gap-3 border-t border-border pt-3.5">
           <DetailRow label="Created" value={secret.created} />

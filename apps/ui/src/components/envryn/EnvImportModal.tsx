@@ -1,10 +1,11 @@
 import * as React from "react";
-import { Eye, EyeOff, Sparkles } from "lucide-react";
+import { Eye, EyeOff, FileUp, Sparkles, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Field, Input, Modal, Select } from "@/components/envryn/ui";
 import { secretTypes, type Environment, type SecretType } from "@/lib/envryn-data";
+import type { ImportPreset } from "@/components/envryn/vault-context";
 import { useCreateSecret, useProjects } from "@/lib/use-vault";
-import { KIND_TO_TYPE } from "@/lib/vault-repository";
+import { dateInputToMs, KIND_TO_TYPE } from "@/lib/vault-repository";
 import * as ipc from "@/lib/ipc";
 
 const ENVIRONMENTS: Environment[] = ["Development", "Staging", "Production", "—"];
@@ -81,30 +82,58 @@ function envImportDescription(stage: "paste" | "review", entryCount: number): st
 export function EnvImportModal({
   open,
   onOpenChange,
+  preset,
 }: Readonly<{
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  preset?: ImportPreset | undefined;
 }>) {
   const projects = useProjects();
   const createSecret = useCreateSecret();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const [stage, setStage] = React.useState<"paste" | "review">("paste");
   const [text, setText] = React.useState("");
   const [project, setProject] = React.useState("");
   const [environment, setEnvironment] = React.useState<Environment>("Development");
+  const [expiresDate, setExpiresDate] = React.useState("");
   const [entries, setEntries] = React.useState<ParsedEntry[]>([]);
   const [classifying, setClassifying] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
+  const [dragOver, setDragOver] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
     setStage("paste");
     setText("");
-    setProject("");
-    setEnvironment("Development");
+    setProject(preset?.project ?? "");
+    setEnvironment(preset?.environment ?? "Development");
+    setExpiresDate("");
     setEntries([]);
     setImporting(false);
-  }, [open]);
+    setDragOver(false);
+  }, [open, preset]);
+
+  /**
+   * Load one or more dropped/picked files into the textarea. `.env` files are
+   * plain text and small, so reading them in the webview with `File.text()`
+   * needs no Rust plugin -- and nothing leaves the device. Several files are
+   * concatenated so a folder of `.env` / `.env.local` can go in at once.
+   */
+  async function loadFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    try {
+      const contents = await Promise.all(Array.from(files, (file) => file.text()));
+      setText((current) => [current.trim(), ...contents].filter(Boolean).join("\n"));
+      toast(
+        files.length === 1
+          ? `Loaded ${files[0]?.name ?? "file"}.`
+          : `Loaded ${files.length} files.`,
+      );
+    } catch {
+      toast("That file could not be read.");
+    }
+  }
 
   /**
    * Deterministic classification first (works with no AI, and is the only
@@ -168,6 +197,8 @@ export function EnvImportModal({
       return;
     }
 
+    const expiresMs = expiresDate ? dateInputToMs(expiresDate) : null;
+
     setImporting(true);
     let succeeded = 0;
     const failedKeys: string[] = [];
@@ -179,6 +210,7 @@ export function EnvImportModal({
           environment,
           type: entry.type,
           value: entry.value,
+          expiresMs,
           notes: "",
           // Import is an action, not a useful permanent category. Do not add
           // a visible tag to every environment variable unless the user
@@ -231,17 +263,66 @@ export function EnvImportModal({
         <div className="space-y-4">
           <Field
             label=".env contents"
-            hint="One KEY=VALUE per line. Comments and blank lines are skipped."
+            hint="Drop a .env file here, choose one, or paste below. Comments and blank lines are skipped."
           >
-            <textarea
-              aria-label=".env contents"
-              autoFocus
-              rows={10}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              className="w-full rounded-md border border-input bg-surface px-2 py-1.5 font-mono text-[12px] placeholder:text-subtle-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/25"
-              placeholder={"DATABASE_URL=postgres://...\nSTRIPE_SECRET_KEY=sk_live_..."}
-            />
+            <div
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragOver(false);
+                void loadFiles(event.dataTransfer.files);
+              }}
+              className={`relative rounded-md border-2 border-dashed transition-colors ${
+                dragOver ? "border-primary bg-primary/5" : "border-input"
+              }`}
+            >
+              <textarea
+                aria-label=".env contents"
+                autoFocus
+                rows={9}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                className="w-full rounded-md bg-surface px-2 py-1.5 font-mono text-[12px] placeholder:text-subtle-foreground focus:outline-none focus:ring-2 focus:ring-primary/25"
+                placeholder={"DATABASE_URL=postgres://...\nSTRIPE_SECRET_KEY=sk_live_..."}
+              />
+              {dragOver && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-primary/10 text-[12px] font-medium text-primary">
+                  <FileUp className="mr-1.5 size-4" />
+                  Drop to load
+                </div>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".env,.env.*,text/plain"
+                className="hidden"
+                onChange={(event) => {
+                  void loadFiles(event.target.files);
+                  // Reset so choosing the same file again still fires onChange.
+                  event.target.value = "";
+                }}
+              />
+              <Button size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload />
+                Choose .env file
+              </Button>
+              {text.trim() && (
+                <button
+                  type="button"
+                  onClick={() => setText("")}
+                  className="text-[11px] text-primary hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </Field>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Project" hint="Type a new name to start a project.">
@@ -268,6 +349,28 @@ export function EnvImportModal({
               </Select>
             </Field>
           </div>
+          <Field
+            label="Expires"
+            hint="Optional. Applies to every variable imported -- handy for tokens that lapse together."
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={expiresDate}
+                onChange={(event) => setExpiresDate(event.target.value)}
+                className="max-w-[190px]"
+              />
+              {expiresDate && (
+                <button
+                  type="button"
+                  onClick={() => setExpiresDate("")}
+                  className="text-[11px] text-primary hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </Field>
         </div>
       ) : (
         <div className="space-y-3">

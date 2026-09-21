@@ -457,6 +457,7 @@ impl Vault {
             notes: record.notes,
             tags: record.tags,
             provider: record.provider,
+            expires_ms: record.expires_ms,
         })
     }
 
@@ -486,6 +487,7 @@ impl Vault {
             created_ms: now,
             updated_ms: now,
             rotated_ms: None,
+            expires_ms: input.expires_ms,
         };
 
         let hlc = self.tick_hlc()?;
@@ -567,6 +569,9 @@ impl Vault {
         }
         if let Some(provider) = update.provider {
             record.provider = provider;
+        }
+        if let Some(expires) = update.expires_ms {
+            record.expires_ms = expires;
         }
 
         let now = now_ms();
@@ -1065,5 +1070,6 @@ pub fn api_key(name: &str, project: &str, environment: Environment, value: &str)
         notes: None,
         tags: Vec::new(),
         provider: None,
+        expires_ms: None,
     }
 }

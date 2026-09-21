@@ -2,6 +2,22 @@
 
 Notable user-facing changes are recorded here. Envryn follows semantic versioning while the project is in beta.
 
+## 0.1.10-beta - 2026-09-22
+
+### Easier .env import
+
+- You can now drag a `.env` file straight onto the import dialog, or pick one with a file button, instead of only pasting its contents. Nothing leaves the device -- the file is read locally.
+- Added an "Import .env" action inside a project (on the project header and its empty state), so credentials can be brought into the project you are already looking at, with the project and environment prefilled.
+
+### Expiration dates
+
+- Secrets can now have an optional expiration date, set when creating or editing, and applied to a whole `.env` import at once. It suits credentials that lapse -- an IGDB app token (about 60 days), a password with a rotation deadline.
+- Expiring and expired secrets are flagged in the list and in the detail panel; a secret is never deleted automatically.
+
+### Local AI starts with the app
+
+- When local AI is enabled in Settings, its on-device worker now starts automatically when the app opens, instead of needing the toggle pressed again each session. It stays best-effort and silent: never blocks the window, and remains off unless you have turned it on.
+
 ## 0.1.9-beta - 2026-08-29
 
 ### Better release confidence

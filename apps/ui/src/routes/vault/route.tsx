@@ -11,7 +11,7 @@ import { EnvImportModal } from "@/components/envryn/EnvImportModal";
 import { StructuredExtractModal } from "@/components/envryn/StructuredExtractModal";
 import { MobileNavigation } from "@/components/envryn/MobileNavigation";
 import { Wordmark } from "@/components/envryn/Logo";
-import { VaultUIContext } from "@/components/envryn/vault-context";
+import { VaultUIContext, type ImportPreset } from "@/components/envryn/vault-context";
 import { type Secret } from "@/lib/envryn-data";
 import { useClearVaultCache, useRevealSecret, useSecretList } from "@/lib/use-vault";
 import { copyValue, forgetClipboardTimer } from "@/lib/vault-actions";
@@ -50,6 +50,7 @@ function VaultLayout() {
   const [preset, setPreset] = React.useState<Partial<Secret> | undefined>();
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [importPreset, setImportPreset] = React.useState<ImportPreset | undefined>();
   const [extractOpen, setExtractOpen] = React.useState(false);
 
   // Mutations refresh the list with new objects. Keep an already-open details
@@ -174,7 +175,10 @@ function VaultLayout() {
         setFormOpen(true);
       },
       openSearch: () => setSearchOpen(true),
-      openImport: () => setImportOpen(true),
+      openImport: (preset?: ImportPreset) => {
+        setImportPreset(preset);
+        setImportOpen(true);
+      },
       openExtract: () => setExtractOpen(true),
     }),
     [selected],
@@ -238,7 +242,7 @@ function VaultLayout() {
         preset={preset}
       />
       <SearchPalette open={searchOpen} onOpenChange={setSearchOpen} onSelect={setSelected} />
-      <EnvImportModal open={importOpen} onOpenChange={setImportOpen} />
+      <EnvImportModal open={importOpen} onOpenChange={setImportOpen} preset={importPreset} />
       <StructuredExtractModal open={extractOpen} onOpenChange={setExtractOpen} />
     </VaultUIContext.Provider>
   );

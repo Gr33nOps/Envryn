@@ -211,6 +211,14 @@ pub struct SecretRecord {
     /// Last rotation, for the review suggestions in specification section 26.
     #[serde(default)]
     pub rotated_ms: Option<i64>,
+    /// When this credential stops being valid, as Unix milliseconds. `None`
+    /// means "does not expire". Set by the user for credentials that are known
+    /// to lapse -- an API token that is only good for a fixed window (e.g. an
+    /// IGDB app token, valid ~60 days), a password with a rotation deadline.
+    /// `#[serde(default)]` keeps records written by older builds -- which have
+    /// no such key in their sealed JSON -- readable as "does not expire".
+    #[serde(default)]
+    pub expires_ms: Option<i64>,
 }
 
 impl SecretRecord {
@@ -227,6 +235,7 @@ impl SecretRecord {
             created_ms: self.created_ms,
             updated_ms: self.updated_ms,
             rotated_ms: self.rotated_ms,
+            expires_ms: self.expires_ms,
         }
     }
 }
@@ -250,6 +259,9 @@ pub struct SecretSummary {
     pub created_ms: i64,
     pub updated_ms: i64,
     pub rotated_ms: Option<i64>,
+    /// See [`SecretRecord::expires_ms`]. Carried on the summary so a list can
+    /// flag expiring or expired credentials without revealing their values.
+    pub expires_ms: Option<i64>,
 }
 
 /// What a caller supplies to create a record. Timestamps and id are assigned
@@ -276,6 +288,11 @@ pub struct NewSecret {
     #[serde(default)]
     #[ts(optional = nullable)]
     pub provider: Option<String>,
+    /// Optional expiry (Unix milliseconds); see [`SecretRecord::expires_ms`].
+    /// Omitted or `null` means the credential does not expire.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub expires_ms: Option<i64>,
 }
 
 /// A partial update. `None` means "leave unchanged", which is why every field
@@ -311,6 +328,12 @@ pub struct SecretUpdate {
     #[serde(default)]
     #[ts(as = "Option<bool>", optional)]
     pub mark_rotated: bool,
+    /// Change the expiry. `None` (the outer option) leaves it unchanged;
+    /// `Some(None)` clears it ("does not expire"); `Some(Some(ms))` sets it.
+    /// The `as`/`optional = nullable` shape matches `notes`/`provider` above:
+    /// the key may be omitted, and when present may be `null`.
+    #[ts(as = "Option<i64>", optional = nullable)]
+    pub expires_ms: Option<Option<i64>>,
 }
 
 /// A paired device this vault will accept a sync connection from.
@@ -447,6 +470,7 @@ mod tests {
             created_ms: 1,
             updated_ms: 2,
             rotated_ms: None,
+            expires_ms: None,
         }
     }
 
@@ -538,6 +562,7 @@ mod tests {
             notes: None,
             tags: vec![],
             provider: None,
+            expires_ms: None,
         };
         assert!(validate_new(&input).is_err());
     }
@@ -558,7 +583,26 @@ mod tests {
             notes: None,
             tags: (0..limits::MAX_TAGS + 1).map(|i| i.to_string()).collect(),
             provider: None,
+            expires_ms: None,
         };
         assert!(validate_new(&input).is_err());
+    }
+
+    /// Expiry survives a JSON round-trip, and a record written without the
+    /// field (an older build) deserialises as "does not expire" rather than
+    /// failing -- the backward-compatibility guarantee `#[serde(default)]`
+    /// exists to provide.
+    #[test]
+    fn expiry_round_trips_and_defaults_when_absent() {
+        let mut rec = record();
+        rec.expires_ms = Some(1_900_000_000_000);
+        let json = serde_json::to_vec(&rec).unwrap();
+        let back: SecretRecord = serde_json::from_slice(&json).unwrap();
+        assert_eq!(back.expires_ms, Some(1_900_000_000_000));
+        assert_eq!(rec.summary().expires_ms, Some(1_900_000_000_000));
+
+        let legacy = r#"{"id":"018f0000-0000-7000-8000-000000000000","name":"n","project":"p","environment":"Development","payload":{"kind":"ApiKey","value":"v"},"notes":null,"tags":[],"provider":null,"created_ms":1,"updated_ms":2,"rotated_ms":null}"#;
+        let parsed: SecretRecord = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.expires_ms, None);
     }
 }

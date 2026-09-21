@@ -403,6 +403,7 @@ mod tests {
                 notes: None,
                 tags: vec![],
                 provider: None,
+                expires_ms: None,
             })
             .unwrap();
 
@@ -430,6 +431,7 @@ mod tests {
                 notes: None,
                 tags: vec![],
                 provider: None,
+                expires_ms: None,
             })
             .unwrap();
 
@@ -526,6 +528,7 @@ mod tests {
                 notes: None,
                 tags: vec![],
                 provider: None,
+                expires_ms: None,
             })
             .unwrap();
         let shared_id = created.id;
@@ -656,6 +659,7 @@ mod tests {
                     notes: Some(format!("Unicode QA note {index}: café 東京")),
                     tags: vec!["qa".into(), format!("batch-{}", index % 10)],
                     provider: Some("Performance QA".into()),
+                    expires_ms: None,
                 })
                 .unwrap();
         }
@@ -721,6 +725,7 @@ mod tests {
                 notes: None,
                 tags: vec![],
                 provider: None,
+                expires_ms: None,
             })
             .unwrap();
         // Give B a vault of its own to sync into -- an empty one is fine.

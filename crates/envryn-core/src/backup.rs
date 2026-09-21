@@ -174,6 +174,7 @@ mod tests {
             created_ms: 1,
             updated_ms: 2,
             rotated_ms: None,
+            expires_ms: None,
         }]
     }
 

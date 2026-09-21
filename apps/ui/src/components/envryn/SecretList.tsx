@@ -24,6 +24,7 @@ import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Secret } from "@/lib/envryn-data";
+import { expiryInfo } from "@/lib/vault-repository";
 import { copyValue } from "@/lib/vault-actions";
 import { useRevealSecret } from "@/lib/use-vault";
 import { IpcError } from "@/lib/ipc";
@@ -72,6 +73,32 @@ function iconForSecret(secret: Pick<Secret, "name" | "provider" | "type">): Luci
     )?.icon ??
     typeIcons[secret.type] ??
     Braces
+  );
+}
+
+/**
+ * A small pill flagging an approaching or past expiry. Deliberately silent for
+ * credentials that expire far off ("ok" tone) so the list is not littered with
+ * a date on every row -- only the ones a user needs to act on show here.
+ */
+function ExpiryChip({ expiresMs }: Readonly<{ expiresMs: number | null | undefined }>) {
+  const expiry = expiryInfo(expiresMs);
+  if (!expiry || expiry.tone === "ok") return null;
+  const tone =
+    expiry.tone === "expired"
+      ? "border-destructive/40 bg-destructive/10 text-destructive"
+      : "border-warning/40 bg-warning/10 text-warning";
+  return (
+    <span
+      title={`Expires ${expiry.date}`}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-medium",
+        tone,
+      )}
+    >
+      <AlertTriangle className="size-2.5" />
+      {expiry.label}
+    </span>
   );
 }
 
@@ -224,9 +251,12 @@ export function SecretList({
                     >
                       {secret.name}
                     </span>
-                    <span className="mt-0.5 block truncate text-[11px] text-subtle-foreground">
-                      {secret.provider ?? secret.type}
-                      {secret.tags?.length ? ` · ${secret.tags.join(" · ")}` : ""}
+                    <span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-subtle-foreground">
+                      <span className="truncate">
+                        {secret.provider ?? secret.type}
+                        {secret.tags?.length ? ` · ${secret.tags.join(" · ")}` : ""}
+                      </span>
+                      <ExpiryChip expiresMs={secret.expiresMs} />
                     </span>
                   </span>
                   {secret.damaged && (

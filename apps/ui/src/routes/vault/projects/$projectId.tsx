@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Plus, ChevronLeft, Pencil, Check, X as XIcon } from "lucide-react";
+import { Plus, ChevronLeft, Pencil, Check, Upload, X as XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { type Environment, type Project, type Secret } from "@/lib/envryn-data";
 import * as ipc from "@/lib/ipc";
@@ -141,7 +141,7 @@ function ProjectDetails() {
   const projects = useProjects();
   const { projectId } = Route.useParams();
   const { env } = Route.useSearch();
-  const { openAdd } = useVaultUI();
+  const { openAdd, openImport } = useVaultUI();
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState("name");
 
@@ -182,15 +182,29 @@ function ProjectDetails() {
           </Link>
         }
         actions={
-          <Button
-            variant="primary"
-            onClick={() =>
-              openAdd({ project: project.name, environment: currentEnvironment as Environment })
-            }
-          >
-            <Plus />
-            Add secret
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                openImport({
+                  project: project.name,
+                  environment: currentEnvironment as Environment,
+                })
+              }
+            >
+              <Upload />
+              Import .env
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() =>
+                openAdd({ project: project.name, environment: currentEnvironment as Environment })
+              }
+            >
+              <Plus />
+              Add secret
+            </Button>
+          </div>
         }
       />
 
@@ -225,10 +239,32 @@ function ProjectDetails() {
             body={q ? "Try another name, project, or tag." : "Add a secret to this environment."}
             action={
               q ? undefined : (
-                <Button variant="primary" onClick={() => openAdd()}>
-                  <Plus />
-                  Add secret
-                </Button>
+                <div className="flex items-center justify-center gap-2">
+                  <Button
+                    variant="primary"
+                    onClick={() =>
+                      openAdd({
+                        project: project.name,
+                        environment: currentEnvironment as Environment,
+                      })
+                    }
+                  >
+                    <Plus />
+                    Add secret
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      openImport({
+                        project: project.name,
+                        environment: currentEnvironment as Environment,
+                      })
+                    }
+                  >
+                    <Upload />
+                    Import .env
+                  </Button>
+                </div>
               )
             }
           />

@@ -17,4 +17,11 @@ export type SecretUpdate = { name?: string, project?: string, environment?: Rust
 /**
  * Set true to stamp the rotation date as now.
  */
-mark_rotated?: boolean, };
+mark_rotated?: boolean, 
+/**
+ * Change the expiry. `None` (the outer option) leaves it unchanged;
+ * `Some(None)` clears it ("does not expire"); `Some(Some(ms))` sets it.
+ * The `as`/`optional = nullable` shape matches `notes`/`provider` above:
+ * the key may be omitted, and when present may be `null`.
+ */
+expires_ms?: number | null, };
