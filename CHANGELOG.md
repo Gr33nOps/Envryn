@@ -4,6 +4,11 @@ Notable user-facing changes are recorded here. Envryn follows semantic versionin
 
 ## 0.1.10-beta - 2026-09-22
 
+### Sync now updates what you see
+
+- Fixed device sync reporting success while the receiving device kept showing its old secrets. Reconciled records were being written to the database but the running app kept serving the list it had loaded at unlock, so a synced phone or PC looked unchanged until it was relocked or restarted. Both the device that pushes and the device that receives now refresh their in-memory view the moment a sync applies anything, and the open screen refetches automatically.
+- The Sync page now keeps its "Online / Offline" indicator live by re-checking the local network on a short interval, so a paired device that is open and reachable shows as connected without pressing Sync first.
+
 ### Easier .env import
 
 - You can now drag a `.env` file straight onto the import dialog, or pick one with a file button, instead of only pasting its contents. Nothing leaves the device -- the file is read locally.

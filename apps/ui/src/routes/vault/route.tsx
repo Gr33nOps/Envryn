@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
@@ -65,6 +66,25 @@ function VaultLayout() {
 
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();
+  const queryClient = useQueryClient();
+
+  // A sync (either a manual "Sync now" or an inbound push from a paired
+  // device) applies records to the database underneath the cached lists. The
+  // backend emits this once records actually changed; refetch so the new or
+  // updated secrets appear immediately instead of after a relock/restart --
+  // this is the other half of the fix for "sync says done but the list is
+  // still old" (see src-tauri/src/sync.rs and Vault::reload_index).
+  React.useEffect(() => {
+    const unlisten = listen("vault://records-changed", () => {
+      void queryClient.invalidateQueries({ queryKey: ["secrets"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["devices"] });
+      toast("Vault updated from another device");
+    }).catch(() => undefined);
+    return () => {
+      void unlisten.then((fn) => fn?.());
+    };
+  }, [queryClient]);
 
   // Stay reachable for the whole unlocked vault session. Previously the
   // listener and mDNS advertisement existed only while the Sync page was

@@ -227,7 +227,7 @@ pub async fn sync_now(
         .parse()
         .map_err(|_| invalid("Not a valid device address."))?;
 
-    tauri::async_runtime::spawn_blocking(move || {
+    let summary = tauri::async_runtime::spawn_blocking(move || {
         let client_conf = Arc::new(client_config(&identity, trusted).map_err(IpcError::from)?);
         let stream = TcpStream::connect_timeout(&target, Duration::from_secs(10))
             .map_err(|_| internal("Could not reach that device."))?;
@@ -238,13 +238,31 @@ pub async fn sync_now(
 
         let store = Store::open(&path).map_err(IpcError::from)?;
         let result = run_sync_session(&mut tls, &store).map_err(IpcError::from)?;
-        Ok(SyncSummary {
+        Ok::<SyncSummary, IpcError>(SyncSummary {
             records_applied: result.applied,
             conflicts: result.conflicts,
         })
     })
     .await
-    .map_err(|_| internal("sync task failed"))?
+    .map_err(|_| internal("sync task failed"))??;
+
+    // The sync wrote reconciled rows through its own `Store` connection, not
+    // through the unlocked `Vault`, whose in-memory index still predates them.
+    // Refresh it and tell the UI so the just-synced secrets actually appear --
+    // otherwise this device keeps showing its pre-sync list despite the
+    // database being up to date. See `Vault::reload_index`.
+    if summary.records_applied > 0 {
+        let _ = state.with(|v| v.reload_index());
+        notify_records_changed(&app);
+    }
+    Ok(summary)
+}
+
+/// Tell the frontend that records changed underneath it (a sync applied new or
+/// updated secrets), so it refetches instead of showing a stale list. The
+/// vault stays unaffected if no window is listening.
+fn notify_records_changed(app: &AppHandle) {
+    let _ = app.emit("vault://records-changed", ());
 }
 
 /// Handle to a running `sync_listen_start` background thread, so
@@ -356,8 +374,10 @@ fn run_listen_loop(
                     continue;
                 };
                 let vault_db_path = vault_db_path.clone();
+                let app_for_conn = app.clone();
                 std::thread::spawn(move || {
-                    let _ = handle_incoming_sync(stream, server_conf, &vault_db_path);
+                    let _ =
+                        handle_incoming_sync(&app_for_conn, stream, server_conf, &vault_db_path);
                 });
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -383,6 +403,7 @@ fn run_listen_loop(
 }
 
 fn handle_incoming_sync(
+    app: &AppHandle,
     stream: TcpStream,
     server_conf: rustls::ServerConfig,
     vault_db_path: &std::path::Path,
@@ -392,7 +413,20 @@ fn handle_incoming_sync(
     let mut stream = stream;
     let mut tls = rustls::Stream::new(&mut conn, &mut stream);
     let store = Store::open(vault_db_path)?;
-    run_sync_session(&mut tls, &store)?;
+    let result = run_sync_session(&mut tls, &store)?;
+
+    // A device receiving a push is passive -- there is no `sync_now` return
+    // value for the UI to react to here -- so this is the only place that can
+    // refresh the in-memory index and prod the window after an inbound sync.
+    // Without it, the receiving device (the exact "phone still shows old
+    // variables" symptom) keeps serving its stale unlock-time index even
+    // though the database now holds the new rows. See `Vault::reload_index`.
+    if result.applied > 0 {
+        if let Some(vault_state) = app.try_state::<VaultState>() {
+            let _ = vault_state.with(|v| v.reload_index());
+        }
+        notify_records_changed(app);
+    }
     Ok(())
 }
 
