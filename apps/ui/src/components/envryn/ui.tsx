@@ -378,11 +378,15 @@ export function Modal({
               : undefined
           }
           className={cn(
-            "envryn-modal fixed left-1/2 top-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-98",
+            // `flex max-h-[...] flex-col` + a scrolling body cap the desktop
+            // dialog to the viewport so a tall form (many fields) can never
+            // overflow the top on a short window -- the mobile bottom-sheet
+            // rules in styles.css already do this; this is the desktop half.
+            "envryn-modal fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-1rem)] w-full -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-[0_16px_48px_-12px_rgba(0,0,0,0.6)] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-98",
             width,
           )}
         >
-          <div className="envryn-modal-header flex items-start justify-between gap-4 border-b border-border px-4 py-2.5">
+          <div className="envryn-modal-header flex shrink-0 items-start justify-between gap-4 border-b border-border px-4 py-2.5">
             <div>
               <DialogPrimitive.Title className="text-[13px] font-medium">
                 {title}
@@ -403,9 +407,11 @@ export function Modal({
               </button>
             </DialogPrimitive.Close>
           </div>
-          {children && <div className="envryn-modal-body px-4 py-3.5">{children}</div>}
+          {children && (
+            <div className="envryn-modal-body min-h-0 overflow-y-auto px-4 py-3.5">{children}</div>
+          )}
           {footer && (
-            <div className="envryn-modal-footer flex items-center justify-end gap-2 border-t border-border px-4 py-2.5">
+            <div className="envryn-modal-footer flex shrink-0 items-center justify-end gap-2 border-t border-border px-4 py-2.5">
               {footer}
             </div>
           )}

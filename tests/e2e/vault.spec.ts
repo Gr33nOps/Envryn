@@ -645,7 +645,7 @@ test("persists desktop settings and exercises Windows unlock, local AI, and pass
   await createDisposableVault(page);
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
-  await expect(page.getByText("Version 0.1.9")).toBeVisible();
+  await expect(page.getByText("Version 0.1.10")).toBeVisible();
 
   await page.getByLabel("Auto-lock the vault").selectOption("15");
   await page.getByLabel("Clear clipboard after copying").selectOption("60");
