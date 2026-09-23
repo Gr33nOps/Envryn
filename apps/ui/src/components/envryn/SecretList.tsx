@@ -251,13 +251,23 @@ export function SecretList({
                     >
                       {secret.name}
                     </span>
-                    <span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-subtle-foreground">
-                      <span className="truncate">
+                    {secret.expiresMs != null ? (
+                      <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-subtle-foreground">
+                        <span className="truncate">
+                          {secret.provider ?? secret.type}
+                          {secret.tags?.length ? ` · ${secret.tags.join(" · ")}` : ""}
+                        </span>
+                        <ExpiryChip expiresMs={secret.expiresMs} />
+                      </span>
+                    ) : (
+                      // No expiry: keep the original single-span markup exactly,
+                      // so a list of many non-expiring rows carries zero extra
+                      // per-row cost (the 1,000-record performance path).
+                      <span className="mt-0.5 block truncate text-[11px] text-subtle-foreground">
                         {secret.provider ?? secret.type}
                         {secret.tags?.length ? ` · ${secret.tags.join(" · ")}` : ""}
                       </span>
-                      <ExpiryChip expiresMs={secret.expiresMs} />
-                    </span>
+                    )}
                   </span>
                   {secret.damaged && (
                     <span title="Needs review" aria-label="Needs review">
