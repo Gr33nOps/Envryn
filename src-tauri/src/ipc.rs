@@ -603,8 +603,14 @@ pub async fn backup_restore(
         return Ok(None);
     };
 
+    // Decrypt first (Argon2id, deliberately slow) off the async runtime, so a
+    // wrong backup password fails here with the current vault untouched.
     let backup_password = Zeroizing::new(backup_password);
-    let records = envryn_core::backup::restore(&bytes, &backup_password)?;
+    let records = tauri::async_runtime::spawn_blocking(move || {
+        envryn_core::backup::restore(&bytes, &backup_password)
+    })
+    .await
+    .map_err(|_| internal("restore task failed"))??;
 
     // Close the current vault so its database file is not held open.
     if let Ok(mut guard) = state.0.lock() {
@@ -615,6 +621,26 @@ pub async fn backup_restore(
     }
 
     let vault_path = vault_path(&app)?;
+    let restored = records.len();
+    let vault = tauri::async_runtime::spawn_blocking(move || {
+        swap_in_restored_vault(&vault_path, &new_master_password, &records)
+    })
+    .await
+    .map_err(|_| internal("restore task failed"))??;
+
+    state.install(vault)?;
+    Ok(Some(RestoreSummary { restored }))
+}
+
+/// Move the closed vault's files aside (timestamped, never deleted) and
+/// create the restored vault in their place, moving the originals back if
+/// that fails. Blocking file I/O plus key derivation, so callers run it on a
+/// blocking thread.
+fn swap_in_restored_vault(
+    vault_path: &std::path::Path,
+    new_master_password: &Zeroizing<String>,
+    records: &[envryn_core::model::SecretRecord],
+) -> IpcResult<Vault> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -633,27 +659,19 @@ pub async fn backup_restore(
 
     let created = (|| {
         let params = kdf::calibrate(700);
-        let mut vault = Vault::create(&vault_path, &new_master_password, params)?;
-        for record in &records {
+        let mut vault = Vault::create(vault_path, new_master_password, params)?;
+        for record in records {
             vault.import_record(record.clone())?;
         }
         Ok::<Vault, Error>(vault)
     })();
-    let vault = match created {
-        Ok(vault) => vault,
-        Err(err) => {
-            for suffix in ["", "-wal", "-shm"] {
-                let _ =
-                    std::fs::remove_file(vault_path.with_file_name(format!("envryn.db{suffix}")));
-            }
-            for (src, dst) in moved.iter().rev() {
-                let _ = std::fs::rename(dst, src);
-            }
-            return Err(err.into());
+    created.map_err(|err| {
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(vault_path.with_file_name(format!("envryn.db{suffix}")));
         }
-    };
-
-    let restored = records.len();
-    state.install(vault)?;
-    Ok(Some(RestoreSummary { restored }))
+        for (src, dst) in moved.iter().rev() {
+            let _ = std::fs::rename(dst, src);
+        }
+        err.into()
+    })
 }
