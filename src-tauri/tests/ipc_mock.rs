@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use envryn_core::crypto::kdf::KdfParams;
 use envryn_core::vault::Vault;
-use envryn_lib::ai::{self, AiState};
+use envryn_lib::detect;
 use envryn_lib::ipc::{self, VaultState};
 use envryn_lib::sync::{PairingState, SyncListenState};
 use tauri::ipc::{CallbackFn, InvokeBody};
@@ -64,15 +64,16 @@ fn build_mock_app() -> App<MockRuntime> {
         .manage(VaultState::default())
         .manage(PairingState::default())
         .manage(SyncListenState::default())
-        .manage(AiState::default())
         .invoke_handler(tauri::generate_handler![
-            ai::classify_deterministic,
+            detect::classify_value,
+            detect::suggest_secret_name,
             ipc::vault_lock,
             ipc::secret_list,
             ipc::secret_search,
             ipc::project_list,
             ipc::project_create,
             ipc::project_rename,
+            ipc::project_delete,
             ipc::secret_reveal,
             ipc::secret_create,
             ipc::secret_update,
@@ -162,7 +163,7 @@ fn call(
 }
 
 #[test]
-fn classify_deterministic_dispatches_with_no_state_at_all() {
+fn classify_value_dispatches_with_no_state_at_all() {
     let app = build_mock_app();
     let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
@@ -174,18 +175,18 @@ fn classify_deterministic_dispatches_with_no_state_at_all() {
     // crate before layering state injection on top of it.
     let hit = call(
         &webview,
-        "classify_deterministic",
+        "classify_value",
         serde_json::json!({ "value": "ghp_1234567890abcdef1234567890abcdef1234" }),
     )
-    .expect("classify_deterministic succeeds");
+    .expect("classify_value succeeds");
     assert_eq!(hit["kind"], "Token");
 
     let miss = call(
         &webview,
-        "classify_deterministic",
+        "classify_value",
         serde_json::json!({ "value": "just some plain text" }),
     )
-    .expect("classify_deterministic succeeds");
+    .expect("classify_value succeeds");
     assert!(miss.is_null(), "an unrecognized value must match nothing");
 }
 
@@ -332,4 +333,71 @@ fn secret_conflicts_and_conflict_count_start_empty_on_a_fresh_vault() {
     let all = call(&webview, "conflict_list_all", serde_json::json!({}))
         .expect("conflict_list_all succeeds");
     assert_eq!(all.as_array().expect("array").len(), 0);
+}
+
+#[test]
+fn suggest_secret_name_returns_a_name_or_null_for_unknown() {
+    let app = build_mock_app();
+    let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .expect("mock webview builds");
+
+    let named = call(
+        &webview,
+        "suggest_secret_name",
+        serde_json::json!({ "value": "postgres://app:pw@db.internal:5432/app" }),
+    )
+    .expect("suggest_secret_name succeeds");
+    assert_eq!(named, "DATABASE_URL");
+
+    let unknown = call(
+        &webview,
+        "suggest_secret_name",
+        serde_json::json!({ "value": "nothing recognisable here" }),
+    )
+    .expect("suggest_secret_name succeeds");
+    assert!(
+        unknown.is_null(),
+        "an unrecognised value must be reported as unknown"
+    );
+}
+
+#[test]
+fn project_delete_removes_the_project_and_its_secrets() {
+    let (app, _cleanup) = test_app_with_unlocked_vault();
+    let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .expect("mock webview builds");
+
+    call(
+        &webview,
+        "project_create",
+        serde_json::json!({ "name": "Doomed" }),
+    )
+    .expect("project_create succeeds");
+    call(
+        &webview,
+        "secret_create",
+        serde_json::json!({ "input": {
+            "name": "DOOMED_KEY",
+            "project": "Doomed",
+            "environment": "Development",
+            "payload": { "kind": "ApiKey", "value": "v" },
+            "tags": []
+        }}),
+    )
+    .expect("secret_create succeeds");
+
+    let deleted = call(
+        &webview,
+        "project_delete",
+        serde_json::json!({ "name": "Doomed" }),
+    )
+    .expect("project_delete succeeds");
+    assert_eq!(deleted, 1);
+
+    let secrets = call(&webview, "secret_list", serde_json::json!({})).expect("secret_list");
+    assert_eq!(secrets.as_array().map(Vec::len), Some(0));
+    let projects = call(&webview, "project_list", serde_json::json!({})).expect("project_list");
+    assert_eq!(projects.as_array().map(Vec::len), Some(0));
 }

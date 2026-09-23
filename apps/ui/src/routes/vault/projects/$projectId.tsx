@@ -1,14 +1,21 @@
 import * as React from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Plus, ChevronLeft, Pencil, Check, Upload, X as XIcon } from "lucide-react";
+import { Plus, ChevronLeft, Pencil, Check, Trash2, Upload, X as XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { type Environment, type Project, type Secret } from "@/lib/envryn-data";
 import * as ipc from "@/lib/ipc";
-import { useProjects, useRenameProject, useSecretList, useUpdateSecret } from "@/lib/use-vault";
+import {
+  useDeleteProject,
+  useProjects,
+  useRenameProject,
+  useSecretList,
+  useUpdateSecret,
+} from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
 import { useVaultUI } from "@/components/envryn/vault-context";
 import {
   Button,
+  ConfirmDialog,
   EmptyState,
   IconButton,
   Input,
@@ -127,7 +134,9 @@ function ProjectTitle({ project, secrets }: Readonly<{ project: Project; secrets
       {project.name}
       <IconButton
         label="Rename project"
-        className="opacity-0 transition-opacity group-hover:opacity-100"
+        // Hover-revealed on desktop; always visible on touch screens, which
+        // have no hover, and when reached by keyboard.
+        className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
         onClick={() => setRenaming(true)}
       >
         <Pencil />
@@ -136,12 +145,30 @@ function ProjectTitle({ project, secrets }: Readonly<{ project: Project; secrets
   );
 }
 
+function emptyTitle(query: string, environment: string, projectSecretCount: number): string {
+  if (query) return `No results for "${query}"`;
+  if (projectSecretCount === 0) return "No secrets yet";
+  if (environment === "—") return "No secrets without an environment";
+  return `No secrets in ${environment}`;
+}
+
+function deleteProjectBody(count: number): string {
+  const what =
+    count === 0
+      ? "This removes the empty project."
+      : `This removes the project and its ${count} secret${count === 1 ? "" : "s"}.`;
+  return `${what} Paired devices remove them too when they next sync. This can't be undone.`;
+}
+
 function ProjectDetails() {
   const secrets = useSecretList();
   const projects = useProjects();
   const { projectId } = Route.useParams();
   const { env } = Route.useSearch();
   const { openAdd, openImport } = useVaultUI();
+  const navigate = useNavigate();
+  const deleteProject = useDeleteProject();
+  const [confirmingDelete, setConfirmingDelete] = React.useState(false);
   const [q, setQ] = React.useState("");
   const [sort, setSort] = React.useState("name");
 
@@ -156,6 +183,7 @@ function ProjectDetails() {
   }
 
   const currentEnvironment = active ?? project.environments[0]?.name ?? "—";
+  const projectSecretCount = project.environments.reduce((sum, e) => sum + e.count, 0);
 
   const items = secrets
     .filter(
@@ -182,7 +210,16 @@ function ProjectDetails() {
           </Link>
         }
         actions={
-          <div className="flex items-center gap-2">
+          <div className="project-actions flex items-center gap-2">
+            <Button
+              variant="secondary"
+              aria-label="Delete project"
+              title="Delete project"
+              className="project-delete"
+              onClick={() => setConfirmingDelete(true)}
+            >
+              <Trash2 />
+            </Button>
             <Button
               variant="secondary"
               onClick={() =>
@@ -209,22 +246,28 @@ function ProjectDetails() {
       />
 
       <div className="space-y-3 px-5 pb-5">
-        <Tabs
-          variant="segmented"
-          items={project.environments.map((e) => ({
-            value: e.name,
-            label: e.name,
-            count: e.count,
-          }))}
-          value={currentEnvironment}
-          onChange={setActive}
-        />
+        {project.environments.length > 0 && (
+          <Tabs
+            variant="segmented"
+            items={project.environments.map((e) => ({
+              value: e.name,
+              label: e.name,
+              count: e.count,
+            }))}
+            value={currentEnvironment}
+            onChange={setActive}
+          />
+        )}
 
         <div className="flex items-center gap-2">
           <SearchField
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder={`Search ${currentEnvironment.toLowerCase()} secrets...`}
+            placeholder={
+              currentEnvironment === "—"
+                ? "Search secrets..."
+                : `Search ${currentEnvironment.toLowerCase()} secrets...`
+            }
             className="max-w-[260px]"
           />
           <Select value={sort} onChange={(e) => setSort(e.target.value)} className="w-[130px]">
@@ -235,8 +278,14 @@ function ProjectDetails() {
 
         {items.length === 0 ? (
           <EmptyState
-            title={q ? `No results for "${q}"` : `No secrets in ${currentEnvironment}`}
-            body={q ? "Try another name, project, or tag." : "Add a secret to this environment."}
+            title={emptyTitle(q, currentEnvironment, projectSecretCount)}
+            body={
+              q
+                ? "Try another name, project, or tag."
+                : projectSecretCount === 0
+                  ? "Add a secret, or import a .env file."
+                  : "Add a secret to this environment."
+            }
             action={
               q ? undefined : (
                 <div className="flex items-center justify-center gap-2">
@@ -272,6 +321,31 @@ function ProjectDetails() {
           <SecretList items={items} columns={["project", "environment", "type", "updated"]} />
         )}
       </div>
+      <ConfirmDialog
+        open={confirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title={`Delete ${project.name}?`}
+        body={deleteProjectBody(projectSecretCount)}
+        confirmLabel="Delete project"
+        onConfirm={() => {
+          void (async () => {
+            try {
+              const removed = await deleteProject.mutateAsync(project.name);
+              toast(
+                `Deleted ${project.name}`,
+                removed
+                  ? { description: `${removed} secret${removed === 1 ? "" : "s"} removed.` }
+                  : {},
+              );
+              void navigate({ to: "/vault/projects" });
+            } catch (err) {
+              toast(
+                err instanceof ipc.IpcError ? err.message : "This project could not be deleted.",
+              );
+            }
+          })();
+        }}
+      />
     </>
   );
 }

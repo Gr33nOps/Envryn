@@ -68,7 +68,6 @@ ignore = [
     { id = "RUSTSEC-2024-0429", reason = "unsound Iterator impl in glib, transitive via tauri/wry's GTK3 (Linux-only) backend; not reachable on the Windows build this project ships" },
     # Small unmaintained utility crates, both transitive and both with no
     # known vulnerability, only "no longer updated."
-    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained (archived by its author) but has no known vulnerability; transitive via candle-core's gemm dependency, not a direct choice of this project" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained but has no known vulnerability; transitive via glib-macros (GTK3/Linux-only path, see above)" },
     # The `unic-*` family (Unicode data crates from the now-archived
     # rust-unic project), transitive via `urlpattern` (a Tauri dependency
@@ -117,7 +116,7 @@ ignore = false
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
-# envryn-core/envryn-ai-worker are path dependencies within this workspace,
+# The envryn-* crates are path dependencies within this workspace,
 # never published to crates.io -- they have no meaningful "version" to pin,
 # unlike an actual `foo = "*"` pointing at the registry, which is what this
 # check exists to catch.
@@ -127,17 +126,14 @@ workspace-default-features = "allow"
 external-default-features = "allow"
 allow-workspace = true
 deny = [
-    # docs/DEPENDENCY_POLICY.md section 2: "Any HTTP client outside the
-    # model-download module." cargo-deny bans a crate for the whole
-    # workspace, not per-module -- it cannot express "ureq is fine in
-    # ai/model_download.rs but nowhere else" (that finer-grained,
-    # per-source-location check is .semgrep/network-egress.yml's job). What
-    # this list *can* enforce is that no *second, undiscussed* HTTP client
-    # ever enters the tree -- ureq is the one exception, already reviewed
-    # and present.
-    { crate = "reqwest", reason = "not the reviewed HTTP client -- ureq is; see docs/DEPENDENCY_POLICY.md section 2 and .semgrep/network-egress.yml" },
-    { crate = "hyper", reason = "not the reviewed HTTP client -- ureq is; see docs/DEPENDENCY_POLICY.md section 2 and .semgrep/network-egress.yml" },
-    { crate = "curl", reason = "not the reviewed HTTP client -- ureq is; see docs/DEPENDENCY_POLICY.md section 2 and .semgrep/network-egress.yml" },
+    # docs/DEPENDENCY_POLICY.md section 2: no HTTP client. Envryn's only
+    # network path is LAN sync over mutual TLS; the one HTTP client it used
+    # to carry (ureq, for the local-AI model download) left with local AI.
+    # .semgrep/network-egress.yml additionally flags any HTTP call in source.
+    { crate = "ureq", reason = "no HTTP client -- Envryn's only network path is LAN sync; see docs/DEPENDENCY_POLICY.md section 2" },
+    { crate = "reqwest", reason = "no HTTP client -- Envryn's only network path is LAN sync; see docs/DEPENDENCY_POLICY.md section 2" },
+    { crate = "hyper", reason = "no HTTP client -- Envryn's only network path is LAN sync; see docs/DEPENDENCY_POLICY.md section 2" },
+    { crate = "curl", reason = "no HTTP client -- Envryn's only network path is LAN sync; see docs/DEPENDENCY_POLICY.md section 2" },
     # docs/DEPENDENCY_POLICY.md section 2: "Alternative cryptographic
     # implementations. One implementation per primitive, listed in
     # CRYPTOGRAPHY.md." rustls (backed by ring) is the one TLS stack; these

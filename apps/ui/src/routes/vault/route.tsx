@@ -9,7 +9,6 @@ import { SecretPanel } from "@/components/envryn/SecretPanel";
 import { SecretFormModal } from "@/components/envryn/SecretForm";
 import { SearchPalette } from "@/components/envryn/SearchPalette";
 import { EnvImportModal } from "@/components/envryn/EnvImportModal";
-import { StructuredExtractModal } from "@/components/envryn/StructuredExtractModal";
 import { MobileNavigation } from "@/components/envryn/MobileNavigation";
 import { Wordmark } from "@/components/envryn/Logo";
 import { VaultUIContext, type ImportPreset } from "@/components/envryn/vault-context";
@@ -17,6 +16,7 @@ import { type Secret } from "@/lib/envryn-data";
 import { useClearVaultCache, useRevealSecret, useSecretList } from "@/lib/use-vault";
 import { copyValue, forgetClipboardTimer } from "@/lib/vault-actions";
 import { isTauri, settingsGet, syncListenStart, syncListenStop, vaultLock } from "@/lib/ipc";
+import { useAutoSync } from "@/lib/auto-sync";
 
 export const Route = createFileRoute("/vault")({
   component: VaultLayout,
@@ -52,7 +52,6 @@ function VaultLayout() {
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
   const [importPreset, setImportPreset] = React.useState<ImportPreset | undefined>();
-  const [extractOpen, setExtractOpen] = React.useState(false);
 
   // Mutations refresh the list with new objects. Keep an already-open details
   // panel attached to the refreshed record so saved edits are visible
@@ -67,6 +66,10 @@ function VaultLayout() {
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();
   const queryClient = useQueryClient();
+
+  // Keep paired devices in sync in the background while unlocked and visible
+  // (off when "Sync automatically" is turned off in Settings).
+  useAutoSync();
 
   // A sync (either a manual "Sync now" or an inbound push from a paired
   // device) applies records to the database underneath the cached lists. The
@@ -199,7 +202,6 @@ function VaultLayout() {
         setImportPreset(preset);
         setImportOpen(true);
       },
-      openExtract: () => setExtractOpen(true),
     }),
     [selected],
   );
@@ -263,7 +265,6 @@ function VaultLayout() {
       />
       <SearchPalette open={searchOpen} onOpenChange={setSearchOpen} onSelect={setSelected} />
       <EnvImportModal open={importOpen} onOpenChange={setImportOpen} preset={importPreset} />
-      <StructuredExtractModal open={extractOpen} onOpenChange={setExtractOpen} />
     </VaultUIContext.Provider>
   );
 }

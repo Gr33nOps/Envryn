@@ -44,15 +44,15 @@ re-derived here · ⚠️ partial / known limitation · ❌ not implemented · �
 ## Secret handling in memory
 
 - 📄 `zeroize`/`secrecy` wrap all key material and decrypted plaintext.
-- ✅ Grepped `crates/` for `println!`/`eprintln!`/`log::*!`: no shipped code path logs a secret,
-  prompt, or model output. Two dev-only `#[ignore]`d test files print synthetic test values only.
+- ✅ Grepped `crates/` for `println!`/`eprintln!`/`log::*!`: no shipped code path logs a secret
+  or decrypted value. Two dev-only `#[ignore]`d test files print synthetic test values only.
 
 ## Filesystem permissions and temp files
 
-- ✅ Vault DB and AI model files live under the OS app-data directory (Windows profile ACL, not
+- ✅ The vault DB lives under the OS app-data directory (Windows profile ACL, not
   world-readable by default).
-- ✅ Model downloads verified size + SHA-256 before an atomic rename from `.part`; a mismatch
-  deletes the partial file (`ai/model_download.rs`, read directly, tests re-run).
+- ✅ Since 0.2.0 nothing is downloaded at runtime; a leftover `models` folder from the removed
+  local-AI feature is deleted on first launch.
 - ➖ Android filesystem hardening not yet implemented (scoped out, `ARCHITECTURE.md` §7).
 
 ## Clipboard handling
@@ -67,8 +67,6 @@ re-derived here · ⚠️ partial / known limitation · ❌ not implemented · �
 - ✅ No Sentry/crash-reporting/telemetry SDK anywhere in the dependency tree; `deny.toml`
   structurally bans the `sentry` crate. Confirmed no Sentry project exists for Envryn in the
   connected org.
-- 📄 `.semgrep/ai-no-content-logging.yml` (0 findings, re-run this audit via the CLI) backs
-  AI-INV-006.
 
 ## Import / export / backups
 
@@ -148,13 +146,8 @@ re-derived here · ⚠️ partial / known limitation · ❌ not implemented · �
 
 ## AI subsystem
 
-- ✅ AI worker binds loopback-only, requires a 192-bit random per-session bearer token on every
-  request (verified in `main.rs`/`protocol.rs` directly, not just the doc claim).
-- ✅ `envryn-ai-worker` has no dependency on `envryn-core` (structural isolation) - the project's
-  own `cargo tree -p envryn-ai-worker -i envryn-core` check, re-verifiable, not re-run fresh this
-  audit but consistent with `Cargo.lock`.
-- 📄 `SanitizedPrompt` constructible only inside `ai::gateway` (compile-time enforced,
-  `trybuild` test).
+- ➖ Removed in 0.2.0. Type and name suggestions are deterministic rules in
+  `envryn_core::classify`, with no model, no worker process, and no network path.
 
 ## Password policy
 

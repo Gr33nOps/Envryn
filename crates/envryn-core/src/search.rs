@@ -1,24 +1,44 @@
-//! Deterministic search-query parsing: turn an obvious query into a
-//! structured filter in plain Rust, before any model is consulted.
+//! Search-query parsing: turn a typed query into a structured filter.
 //!
-//! This is to [`crate::ai::gateway::AiGateway::parse_search_intent`] exactly
-//! what [`crate::ai::classify`] is to `classify_pasted_value`: the fast,
-//! always-available path that handles the cases a model has no business
-//! being asked about, leaving the model to interpret genuinely vague
-//! phrasing.
-//!
-//! **Why this exists.** Natural-language search used to hand *every* query
-//! straight to a 1.5B model and ask it to rediscover metadata the vault
-//! already knows precisely -- which environment names exist, which secret
-//! kinds exist, which providers are recognised. Asking a small model to
-//! recover "production" from the word "production" is both slower and less
-//! reliable than a string comparison, and when it failed (which was often)
-//! the user got "No match found" for a query whose answer was sitting right
-//! there. `docs/AI_DATA_ACCESS.md`'s Tier 1 search row is unchanged by this:
-//! the model still only ever sees the query, never a record.
+//! "production stripe keys" becomes environment = Production plus the free
+//! text "stripe keys", using exact word lists for the environments and secret
+//! kinds the vault actually has. It is instant and offline, and anything it
+//! does not recognise stays as free text, so a partly understood query still
+//! narrows the list instead of returning nothing.
 
-use crate::ai::schemas::SearchFilterOutput;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
 use crate::model::{Environment, SecretKind};
+
+/// The structured part of a search query. Every field is optional: a query
+/// that names only an environment leaves the rest empty.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct SearchFilter {
+    #[ts(optional = nullable)]
+    pub project: Option<String>,
+    #[ts(optional = nullable)]
+    pub environment: Option<Environment>,
+    #[ts(optional = nullable)]
+    pub kind: Option<SecretKind>,
+    pub tags: Vec<String>,
+    #[ts(optional = nullable)]
+    pub text: Option<String>,
+}
+
+impl SearchFilter {
+    /// True when this filter would not narrow anything, so the caller should
+    /// fall back to plain matching rather than "filter by nothing".
+    pub fn is_empty(&self) -> bool {
+        self.project.is_none()
+            && self.environment.is_none()
+            && self.kind.is_none()
+            && self.tags.is_empty()
+            && self.text.as_deref().is_none_or(|t| t.trim().is_empty())
+    }
+}
 
 /// Words that map onto an [`Environment`], including the shorthands people
 /// actually type. Matched case-insensitively against whole words only.
@@ -77,17 +97,17 @@ const STOP_WORDS: &[&str] = &[
 ];
 
 /// Parse what can be parsed with certainty. Anything not recognised is left
-/// in [`SearchFilterOutput::text`] for substring matching, so a query this
+/// in [`SearchFilter::text`] for substring matching, so a query this
 /// function only partly understands still narrows correctly rather than
 /// returning nothing.
-pub fn parse_query(query: &str) -> SearchFilterOutput {
+pub fn parse_query(query: &str) -> SearchFilter {
     let lowered = query.trim().to_lowercase();
     if lowered.is_empty() {
-        return SearchFilterOutput::default();
+        return SearchFilter::default();
     }
 
     let mut remaining = lowered.clone();
-    let mut filter = SearchFilterOutput::default();
+    let mut filter = SearchFilter::default();
 
     // Phrases first: "api key" must be consumed before the bare word "key"
     // or "api" can be considered separately.
@@ -147,9 +167,7 @@ fn remove_word_sequence(query: &str, phrase: &str) -> String {
     }
     let mut out: Vec<&str> = Vec::new();
     let mut i = 0;
-    // `get`-based rather than indexed: this crate denies `indexing_slicing`
-    // outright, which is the same lint family that would have caught the
-    // out-of-bounds vocabulary lookup in the AI worker.
+    // `get`-based rather than indexed: this crate denies `indexing_slicing`.
     while let Some(word) = q.get(i) {
         let matches_here = q.get(i..i + p.len()).is_some_and(|w| w == p.as_slice());
         if matches_here {
@@ -195,11 +213,10 @@ mod tests {
         assert_eq!(f.text, None);
     }
 
-    /// The whole point of this module: a sentence a person would actually
-    /// type resolves to exact structured filters plus one residual term,
-    /// with the model never involved.
+    /// A sentence a person would actually type resolves to exact
+    /// structured filters plus one residual term.
     #[test]
-    fn a_natural_sentence_resolves_without_the_model() {
+    fn a_natural_sentence_resolves_to_filters() {
         let f = parse_query("show me my production stripe keys");
         assert_eq!(f.environment, Some(Environment::Production));
         assert_eq!(f.text.as_deref(), Some("stripe keys"));

@@ -20,12 +20,6 @@ where the detail lives, rather than four separate ~300-400 line documents to rec
          v
     Rust core (src-tauri + envryn-core)   TRUSTED -- holds keys, does crypto
          |
-         |  loopback TCP + per-session 192-bit bearer token,
-         |  regenerated every worker launch
-         v
-    AI worker process (envryn-ai-worker)   UNTRUSTED -- no keys, no DB,
-         |                                 no dependency on envryn-core
-         |
          |  mutual TLS 1.3, pinned device-certificate fingerprints,
          |  no CA, no name validation -- the pinned set IS the trust store
          v
@@ -34,19 +28,18 @@ where the detail lives, rather than four separate ~300-400 line documents to rec
 
 **Why the UI is untrusted despite being "inside" the app.** A Tauri WebView is a large attack
 surface Envryn does not fully control. The UI is treated as a hostile input source: it can request
-operations but cannot construct key material, cannot name a filesystem path outside two
-deliberate, documented exceptions (backup export/import), and cannot reach any Tauri plugin that
-would let it touch the filesystem, shell, network, or clipboard directly. This audit independently
+operations but cannot construct key material, cannot name a filesystem path at all (since 0.2.0
+backup and restore locations come from the native Save/Open dialog, opened by the Rust core), and
+cannot reach any Tauri plugin that would let it touch the filesystem, shell, network, or
+clipboard directly. The dialog and fs plugins are registered for the Rust core's own use and are
+not granted to the WebView. This audit independently
 confirmed the capability grant (`src-tauri/capabilities/default.json`: `core:default` only) and
 walked every `#[tauri::command]` in `ipc.rs` to confirm no path- or SQL-shaped parameter escapes
 that model.
 
-**Why the AI worker is a separate, less-trusted process.** It is explicitly in-scope in the threat
-model as reachable by "a malicious or curious local process running as the user" - so its trust
-boundary is enforced the same way a network service would be: loopback-only bind, a random
-per-session token nobody outside this process's own stdout stream can read, and structural
-isolation (`envryn-ai-worker` does not depend on `envryn-core` at the `Cargo.toml` level, so it
-cannot name a `Vmk` or a database handle even if compromised).
+**No AI process.** Releases before 0.2.0 ran an optional local-AI worker as a separate,
+less-trusted process. 0.2.0 removed it; type and name suggestions are deterministic string rules
+inside the trusted core (`envryn_core::classify`), so that boundary no longer exists.
 
 ## 2. Key hierarchy (normative: `CRYPTOGRAPHY.md` §2)
 
@@ -131,8 +124,6 @@ Worth stating plainly because it is easy to misread from the feature list alone:
   and ECDSA signatures are not deterministic, so there is no stable unwrap key derivable from one.
 - DPAPI protects a random 32-byte platform key, never the VMK directly, so a bug in the platform
   layer cannot produce a different unwrap code path for the VMK itself.
-- The AI worker's per-session token is 192 bits from a CSPRNG, checked on every request - not a
-  one-time handshake token trusted for the connection's lifetime.
 - The 8-character master-password minimum plus a strength estimate (§2) is **not** a guarantee of
   a strong password - it is a floor plus a nudge, and this document does not claim otherwise.
 
@@ -144,7 +135,6 @@ Worth stating plainly because it is easy to misread from the feature list alone:
 | Screen capture exclusion | `WDA_EXCLUDEFROMCAPTURE`, implemented | `FLAG_SECURE`, planned, not built |
 | Clipboard exclusion | Implemented (native tag + timed clear) | `EXTRA_IS_SENSITIVE`, planned, not built |
 | Auto-lock trigger | Idle poll + `WTS_SESSION_LOCK` hook, both implemented | Lifecycle trigger, planned, not built |
-| Local AI | Implemented (candle sidecar, job-object isolation) | Not in v1 |
 
 Android's gaps are scoped-out, documented absences, not defects discovered by this audit - see
 `ARCHITECTURE.md` §7 for the full table this one summarizes.

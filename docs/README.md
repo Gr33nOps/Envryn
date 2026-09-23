@@ -5,7 +5,6 @@ This is the best starting point if you want to understand how Envryn works, how 
 ## For users
 
 - [Update policy](UPDATE_POLICY.md): safe upgrades, backups, and rollback guidance
-- [AI data access](AI_DATA_ACCESS.md): exactly what the optional local model can receive
 - [Security and privacy testing](SECURITY_TESTING.md): checks you can run before trusting a build
 
 ## For contributors
@@ -20,8 +19,6 @@ This is the best starting point if you want to understand how Envryn works, how 
 - [Threat model](THREAT_MODEL.md)
 - [Cryptography](CRYPTOGRAPHY.md)
 - [Security invariants](SECURITY_INVARIANTS.md)
-- [AI security](AI_SECURITY.md)
-- [AI data access](AI_DATA_ACCESS.md)
 
 The historical [audit report](audits/AUDIT_REPORT.md) and [remediation report](audits/SECURITY_REMEDIATION_REPORT.md) record how the current controls were developed. When those reports conflict with current code or CI, the current guides and repository configuration are authoritative.
 

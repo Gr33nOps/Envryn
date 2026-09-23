@@ -114,8 +114,7 @@ impl KeySlot {
 /// The Vault Master Key. Everything in the vault is reachable from this.
 ///
 /// Never persisted except wrapped. Never leaves the Rust core. Never crosses
-/// the IPC boundary to the UI, and never reaches the AI subsystem
-/// (AI-INV-001).
+/// the IPC boundary to the UI.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct VaultMasterKey(SymmetricKey);
 

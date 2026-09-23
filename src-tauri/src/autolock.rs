@@ -76,10 +76,6 @@ fn lock_now(app: &AppHandle) {
     *guard = None;
     drop(guard);
 
-    if let Some(ai_state) = app.try_state::<crate::ai::AiState>() {
-        crate::ai::stop(&ai_state);
-    }
-
     let _ = app.emit("vault-locked", ());
 }
 

@@ -186,16 +186,12 @@ Right after uninstalling (§8), still on the same VM:
       ```
       Open the resulting `.pcapng` file - Wireshark is the easiest way to browse it if available;
       if not, `pktmon` also has a `format` command to dump it as text for a rougher read-through.
-- [ ] Do **one full pass** of this checklist *without* ever turning on the local-AI feature in
-      Settings, and confirm the capture shows **zero** network activity from Envryn the entire
-      time (install, use, uninstall).
-- [ ] Separately, do a pass where you *do* turn on and use the AI feature (which downloads a
-      model on first use) and confirm the capture shows connections to `huggingface.co` and
-      nowhere else during that download - no other host, no repeated/background connections after
-      it completes.
+- [ ] Do **one full pass** of this checklist and confirm the capture shows **zero** network
+      activity from Envryn the entire time (install, use, uninstall), other than the sync case
+      below. Envryn has no HTTP client, so there should be nothing else to see.
 - [ ] If you test device sync/pairing, confirm capture activity only appears while that flow is
       actively being used, to a local peer address on your own network, never anywhere else.
-- [ ] Any other connection you see - anything not explained by one of the three cases above - is
+- [ ] Any other connection you see - anything not explained by one of the two cases above - is
       a real finding. Stop and report it; don't wave it off as noise.
 
 ---

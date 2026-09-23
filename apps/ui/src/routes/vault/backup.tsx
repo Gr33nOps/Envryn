@@ -23,7 +23,6 @@ function CreateBackupModal({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }>) {
-  const [path, setPath] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -31,7 +30,6 @@ function CreateBackupModal({
 
   React.useEffect(() => {
     if (open) {
-      setPath("");
       setPassword("");
       setConfirm("");
       setError(null);
@@ -41,10 +39,6 @@ function CreateBackupModal({
 
   async function create() {
     setError(null);
-    if (!path.trim()) {
-      setError("Choose where to save the backup file.");
-      return;
-    }
     if (password.length < 8) {
       setError("Your backup password must be at least 8 characters.");
       return;
@@ -55,9 +49,12 @@ function CreateBackupModal({
     }
     setLoading(true);
     try {
-      await backupCreate(path.trim(), password);
+      // Rust opens the system Save dialog; `null` means it was cancelled,
+      // which is not an error -- leave the modal open to try again.
+      const savedTo = await backupCreate(password);
+      if (savedTo === null) return;
       onOpenChange(false);
-      toast("Backup created", { description: path.trim() });
+      toast("Backup saved", { description: savedTo });
     } catch (err) {
       setError(err instanceof IpcError ? err.message : "That backup could not be created.");
     } finally {
@@ -70,32 +67,21 @@ function CreateBackupModal({
       open={open}
       onOpenChange={onOpenChange}
       title="Create encrypted backup"
-      description="Choose a password for this backup, separate from your vault password. Envryn cannot recover a lost backup password."
+      description="Choose a password for this backup, separate from your vault password. Envryn cannot recover a lost backup password. You'll pick where to save the file next."
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button variant="primary" loading={loading} onClick={() => void create()}>
-            Create backup
+            Choose location and save
           </Button>
         </>
       }
     >
       <div className="space-y-3">
-        <Field
-          label="Save to"
-          hint="A full file path on this PC, e.g. C:\Users\You\Documents\envryn-backup.envrynbk"
-        >
-          <Input
-            mono
-            autoFocus
-            value={path}
-            onChange={(event) => setPath(event.target.value)}
-            placeholder="C:\Users\You\Documents\envryn-backup.envrynbk"
-          />
-        </Field>
         <Field label="Backup password" error={error ?? undefined}>
           <Input
             type="password"
+            autoFocus
             invalid={Boolean(error)}
             value={password}
             onChange={(event) => {
@@ -129,7 +115,6 @@ function RestoreBackupModal({
   onOpenChange: (v: boolean) => void;
   onRestored: (count: number) => void;
 }>) {
-  const [path, setPath] = React.useState("");
   const [backupPassword, setBackupPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
@@ -138,7 +123,6 @@ function RestoreBackupModal({
 
   React.useEffect(() => {
     if (open) {
-      setPath("");
       setBackupPassword("");
       setNewPassword("");
       setConfirm("");
@@ -149,8 +133,8 @@ function RestoreBackupModal({
 
   async function restore() {
     setError(null);
-    if (!path.trim()) {
-      setError("Choose the backup file to restore.");
+    if (!backupPassword) {
+      setError("Enter the password this backup was created with.");
       return;
     }
     if (newPassword.length < 8) {
@@ -163,7 +147,9 @@ function RestoreBackupModal({
     }
     setLoading(true);
     try {
-      const summary = await backupRestore(path.trim(), backupPassword, newPassword);
+      // Rust opens the system Open dialog; `null` means it was cancelled.
+      const summary = await backupRestore(backupPassword, newPassword);
+      if (summary === null) return;
       onOpenChange(false);
       onRestored(summary.restored);
     } catch (err) {
@@ -178,12 +164,12 @@ function RestoreBackupModal({
       open={open}
       onOpenChange={onOpenChange}
       title="Restore from backup"
-      description="This replaces the vault currently on this PC. The existing vault file is kept, renamed aside with a timestamp, not deleted."
+      description="This replaces the vault currently on this device. The existing vault file is kept, renamed aside with a timestamp, not deleted. You'll choose the backup file next."
       footer={
         <>
           <Button onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button variant="primary" loading={loading} onClick={() => void restore()}>
-            Restore vault
+            Choose backup file and restore
           </Button>
         </>
       }
@@ -196,18 +182,10 @@ function RestoreBackupModal({
             password or the current vault's password.
           </p>
         </div>
-        <Field label="Backup file" hint="The full path to the .envrynbk file.">
-          <Input
-            mono
-            autoFocus
-            value={path}
-            onChange={(event) => setPath(event.target.value)}
-            placeholder="C:\Users\You\Documents\envryn-backup.envrynbk"
-          />
-        </Field>
         <Field label="Backup password">
           <Input
             type="password"
+            autoFocus
             value={backupPassword}
             onChange={(event) => setBackupPassword(event.target.value)}
           />

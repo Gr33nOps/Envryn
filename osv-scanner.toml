@@ -35,9 +35,6 @@ reason = "GTK3 Linux backend only; Envryn does not build or ship Linux"
 id = "RUSTSEC-2024-0429"
 reason = "glib is reachable only through Tauri's unshipped Linux GTK backend"
 [[IgnoredVulns]]
-id = "RUSTSEC-2024-0436"
-reason = "Unmaintained paste crate; no known vulnerability; transitive through candle"
-[[IgnoredVulns]]
 id = "RUSTSEC-2024-0370"
 reason = "Unmaintained proc-macro helper in the unshipped GTK dependency graph"
 [[IgnoredVulns]]

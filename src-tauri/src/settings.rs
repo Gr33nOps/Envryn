@@ -1,5 +1,5 @@
 //! Non-secret application preferences: auto-lock timeout, clipboard clear
-//! delay.
+//! delay, and whether to sync automatically.
 //!
 //! Deliberately not stored in the vault. These control *when* protective
 //! behaviour kicks in, not what is protected, and the vault must be usable
@@ -28,13 +28,13 @@ const MAX_CLIPBOARD_SECONDS: u32 = 300;
 pub struct AppSettings {
     pub auto_lock_minutes: u32,
     pub clipboard_clear_seconds: u32,
-    /// Whether the local AI subsystem may run at all. Defaults to `false` --
-    /// AI is opt-in, never a silent default, matching specification section
-    /// 2's "Local AI = OFF must leave every vault feature working." Turning
-    /// this off does not just hide the UI; `ai.rs` refuses every AI command
-    /// while it is false, so a stale cached frontend state can't route
-    /// around the setting.
-    pub ai_enabled: bool,
+    /// Sync with paired devices in the background while the vault is
+    /// unlocked and the app is open, instead of only when "Sync now" is
+    /// pressed. On by default: two paired devices that are both open should
+    /// simply agree. A settings file from an older build (which has no such
+    /// key, and may still carry the removed `ai_enabled` flag -- serde ignores
+    /// unknown keys) gets the default.
+    pub auto_sync: bool,
 }
 
 impl Default for AppSettings {
@@ -42,7 +42,7 @@ impl Default for AppSettings {
         Self {
             auto_lock_minutes: 5,
             clipboard_clear_seconds: 30,
-            ai_enabled: false,
+            auto_sync: true,
         }
     }
 }

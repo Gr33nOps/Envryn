@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ArrowDownUp, ChevronDown, Plus, Sparkles, Upload } from "lucide-react";
+import { ArrowDownUp, ChevronDown, Plus, Upload } from "lucide-react";
 import { categories, type SecretType } from "@/lib/envryn-data";
 import { useSecretList } from "@/lib/use-vault";
 import { SecretList } from "@/components/envryn/SecretList";
@@ -31,7 +31,7 @@ function matchesFilter(secretType: SecretType, filter: string): boolean {
 }
 
 function AllSecrets() {
-  const { openAdd, openImport, openExtract } = useVaultUI();
+  const { openAdd, openImport } = useVaultUI();
   const secrets = useSecretList();
   const [filter, setFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
@@ -191,14 +191,6 @@ function AllSecrets() {
           <div className="vault-list-footer flex items-center justify-between border-t border-border bg-background/35 px-3.5 py-2 text-[10.5px] text-subtle-foreground">
             <span>Encrypted values stay on this device.</span>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 text-primary transition-colors hover:text-foreground"
-                onClick={() => openExtract()}
-              >
-                <Sparkles className="size-3" />
-                Extract fields
-              </button>
               <button
                 type="button"
                 className="inline-flex items-center gap-1 text-primary transition-colors hover:text-foreground"

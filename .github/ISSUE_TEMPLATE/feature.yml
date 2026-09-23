@@ -30,7 +30,6 @@ body:
         - label: Android
         - label: Device sync
         - label: Vault format or cryptography
-        - label: Local AI
         - label: Accessibility
         - label: Documentation
   - type: checkboxes

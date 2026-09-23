@@ -14,7 +14,6 @@ interface VaultUI {
   openEdit: (s: Secret) => void;
   openSearch: () => void;
   openImport: (preset?: ImportPreset) => void;
-  openExtract: () => void;
 }
 
 export const VaultUIContext = React.createContext<VaultUI>({
@@ -24,7 +23,6 @@ export const VaultUIContext = React.createContext<VaultUI>({
   openEdit: () => {},
   openSearch: () => {},
   openImport: () => {},
-  openExtract: () => {},
 });
 
 export const useVaultUI = () => React.useContext(VaultUIContext);

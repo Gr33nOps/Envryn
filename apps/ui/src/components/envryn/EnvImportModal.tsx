@@ -46,32 +46,19 @@ export function parseEnvText(text: string): { key: string; value: string }[] {
   return entries;
 }
 
-/** Deterministic classification for every parsed entry; returns the keys it couldn't place. */
-async function classifyDeterministically(draft: ParsedEntry[]): Promise<string[]> {
-  const undetected: string[] = [];
-  for (const entry of draft) {
-    const deterministic = await ipc.classifyDeterministic(entry.value, entry.key).catch(() => null);
-    if (deterministic) {
-      entry.type = KIND_TO_TYPE[deterministic.kind];
-    } else {
-      undetected.push(entry.key);
-    }
-  }
-  return undetected;
-}
-
-/** Local AI fallback for names deterministic matching couldn't place -- a no-op if AI is off. */
-async function classifyRemainingWithAi(draft: ParsedEntry[], undetected: string[]): Promise<void> {
-  if (undetected.length === 0) return;
-  const status = await ipc.aiStatus().catch(() => null);
-  if (!status?.enabled_in_settings || !status.engine_running) return;
-  const result = await ipc.aiClassifyEnvNames(undetected).catch(() => null);
-  if (!result) return;
-  const byName = new Map(result.names.map((n) => [n.name, n.kind]));
-  for (const entry of draft) {
-    const kind = byName.get(entry.key);
-    if (kind) entry.type = KIND_TO_TYPE[kind];
-  }
+/**
+ * Rule-based type detection for every parsed entry: the value's prefix or
+ * shape first, then the variable name (so `IGDB_CLIENT_SECRET` is recognised
+ * even when its value is opaque). Unrecognised entries keep the default
+ * "Environment" type for the user to review.
+ */
+async function detectTypes(draft: ParsedEntry[]): Promise<void> {
+  await Promise.all(
+    draft.map(async (entry) => {
+      const found = await ipc.classifyValue(entry.value, entry.key).catch(() => null);
+      if (found) entry.type = KIND_TO_TYPE[found.kind];
+    }),
+  );
 }
 
 function envImportDescription(stage: "paste" | "review", entryCount: number): string {
@@ -135,14 +122,7 @@ export function EnvImportModal({
     }
   }
 
-  /**
-   * Deterministic classification first (works with no AI, and is the only
-   * path that ever sees the *value*). Only names deterministic matching
-   * couldn't place are sent to the local model, one batch call for the
-   * whole file rather than one call per line -- and only the bare variable
-   * names cross that boundary, never the values (`docs/AI_DATA_ACCESS.md`
-   * Tier 1 "naming"), matching `ai_classify_env_names`'s own contract.
-   */
+  /** Parse the pasted/dropped text, detect each entry's type, then review. */
   async function parseAndClassify() {
     const parsed = parseEnvText(text);
     if (parsed.length === 0) {
@@ -160,8 +140,7 @@ export function EnvImportModal({
 
     setClassifying(true);
     try {
-      const undetected = await classifyDeterministically(draft);
-      await classifyRemainingWithAi(draft, undetected);
+      await detectTypes(draft);
     } finally {
       setClassifying(false);
     }
@@ -376,7 +355,8 @@ export function EnvImportModal({
         <div className="space-y-3">
           <div className="flex items-center gap-1.5 text-[10.5px] text-subtle-foreground">
             <Sparkles className="size-3" />
-            Types were detected automatically -- check them before importing.
+            Types were matched from known key formats and variable names -- check them before
+            importing.
           </div>
           <div className="max-h-[360px] overflow-y-auto rounded-md border border-border">
             <table className="w-full text-left text-[12px]">

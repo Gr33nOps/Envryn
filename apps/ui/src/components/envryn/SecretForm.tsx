@@ -2,7 +2,6 @@ import * as React from "react";
 import { Eye, EyeOff, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Field, IconButton, Input, Modal, Select } from "@/components/envryn/ui";
-import { isAndroidClient } from "@/lib/platform";
 import { secretTypes, typeFields, type Environment, type Secret } from "@/lib/envryn-data";
 import { useCreateSecret, useProjects, useUpdateSecret } from "@/lib/use-vault";
 import {
@@ -72,7 +71,7 @@ function ValueFieldLabel({
           className="inline-flex items-center gap-1 text-[10.5px] font-normal text-primary hover:text-foreground disabled:opacity-50"
         >
           <Sparkles className="size-3" />
-          {suggesting ? "Checking..." : "Suggest type"}
+          Suggest type
         </button>
       </span>
     );
@@ -91,7 +90,6 @@ export function SecretFormModal({
   secret?: Secret | null | undefined;
   preset?: Partial<Secret> | undefined;
 }>) {
-  const isAndroid = isAndroidClient();
   const projects = useProjects();
   const createSecret = useCreateSecret();
   const updateSecret = useUpdateSecret();
@@ -187,75 +185,53 @@ export function SecretFormModal({
   const extra = typeFields[type] ?? [];
 
   /**
-   * Deterministic classification first -- known-prefix/shape matching that
-   * works with no model installed (`docs/AI_DATA_ACCESS.md` section 3: "the
-   * AI is the fallback for values the rules do not recognise"). Only if
-   * that finds nothing does this fall back to the local model, and only if
-   * the user has turned it on -- a failed or declined AI call here just
-   * means no suggestion, never a blocked save.
+   * Rule-based: the value's known prefix or shape first, then the variable
+   * name. Instant, offline, and nothing leaves the device. When the rules do
+   * not recognise it, say "Unknown" instead of guessing -- the user picks.
    */
   async function suggestType() {
     if (!value.trim()) return;
     setSuggesting(true);
     try {
-      const deterministic = await ipc.classifyDeterministic(value, name);
-      if (deterministic) {
-        setType(KIND_TO_TYPE[deterministic.kind]);
-        if (deterministic.provider) setProvider(deterministic.provider);
-        toast(
-          deterministic.provider
-            ? `Looks like a ${deterministic.provider} credential`
-            : "Type detected",
-        );
+      const found = await ipc.classifyValue(value, name);
+      if (!found) {
+        toast("Type: Unknown", { description: "Choose the closest type from the list." });
         return;
       }
-      const status = await ipc.aiStatus().catch(() => null);
-      if (!status?.enabled_in_settings || !status.engine_running) {
-        toast("Couldn't recognize this value automatically. Enable local AI in Settings for more.");
-        return;
-      }
-      const result = await ipc.aiClassifyPastedValue(value);
-      if (result.confidence < 0.65) {
-        toast("Couldn't identify this credential reliably. Choose the closest type manually.");
-        return;
-      }
-      setType(KIND_TO_TYPE[result.kind]);
-      if (result.provider) setProvider(result.provider);
+      const detected = KIND_TO_TYPE[found.kind];
+      setType(detected);
+      if (found.provider) setProvider(found.provider);
       toast(
-        result.provider
-          ? `Local AI: looks like a ${result.provider} credential`
-          : "Local AI suggested a type",
+        `Type: ${detected}`,
+        found.provider ? { description: `Looks like a ${found.provider} credential.` } : {},
       );
     } catch (err) {
-      toast(err instanceof IpcError ? err.message : "Could not suggest a type for this value.");
+      toast(err instanceof IpcError ? err.message : "Could not check this value.");
     } finally {
       setSuggesting(false);
     }
   }
 
   /**
-   * L2, same data-access level as `suggestType`: the pasted value plus
-   * whatever provider deterministic classification already found (never a
-   * second round of AI-only detection just for this). Unlike type
-   * detection, there is no non-AI fallback for naming -- gated entirely on
-   * local AI being enabled and running, same as `docs/AI_DATA_ACCESS.md`'s
-   * Tier 1 "naming" row describes.
+   * Rule-based name: a pasted `NAME=value` line names itself, and a
+   * recognised key gets the name its service documents (`sk_live_...` is
+   * `STRIPE_SECRET_KEY`). Anything else is "Unknown" and the name field is
+   * left alone, so a secret is never saved as literally "Unknown".
    */
   async function suggestName() {
     if (!value.trim()) return;
     setSuggestingName(true);
     try {
-      const status = await ipc.aiStatus().catch(() => null);
-      if (!status?.enabled_in_settings || !status.engine_running) {
-        toast("Enable local AI in Settings to get name suggestions.");
+      const suggested = await ipc.suggestSecretName(value);
+      if (!suggested) {
+        toast("Name: Unknown", { description: "Envryn doesn't recognise this key. Type a name." });
         return;
       }
-      const deterministic = await ipc.classifyDeterministic(value, name).catch(() => null);
-      const result = await ipc.aiSuggestName(value, deterministic?.provider ?? null);
-      setName(result.name);
-      toast("Suggested a name based on this value.");
+      setName(suggested);
+      setError(null);
+      toast(`Name: ${suggested}`);
     } catch (err) {
-      toast(err instanceof IpcError ? err.message : "Could not suggest a name for this value.");
+      toast(err instanceof IpcError ? err.message : "Could not check this value.");
     } finally {
       setSuggestingName(false);
     }
@@ -372,7 +348,7 @@ export function SecretFormModal({
       <div className="space-y-4">
         <Field
           label={
-            !isAndroid && !editing && type !== "Note" && value.trim() ? (
+            !editing && type !== "Note" && value.trim() ? (
               <span className="flex items-center justify-between">
                 <span>Name</span>
                 <button
@@ -382,7 +358,7 @@ export function SecretFormModal({
                   className="inline-flex items-center gap-1 text-[10.5px] font-normal text-primary hover:text-foreground disabled:opacity-50"
                 >
                   <Sparkles className="size-3" />
-                  {suggestingName ? "Thinking..." : "Suggest name"}
+                  Suggest name
                 </button>
               </span>
             ) : (
@@ -448,7 +424,7 @@ export function SecretFormModal({
         <Field
           label={
             <ValueFieldLabel
-              showSuggestType={!isAndroid && !editing && type !== "Note" && Boolean(value.trim())}
+              showSuggestType={!editing && type !== "Note" && Boolean(value.trim())}
               isNote={type === "Note"}
               suggesting={suggesting}
               onSuggestType={() => void suggestType()}

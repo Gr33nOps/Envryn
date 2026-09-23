@@ -1,17 +1,15 @@
 rules:
-  - id: no-http-client-outside-model-download
+  - id: no-http-client
     languages: [rust]
     severity: ERROR
     message: >
-      An HTTP client call was found outside crates/envryn-core/src/ai/model_download.rs.
-      INV-010 permits exactly two outbound network paths: explicit user-initiated model
-      download, and LAN sync with an already-paired device. Anything else that reaches the
-      network here widens that surface silently -- see docs/DEPENDENCY_POLICY.md section 2 and
-      docs/THREAT_MODEL.md's privacy claims. If this call is genuinely part of the model
-      download flow, move it into ai/model_download.rs; if it is not, it should not exist.
+      An HTTP client call was found. Envryn makes no HTTP requests at all: since local AI (and
+      its one-time model download) was removed, INV-010's only outbound network path is LAN
+      sync with an already-paired device over mutual TLS. Any HTTP call widens that surface
+      silently -- see docs/DEPENDENCY_POLICY.md section 2 and docs/THREAT_MODEL.md's privacy
+      claims. It should not exist.
     paths:
       exclude:
-        - "**/crates/envryn-core/src/ai/model_download.rs"
         - "**/*/tests/*"
         - "**/*/target/*"
     patterns:
@@ -38,9 +36,9 @@ rules:
       A new import from a crate not already on the reviewed network-capable list
       (docs/DEPENDENCY_POLICY.md section 7) was found. This rule is intentionally broad and
       will false-positive on legitimate additions -- its job is to make a reviewer look, not to
-      block by itself. If this is `ureq` inside ai/model_download.rs, or `tokio`/`rustls`/
-      `mdns-sd`/etc. inside sync/, it is expected and this finding can be dismissed; anywhere
-      else, it deserves the section 1 questionnaire in docs/DEPENDENCY_POLICY.md.
+      block by itself. If this is `tokio`/`rustls`/`mdns-sd`/etc. inside sync/, it is
+      expected and this finding can be dismissed; anywhere else, it deserves the section 1
+      questionnaire in docs/DEPENDENCY_POLICY.md.
     paths:
       exclude:
         - "**/*/tests/*"

@@ -8,7 +8,7 @@ smallest useful surface instead of relying on one large end-to-end test.
 
 | Layer                       | Target                                                                                            | Command                                        | CI platform       |
 | --------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------- |
-| Rust unit and integration   | Vault lifecycle, storage, crypto, pairing, sync, conflicts, and local AI boundaries               | `cargo test --workspace`                       | Windows           |
+| Rust unit and integration   | Vault lifecycle, storage, crypto, pairing, sync, conflicts, and type and name suggestions        | `cargo test --workspace`                       | Windows           |
 | Frontend unit and component | React behavior, state, forms, navigation, native-command adapters, and a coverage baseline        | `npm run test:coverage --workspace @envryn/ui` | Linux             |
 | Browser journey             | Vault onboarding through the responsive application shell                                         | `npm run test:e2e`                             | Linux             |
 | Responsive layout           | Desktop (1440 x 900) and Pixel 7-sized Android viewport, including horizontal-overflow protection | `npm run test:e2e`                             | Linux             |

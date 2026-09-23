@@ -2,11 +2,11 @@
 
 export type AppSettings = { auto_lock_minutes: number, clipboard_clear_seconds: number, 
 /**
- * Whether the local AI subsystem may run at all. Defaults to `false` --
- * AI is opt-in, never a silent default, matching specification section
- * 2's "Local AI = OFF must leave every vault feature working." Turning
- * this off does not just hide the UI; `ai.rs` refuses every AI command
- * while it is false, so a stale cached frontend state can't route
- * around the setting.
+ * Sync with paired devices in the background while the vault is
+ * unlocked and the app is open, instead of only when "Sync now" is
+ * pressed. On by default: two paired devices that are both open should
+ * simply agree. A settings file from an older build (which has no such
+ * key, and may still carry the removed `ai_enabled` flag -- serde ignores
+ * unknown keys) gets the default.
  */
-ai_enabled: boolean, };
+auto_sync: boolean, };

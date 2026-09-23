@@ -209,8 +209,8 @@ credentials are low-entropy (`admin`, `changeme`, a short database password), an
 holding the database file could confirm a guess instantly. Keying under a VMK-derived subkey
 means an attacker without the master password cannot compute candidate fingerprints at all.
 
-Exact-duplicate detection is deterministic Rust and **never** involves the AI. The AI's only
-role in duplicate detection is *semantic* similarity over metadata (spec section 21).
+Exact-duplicate detection is deterministic Rust. There is no model involved anywhere in Envryn
+(local AI was removed in 0.2.0).
 
 ---
 
@@ -379,8 +379,7 @@ recovery of data, not vault identity. The desktop app currently supports exactly
 in practice "restore" replaces it - the existing vault file (and its WAL/SHM sidecars) is renamed
 aside with a timestamp first, never deleted, so a mistaken restore stays recoverable.
 
-Backups contain vault data only. AI preferences do not exist yet (Phase 3); model binaries are
-never included regardless (spec section 19).
+Backups contain vault data only (spec section 19).
 
 ---
 

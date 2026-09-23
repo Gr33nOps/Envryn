@@ -1,6 +1,6 @@
 # Envryn - Installer Configuration Review
 
-> Historical installer review. Use the [beta release checklist](../releasing/BETA_RELEASE_CHECKLIST.md) and [release process](../RELEASE_PROCESS.md) for the current release gate.
+> Historical installer review. Use the [beta release checklist](../releasing/BETA_RELEASE_CHECKLIST.md) and [release process](../RELEASE_PROCESS.md) for the current release gate. Local AI (the `envryn-ai-worker` sidecar, model download, and every AI command) was removed in 0.2.0, so AI findings here are historical.
 
 Static review of what Envryn's two installer types actually do, verified against the pinned
 `tauri-utils 2.9.3` config schema this project builds against (same source used for

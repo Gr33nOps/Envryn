@@ -3,7 +3,7 @@ import { Check, CircleAlert, RefreshCw, TriangleAlert } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { toast } from "sonner";
 import * as ipc from "@/lib/ipc";
-import { syncDiscoveredPeer } from "@/lib/sync-peer";
+import { syncResultMessage } from "@/lib/auto-sync";
 import { useDevices } from "@/lib/use-vault";
 import { Button, DetailRow, Panel, StatusLabel } from "@/components/envryn/ui";
 
@@ -111,7 +111,8 @@ function Sync() {
     try {
       const found = await refreshPeers();
       const results: Record<string, Outcome> = {};
-      let totalApplied = 0;
+      let totalReceived = 0;
+      let totalSent = 0;
       let totalConflicts = 0;
       let attempted = 0;
 
@@ -120,9 +121,10 @@ function Sync() {
         if (!peer || peer.addresses.length === 0) continue;
         attempted += 1;
         try {
-          const summary = await syncDiscoveredPeer(peer, ipc.syncNow);
+          const summary = await ipc.syncPeer(peer.addresses, peer.port);
           results[device.id] = "ok";
-          totalApplied += summary.records_applied;
+          totalReceived += summary.records_applied;
+          totalSent += summary.records_sent;
           totalConflicts += summary.conflicts;
         } catch {
           results[device.id] = "failed";
@@ -139,7 +141,7 @@ function Sync() {
           `Sync complete — ${totalConflicts} conflicting edit${totalConflicts === 1 ? "" : "s"} found. Review below.`,
         );
       } else {
-        toast(`Sync complete — ${totalApplied} record${totalApplied === 1 ? "" : "s"} updated`);
+        toast(syncResultMessage(totalSent, totalReceived));
       }
     } catch (err) {
       toast(err instanceof ipc.IpcError ? err.message : "Sync could not complete.");

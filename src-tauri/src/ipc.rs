@@ -24,6 +24,7 @@
 //!   already have via repeated `secret_reveal` calls; see
 //!   `envryn_core::vault::Vault::export_all`.
 
+use std::io::Write;
 use std::sync::Mutex;
 
 use envryn_core::model::{
@@ -33,6 +34,8 @@ use envryn_core::vault::Vault;
 use envryn_core::{crypto::kdf, Error};
 use serde::Serialize;
 use tauri::{Manager, State};
+use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 use zeroize::Zeroizing;
 
 use crate::settings;
@@ -246,17 +249,13 @@ pub fn vault_unlock_with_platform(
 /// Lock the vault. Infallible from the UI's point of view: a lock request must
 /// never leave the vault open because bookkeeping failed.
 #[tauri::command]
-pub fn vault_lock(state: State<'_, VaultState>, ai_state: State<'_, crate::ai::AiState>) {
+pub fn vault_lock(state: State<'_, VaultState>) {
     if let Ok(mut guard) = state.0.lock() {
         if let Some(vault) = guard.as_mut() {
             vault.lock();
         }
         *guard = None;
     }
-    // Killing the AI worker on lock, not just clearing its context, is the
-    // only thing docs/AI_SECURITY.md section 3 trusts to remove whatever
-    // plaintext was in its inference buffers.
-    crate::ai::stop(&ai_state);
 }
 
 /// Enable the platform slot: unlock without the master password, tied to the
@@ -346,6 +345,13 @@ pub fn project_rename(
     name: String,
 ) -> IpcResult<VaultProject> {
     state.with(|vault| vault.rename_project(&id, &name))
+}
+
+/// Delete a project and every secret filed under it, returning how many
+/// secrets were removed. The deletions sync to paired devices as tombstones.
+#[tauri::command]
+pub fn project_delete(state: State<'_, VaultState>, name: String) -> IpcResult<usize> {
+    state.with(|vault| vault.delete_project(&name))
 }
 
 /// Reveal one record's secret material.
@@ -490,46 +496,89 @@ pub struct RestoreSummary {
     pub restored: usize,
 }
 
-/// Write an encrypted backup of every record to `path`.
-///
-/// `path` is a user-chosen export destination, not the vault's own storage
-/// location -- see the module docs' note on this being the one deliberate
-/// exception to "no path from the caller."
-#[tauri::command]
-pub fn backup_create(
-    state: State<'_, VaultState>,
-    path: String,
-    password: String,
-) -> IpcResult<()> {
-    if path.trim().is_empty() {
-        return Err(invalid("Choose a location to save the backup."));
+/// File extension for Envryn backups, offered as the Save dialog's filter.
+const BACKUP_EXTENSION: &str = "envrynbk";
+
+/// A human-readable label for where a dialog-chosen file lives. On Android the
+/// dialog returns a `content://` URI whose text means nothing to a person.
+fn describe_location(path: &FilePath) -> String {
+    match path {
+        FilePath::Path(p) => p.display().to_string(),
+        FilePath::Url(_) => "the location you chose".to_string(),
     }
+}
+
+/// Encrypt every record into a backup file and let the user choose where to
+/// save it with the platform's own Save dialog (a system file picker on
+/// Android, so Downloads or a cloud drive both work). Returns where it was
+/// saved, or `None` if the dialog was cancelled.
+///
+/// This replaces a typed file path, which failed for any folder that did not
+/// exist yet and could not work at all on Android's sandboxed storage.
+#[tauri::command]
+pub async fn backup_create(
+    app: tauri::AppHandle,
+    state: State<'_, VaultState>,
+    password: String,
+) -> IpcResult<Option<String>> {
     let password = Zeroizing::new(password);
     if password.len() < 8 {
         return Err(invalid(
             "Your backup password must be at least 8 characters.",
         ));
     }
-    let records = state.with(|v| v.export_all())?;
-    let file = envryn_core::backup::create(&records, &password)?;
-    std::fs::write(&path, file)
-        .map_err(|_| internal("Could not write the backup file. Check the location and try again."))
+    let file = {
+        let records = state.with(|v| v.export_all())?;
+        envryn_core::backup::create(&records, &password)?
+    };
+    let file_name = format!(
+        "envryn-backup-{}.{BACKUP_EXTENSION}",
+        time::OffsetDateTime::now_utc().date()
+    );
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let dialog = app.dialog().file().set_file_name(file_name);
+        #[cfg(desktop)]
+        let dialog = dialog.add_filter("Envryn backup", &[BACKUP_EXTENSION]);
+        let Some(target) = dialog.blocking_save_file() else {
+            return Ok(None);
+        };
+        let label = describe_location(&target);
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        let mut out = app
+            .fs()
+            .open(target, options)
+            .map_err(|_| internal("Could not save the backup there. Choose another location."))?;
+        out.write_all(&file)
+            .and_then(|()| out.sync_all())
+            .map_err(|_| {
+                internal("Could not finish writing the backup. Choose another location.")
+            })?;
+        Ok(Some(label))
+    })
+    .await
+    .map_err(|_| internal("backup task failed"))?
 }
 
-/// Restore a backup, replacing the current vault.
+/// Restore a backup chosen with the platform's Open dialog, replacing the
+/// current vault. Returns `None` if the dialog was cancelled.
 ///
-/// The existing vault file (and its WAL/SHM sidecars, if present) is renamed
-/// aside with a timestamp rather than deleted, so a mistaken restore is still
-/// recoverable. Restoring always sets a *new* master password -- see
-/// `envryn_core::backup` for why a backup never carries the original one.
+/// The backup is read and decrypted *before* anything is touched, so a wrong
+/// backup password changes nothing. Only then is the current vault closed --
+/// its SQLite connection must be released first, or Windows refuses to move
+/// the open file aside -- and its files (with WAL/SHM sidecars) renamed with a
+/// timestamp rather than deleted, so a mistaken restore is still recoverable.
+/// If creating the restored vault fails, the original files are moved back.
+/// Restoring always sets a *new* master password -- see `envryn_core::backup`
+/// for why a backup never carries the original one.
 #[tauri::command]
-pub fn backup_restore(
+pub async fn backup_restore(
     app: tauri::AppHandle,
     state: State<'_, VaultState>,
-    path: String,
     backup_password: String,
     new_master_password: String,
-) -> IpcResult<RestoreSummary> {
+) -> IpcResult<Option<RestoreSummary>> {
     let new_master_password = Zeroizing::new(new_master_password);
     if new_master_password.len() < 8 {
         return Err(invalid(
@@ -537,33 +586,74 @@ pub fn backup_restore(
         ));
     }
 
-    let bytes = std::fs::read(&path).map_err(|_| invalid("Could not read that backup file."))?;
+    let picker_app = app.clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let Some(source) = picker_app.dialog().file().blocking_pick_file() else {
+            return Ok(None);
+        };
+        picker_app
+            .fs()
+            .read(source)
+            .map(Some)
+            .map_err(|_| invalid("Could not read that backup file."))
+    })
+    .await
+    .map_err(|_| internal("restore task failed"))??;
+    let Some(bytes) = bytes else {
+        return Ok(None);
+    };
+
     let backup_password = Zeroizing::new(backup_password);
     let records = envryn_core::backup::restore(&bytes, &backup_password)?;
 
+    // Close the current vault so its database file is not held open.
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(vault) = guard.as_mut() {
+            vault.lock();
+        }
+        *guard = None;
+    }
+
     let vault_path = vault_path(&app)?;
-    if vault_path.exists() {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        for suffix in ["", "-wal", "-shm"] {
-            let src = vault_path.with_file_name(format!("envryn.db{suffix}"));
-            if src.exists() {
-                let dst =
-                    vault_path.with_file_name(format!("envryn.db{suffix}.pre-restore-{stamp}"));
-                let _ = std::fs::rename(&src, &dst);
-            }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut moved = Vec::new();
+    for suffix in ["", "-wal", "-shm"] {
+        let src = vault_path.with_file_name(format!("envryn.db{suffix}"));
+        if src.exists() {
+            let dst = vault_path.with_file_name(format!("envryn.db{suffix}.pre-restore-{stamp}"));
+            std::fs::rename(&src, &dst).map_err(|_| {
+                internal("Could not move the current vault aside. Close other Envryn windows and try again.")
+            })?;
+            moved.push((src, dst));
         }
     }
 
-    let params = kdf::calibrate(700);
-    let mut vault = Vault::create(&vault_path, &new_master_password, params)?;
-    for record in &records {
-        vault.import_record(record.clone())?;
-    }
+    let created = (|| {
+        let params = kdf::calibrate(700);
+        let mut vault = Vault::create(&vault_path, &new_master_password, params)?;
+        for record in &records {
+            vault.import_record(record.clone())?;
+        }
+        Ok::<Vault, Error>(vault)
+    })();
+    let vault = match created {
+        Ok(vault) => vault,
+        Err(err) => {
+            for suffix in ["", "-wal", "-shm"] {
+                let _ =
+                    std::fs::remove_file(vault_path.with_file_name(format!("envryn.db{suffix}")));
+            }
+            for (src, dst) in moved.iter().rev() {
+                let _ = std::fs::rename(dst, src);
+            }
+            return Err(err.into());
+        }
+    };
 
     let restored = records.len();
     state.install(vault)?;
-    Ok(RestoreSummary { restored })
+    Ok(Some(RestoreSummary { restored }))
 }

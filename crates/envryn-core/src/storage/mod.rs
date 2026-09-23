@@ -131,6 +131,11 @@ pub struct Store {
 impl Store {
     pub fn open(path: &std::path::Path) -> Result<Self> {
         let conn = Connection::open(path)?;
+        // Sync opens its own connection alongside the unlocked vault's, and
+        // with automatic sync two sessions (one inbound, one outbound) can
+        // overlap. Wait briefly for another connection's write to finish
+        // instead of failing the whole session with SQLITE_BUSY.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         schema::initialise(&conn)?;
         Ok(Self { conn })
     }
@@ -591,7 +596,7 @@ impl Store {
     }
 
     /// Ids of live records sharing a fingerprint. Exact duplicate detection is
-    /// deterministic and never involves the AI (docs/CRYPTOGRAPHY.md section 5).
+    /// deterministic (docs/CRYPTOGRAPHY.md section 5).
     pub fn find_by_fingerprint(&self, fp: &Fingerprint) -> Result<Vec<SecretId>> {
         let mut stmt = self
             .conn

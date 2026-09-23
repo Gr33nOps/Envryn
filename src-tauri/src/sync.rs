@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use envryn_core::model::TrustedDevice;
 use envryn_core::storage::Store;
-use envryn_core::sync::discovery::Discovery;
+use envryn_core::sync::discovery::{order_peer_addresses, Discovery};
 use envryn_core::sync::handshake;
 use envryn_core::sync::identity::{DeviceIdentity, Fingerprint};
 use envryn_core::sync::pairing::{open_vmk, seal_vmk};
@@ -201,36 +201,62 @@ pub async fn discovery_browse(app: AppHandle) -> IpcResult<Vec<DiscoveredPeerDto
 #[derive(Serialize, ts_rs::TS)]
 #[ts(export)]
 pub struct SyncSummary {
+    /// Records this device received and applied.
     pub records_applied: usize,
+    /// Records this device sent because the peer was missing them. Reported
+    /// separately so a device that pushed changes does not say "0 updated".
+    pub records_sent: usize,
     /// Genuine concurrent edits detected during this sync (INV-109) -- the
     /// losing side of each was preserved, not discarded, but the frontend
     /// should surface a non-zero count rather than let it pass silently.
     pub conflicts: usize,
 }
 
+/// How long to wait for a TCP connection to one peer address. A reachable
+/// device on the same LAN answers in milliseconds; a virtual-switch or
+/// link-local address the peer advertised never answers at all, and a long
+/// timeout on each of those is what made syncing from a phone to a PC look
+/// broken.
+const SYNC_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Connect out to a peer and run one sync session as the TLS client. The
 /// peer must already be listening (its own `sync_listen_start`) and must
 /// trust this device's fingerprint, and this device must trust the peer's --
 /// the mutual-TLS handshake enforces both directions before any record
 /// moves (INV-104).
+///
+/// `addresses` is everything the peer advertised. They are tried in the
+/// order [`order_peer_addresses`] ranks them -- this device's own subnet
+/// first -- and the first one that accepts a TCP connection is used. A
+/// failure after connecting (a rejected handshake) is returned as is rather
+/// than retried on another address: that device was reached and said no.
 #[tauri::command]
-pub async fn sync_now(
+pub async fn sync_peer(
     app: AppHandle,
     state: State<'_, VaultState>,
-    address: String,
+    addresses: Vec<String>,
     port: u16,
 ) -> IpcResult<SyncSummary> {
     let identity = load_identity(&app)?;
     let trusted = trusted_fingerprint_set(&state)?;
     let path = vault_path(&app)?;
-    let target: SocketAddr = format!("{address}:{port}")
-        .parse()
-        .map_err(|_| invalid("Not a valid device address."))?;
+    let parsed: Vec<std::net::IpAddr> = addresses
+        .iter()
+        .filter_map(|address| address.trim().parse().ok())
+        .collect();
+    if parsed.is_empty() {
+        return Err(invalid("That device did not share a usable address."));
+    }
+    let ordered = order_peer_addresses(&parsed, local_ip().ok());
 
     let summary = tauri::async_runtime::spawn_blocking(move || {
+        let stream = ordered
+            .iter()
+            .find_map(|ip| {
+                TcpStream::connect_timeout(&SocketAddr::new(*ip, port), SYNC_CONNECT_TIMEOUT).ok()
+            })
+            .ok_or_else(|| internal("Could not reach that device."))?;
         let client_conf = Arc::new(client_config(&identity, trusted).map_err(IpcError::from)?);
-        let stream = TcpStream::connect_timeout(&target, Duration::from_secs(10))
-            .map_err(|_| internal("Could not reach that device."))?;
         let mut conn = rustls::ClientConnection::new(client_conf, placeholder_server_name())
             .map_err(|_| internal("could not start the TLS session"))?;
         let mut stream = stream;
@@ -240,6 +266,7 @@ pub async fn sync_now(
         let result = run_sync_session(&mut tls, &store).map_err(IpcError::from)?;
         Ok::<SyncSummary, IpcError>(SyncSummary {
             records_applied: result.applied,
+            records_sent: result.sent,
             conflicts: result.conflicts,
         })
     })

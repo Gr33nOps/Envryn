@@ -2,6 +2,39 @@
 
 Notable user-facing changes are recorded here. Envryn follows semantic versioning while the project is in beta.
 
+## 0.2.0-beta - 2026-09-24
+
+### Local AI removed: a faster, lighter app
+
+- The optional local AI is gone: no model to download (it was about 1 GB), no background worker process, and no AI settings. The app starts faster, uses less memory, and the installer is smaller. On first launch, a model downloaded by an earlier version is deleted to free the space.
+- Envryn now has no HTTP client at all. The only network traffic it can make is sync with your own paired devices on your local network.
+
+### Suggest name and Suggest type, rule-based
+
+- Both buttons now use built-in rules for more than 70 known key formats (Stripe, OpenAI, GitHub, AWS, Slack, database URLs, private keys, JWTs, and more) plus common variable-name conventions. Results are instant and work offline.
+- When a value is not recognised, Envryn says "Unknown" and leaves your field alone instead of guessing. Pasting a full `NAME=value` line suggests `NAME`.
+- Search still understands phrases such as "production database", using the same rules.
+
+### Projects can be deleted
+
+- A project page now has a Delete button. It confirms how many secrets go with the project, then removes both. The deletion syncs to paired devices.
+
+### Backups that save where you choose
+
+- Backup and restore now use the system Save and Open dialogs, on Windows and Android, so any folder you can pick (Downloads, a USB drive, a cloud folder) works. This fixes the "can't back up, change the location" error.
+- Restoring while the vault is unlocked now works; the previous vault file is kept aside with a timestamp.
+
+### Sync works both ways, automatically
+
+- Fixed phone-to-PC sync on PCs with WSL, Hyper-V, or VPN network adapters. The phone was trying those virtual addresses first and timing out; it now tries the address on your own network first and gives up on dead addresses in seconds.
+- New "Sync automatically" setting (on by default): while both apps are open and unlocked, paired devices sync every 30 seconds, so changes show up without pressing Sync.
+- The sync notification now reports what was sent and what was received, instead of "0 secrets synced" after a sync that sent changes.
+
+### Mobile fixes
+
+- The rename and delete project controls and the secret row actions are now always visible on touch screens, where there is no hover to reveal them.
+- Tidied the project header spacing and empty state on small screens.
+
 ## 0.1.10-beta - 2026-09-22
 
 ### Sync now updates what you see

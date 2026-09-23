@@ -19,7 +19,7 @@ src-tauri/gen/
 src-tauri/binaries/
 apps/ui/src/routeTree.gen.ts
 
-# Local AI models -- never committed (large, and not ours to redistribute)
+# Model files from the removed local-AI feature (pre-0.2.0) -- never committed
 models/
 *.gguf
 

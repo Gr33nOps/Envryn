@@ -868,7 +868,26 @@
   .envryn-page-header {
     align-items: stretch;
     flex-direction: column;
-    padding: 18px 0 14px;
+    /* Same 20px gutter as the page body below it; 0 left the title and back
+       link touching the screen edge. */
+    padding: 18px 20px 14px;
+  }
+
+  /* Project actions: Import and Add share the row; Delete stays a square,
+     full-height touch target instead of a tiny icon. */
+  .project-actions {
+    width: 100%;
+  }
+
+  .project-actions > button {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  .project-actions > .project-delete {
+    flex: 0 0 44px;
+    width: 44px;
+    padding: 0;
   }
 
   .envryn-page-header h1 {

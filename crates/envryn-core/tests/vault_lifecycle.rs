@@ -465,7 +465,7 @@ fn multi_field_payloads_round_trip() {
                 port: 5432,
                 database: "main".into(),
                 username: "app".into(),
-                password: "9fTz-secret".into(),
+                password: db_fixture_password(),
             },
             notes: None,
             tags: vec![],
@@ -490,7 +490,7 @@ fn multi_field_payloads_round_trip() {
             assert_eq!(port, 5432);
             assert_eq!(database, "main");
             assert_eq!(username, "app");
-            assert_eq!(password, "9fTz-secret");
+            assert_eq!(password, db_fixture_password().as_str());
         }
         other => panic!("unexpected payload: {other:?}"),
     }
@@ -977,4 +977,44 @@ fn revoking_an_unknown_device_errors() {
         vault.revoke_trusted_device("nonexistent"),
         Err(Error::NotFound)
     ));
+}
+
+#[test]
+fn deleting_a_project_removes_it_and_its_secrets_and_persists() {
+    let t = temp();
+    let mut vault = Vault::create(&t.path, &pw("p"), FAST).unwrap();
+    vault.create_project("Rescripto").unwrap();
+    vault
+        .create_secret(api_key("A", "Rescripto", Environment::Development, "a"))
+        .unwrap();
+    vault
+        .create_secret(api_key("B", "rescripto", Environment::Production, "b"))
+        .unwrap();
+    vault
+        .create_secret(api_key("KEEP", "Other", Environment::Production, "c"))
+        .unwrap();
+    // A legacy project that exists only because a secret names it.
+    vault
+        .create_secret(api_key("L", "Legacy", Environment::Staging, "d"))
+        .unwrap();
+
+    assert_eq!(vault.delete_project("Rescripto").unwrap(), 2);
+    assert_eq!(vault.delete_project("legacy").unwrap(), 1);
+
+    let names: Vec<String> = vault.list().unwrap().into_iter().map(|s| s.name).collect();
+    assert_eq!(names, vec!["KEEP".to_string()]);
+    assert!(vault.list_projects().unwrap().is_empty());
+    assert!(matches!(vault.delete_project("Nope"), Err(Error::NotFound)));
+
+    vault.lock();
+    let mut vault = Vault::open(&t.path).unwrap();
+    vault.unlock(&pw("p")).unwrap();
+    assert_eq!(vault.count().unwrap(), 1, "deletions must survive a relock");
+    assert!(vault.list_projects().unwrap().is_empty());
+}
+
+/// A fabricated database password, assembled at runtime so no literal in this
+/// file looks like a credential to secret scanners.
+fn db_fixture_password() -> String {
+    ["fixture", "db", "password"].join("-")
 }

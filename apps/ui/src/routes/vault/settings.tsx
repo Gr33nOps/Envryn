@@ -2,7 +2,6 @@ import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowRight, Download, KeyRound, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { isAndroidClient } from "@/lib/platform";
 import {
   Button,
   Field,
@@ -14,7 +13,6 @@ import {
   SettingsRow,
   Switch,
 } from "@/components/envryn/ui";
-import * as ipc from "@/lib/ipc";
 import {
   IpcError,
   settingsGet,
@@ -211,138 +209,10 @@ function ChangePasswordModal({
   );
 }
 
-/** Local AI: off by default, runs entirely on this device. Every control
- * here mirrors src-tauri/src/ai.rs's own fail-closed behaviour -- turning
- * the switch off is a real "no," not just a UI hint. */
-function AiSettingsGroup({
-  settings,
-  updateSettings,
-}: Readonly<{
-  settings: AppSettings | null;
-  updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
-}>) {
-  const [status, setStatus] = React.useState<ipc.AiStatus | null>(null);
-  const [downloading, setDownloading] = React.useState(false);
-  const [downloadProgress, setDownloadProgress] = React.useState<ipc.AiDownloadProgress | null>(
-    null,
-  );
-  const [starting, setStarting] = React.useState(false);
-
-  const refreshStatus = React.useCallback(() => {
-    ipc
-      .aiStatus()
-      .then(setStatus)
-      .catch(() => {
-        // AI status just stays unknown; every other setting on this page
-        // still works.
-      });
-  }, []);
-
-  React.useEffect(() => {
-    refreshStatus();
-  }, [refreshStatus]);
-
-  async function downloadModel() {
-    setDownloading(true);
-    setDownloadProgress(null);
-    const unlisten = await ipc.listenAiDownloadProgress(setDownloadProgress);
-    try {
-      await ipc.aiDownloadModel();
-      toast("Local AI model downloaded");
-    } catch (err) {
-      toast(err instanceof IpcError ? err.message : "Could not download the model.");
-    } finally {
-      unlisten();
-      setDownloading(false);
-      setDownloadProgress(null);
-      refreshStatus();
-    }
-  }
-
-  function downloadButtonLabel(): string {
-    if (!downloading) return "Download";
-    if (!downloadProgress || downloadProgress.total_bytes === 0) return "Starting…";
-    const pct = Math.floor(
-      (downloadProgress.bytes_downloaded / downloadProgress.total_bytes) * 100,
-    );
-    const label = downloadProgress.file_name === "tokenizer.json" ? "Tokenizer" : "Model";
-    return `${label} ${pct}%`;
-  }
-
-  async function toggleAi(enable: boolean) {
-    await updateSettings({ ai_enabled: enable });
-    if (enable) {
-      setStarting(true);
-      try {
-        await ipc.aiStart();
-        toast("Local AI is running");
-      } catch (err) {
-        toast(err instanceof IpcError ? err.message : "Could not start local AI.");
-      } finally {
-        setStarting(false);
-        refreshStatus();
-      }
-    } else {
-      await ipc.aiStop().catch(() => {});
-      refreshStatus();
-    }
-  }
-
-  return (
-    <Group
-      label="Local AI"
-      description="Optional. Runs entirely on this device -- the only network access is the one-time model download below, never during normal use."
-    >
-      <SettingsRow
-        label="Enable local AI"
-        description="Credential classification, naming suggestions, and natural-language search. Off by default."
-        control={
-          <Switch
-            label="Enable local AI"
-            checked={settings?.ai_enabled ?? false}
-            onCheckedChange={(checked) => !starting && void toggleAi(checked)}
-          />
-        }
-      />
-      <SettingsRow
-        label="Model"
-        description={
-          status?.model_downloaded
-            ? status.model_name
-            : downloading
-              ? "Downloading -- about 1 GB, this can take several minutes on an ordinary connection."
-              : "Not downloaded yet (about 1 GB, one-time)"
-        }
-        control={
-          status?.model_downloaded ? (
-            <span className="text-[11.5px] text-success">Ready</span>
-          ) : (
-            <Button size="sm" loading={downloading} onClick={() => void downloadModel()}>
-              <Download />
-              {downloadButtonLabel()}
-            </Button>
-          )
-        }
-      />
-      {settings?.ai_enabled && (
-        <SettingsRow
-          label="Status"
-          control={
-            <span className="text-[11.5px] text-muted-foreground">
-              {status?.engine_running ? "Running" : "Not running"}
-            </span>
-          }
-        />
-      )}
-    </Group>
-  );
-}
-
 const AUTO_LOCK_OPTIONS = [1, 5, 15, 30, 60];
 const CLIPBOARD_OPTIONS = [10, 30, 60, 120];
 
 function Settings() {
-  const isAndroid = isAndroidClient();
   const [settings, setSettings] = React.useState<AppSettings | null>(null);
   const [platformAvailable, setPlatformAvailable] = React.useState(false);
   const [platformEnabled, setPlatformEnabled] = React.useState(false);
@@ -477,6 +347,17 @@ function Settings() {
               description="Pair a device and sync directly over your local network -- no account, no cloud."
             >
               <SettingsRow
+                label="Sync automatically"
+                description="While Envryn is open and unlocked, keep paired devices on this network in sync in the background."
+                control={
+                  <Switch
+                    label="Sync automatically"
+                    checked={settings?.auto_sync ?? true}
+                    onCheckedChange={(checked) => void updateSettings({ auto_sync: checked })}
+                  />
+                }
+              />
+              <SettingsRow
                 label="Trusted devices"
                 description="Pair a new device, or rename and revoke existing ones."
                 control={
@@ -499,8 +380,6 @@ function Settings() {
                 }
               />
             </Group>
-
-            {!isAndroid && <AiSettingsGroup settings={settings} updateSettings={updateSettings} />}
 
             <Group
               label="Backup"

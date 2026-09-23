@@ -33,6 +33,13 @@ custom-protocol = ["tauri/custom-protocol"]
 [dependencies]
 envryn-core = { path = "../crates/envryn-core" }
 tauri = { version = "2", features = [] }
+# Native save/open dialogs for backup files, driven from Rust commands only --
+# no dialog or fs permission is granted to the webview (capabilities/default.json).
+# The fs plugin is what writes/reads the chosen file on Android, where the
+# dialog returns a content:// URI rather than a filesystem path.
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+time.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 zeroize.workspace = true

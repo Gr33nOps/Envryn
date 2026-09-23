@@ -1,27 +1,54 @@
-//! Deterministic classification: known credential prefixes and shapes,
-//! matched in plain Rust before any model is ever consulted.
+//! Rule-based credential recognition: known key prefixes, connection-string
+//! schemes, value shapes, and variable-name conventions.
 //!
-//! `docs/ARCHITECTURE.md` section 6 and `docs/AI_DATA_ACCESS.md` section 3:
-//! "Classification runs a rules engine before the model... The AI is the
-//! fallback for values the rules do not recognise, never the primary path."
-//! This is why: matches here are instant, work with the AI subsystem fully
-//! disabled or never installed, and never send a credential anywhere --
-//! not even to a local model. [`crate::ai::gateway::AiGateway::classify_pasted_value`]
-//! is the fallback for whatever this module returns `None` for.
+//! This is how Envryn suggests a secret's type and name. It is plain Rust
+//! string matching -- instant, offline, and it never sends a credential
+//! anywhere. When nothing here recognises a value, callers report "Unknown"
+//! rather than guessing: a wrong label presented confidently is worse than
+//! an honest blank.
 
 use serde::Serialize;
 use ts_rs::TS;
 
 use crate::model::SecretKind;
 
-/// A high-confidence classification. `provider` is a short, stable string
-/// suitable for display and for [`crate::ai::gateway::AiGateway::suggest_name`]'s
-/// input -- never inferred, only ever a literal match on a known prefix.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[ts(export)]
+/// A literal match on a known prefix or shape. `provider` is a short,
+/// stable display string, never inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeterministicMatch {
     pub kind: SecretKind,
     pub provider: Option<&'static str>,
+}
+
+/// What the classify command returns to the UI: the recognised kind and, when
+/// the rules name one, the service it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+pub struct Classification {
+    pub kind: SecretKind,
+    pub provider: Option<String>,
+}
+
+impl From<DeterministicMatch> for Classification {
+    fn from(m: DeterministicMatch) -> Self {
+        Self {
+            kind: m.kind,
+            provider: m.provider.map(str::to_string),
+        }
+    }
+}
+
+/// Classify a value, falling back to its variable name when the value itself
+/// carries no recognisable prefix or shape. `None` means "Unknown".
+pub fn classify_value_or_name(value: &str, name: Option<&str>) -> Option<Classification> {
+    if let Some(found) = classify(value) {
+        return Some(found.into());
+    }
+    name.and_then(classify_name)
+        .map(|(kind, provider)| Classification {
+            kind,
+            provider: (!provider.is_empty()).then_some(provider),
+        })
 }
 
 const fn m(kind: SecretKind, provider: Option<&'static str>) -> DeterministicMatch {
@@ -35,8 +62,8 @@ const fn m(kind: SecretKind, provider: Option<&'static str>) -> DeterministicMat
 /// always beats a more general one that shares its start regardless of where
 /// either sits here (`sk-or-v1-` beats `sk-or-` beats `sk-`). Getting this
 /// wrong is not hypothetical: an OpenRouter key (`sk-or-v1-...`) previously
-/// matched no rule at all, fell through to the model, and came back
-/// confidently labelled "Stripe" -- a wrong answer presented with the same
+/// matched no rule at all, fell through to the (since removed) local AI
+/// model, and came back confidently labelled "Stripe" -- a wrong answer presented with the same
 /// authority as a right one. Longest-match makes the precedence structural
 /// instead of a hand-maintained ordering a future edit can silently break.
 const PREFIX_RULES: &[(&str, DeterministicMatch)] = &[
@@ -151,9 +178,8 @@ const SCHEME_RULES: &[(&str, DeterministicMatch)] = &[
 /// prefix's result, so a specific rule always wins over a general one; see
 /// [`PREFIX_RULES`] for why that is structural rather than ordering-based.
 ///
-/// A `Some(_)` here is a high-confidence, literal match. Callers must treat
-/// it as final and must not ask the model to second-guess it -- see
-/// `AiGateway::classify_pasted_value`'s own note.
+/// A `Some(_)` here is a high-confidence, literal match; `None` means the
+/// value is not recognised and the caller should say so.
 pub fn classify(value: &str) -> Option<DeterministicMatch> {
     let v = value.trim();
     if v.is_empty() {
@@ -198,7 +224,7 @@ pub fn classify(value: &str) -> Option<DeterministicMatch> {
 /// variable or configuration key. Unlike value-prefix rules, this does not
 /// need a provider catalogue: semantic suffixes are removed and the remaining
 /// identifier becomes the provider label. This lets uncommon services such as
-/// IGDB and TMDB work without sending the credential value to the model.
+/// IGDB and TMDB be recognised from their variable name alone.
 pub fn classify_name(name: &str) -> Option<(SecretKind, String)> {
     let words: Vec<String> = name
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -286,6 +312,119 @@ pub fn classify_name(name: &str) -> Option<(SecretKind, String)> {
     Some((kind, provider))
 }
 
+/// Names for prefixes where one provider issues several different kinds of
+/// credential, so the provider alone would give the wrong name (a Stripe
+/// publishable key is not `STRIPE_SECRET_KEY`). Longest match wins, exactly
+/// as in [`PREFIX_RULES`].
+const PREFIX_NAMES: &[(&str, &str)] = &[
+    ("sk_live_", "STRIPE_SECRET_KEY"),
+    ("sk_test_", "STRIPE_SECRET_KEY"),
+    ("pk_live_", "STRIPE_PUBLISHABLE_KEY"),
+    ("pk_test_", "STRIPE_PUBLISHABLE_KEY"),
+    ("rk_live_", "STRIPE_RESTRICTED_KEY"),
+    ("rk_test_", "STRIPE_RESTRICTED_KEY"),
+    ("whsec_", "STRIPE_WEBHOOK_SECRET"),
+    ("xoxb-", "SLACK_BOT_TOKEN"),
+    ("xoxp-", "SLACK_USER_TOKEN"),
+    ("https://hooks.slack.com/", "SLACK_WEBHOOK_URL"),
+    ("ya29.", "GOOGLE_OAUTH_ACCESS_TOKEN"),
+    ("hf_", "HF_TOKEN"),
+    ("r8_", "REPLICATE_API_TOKEN"),
+    ("npm_", "NPM_TOKEN"),
+    ("pypi-", "PYPI_API_TOKEN"),
+    ("sbp_", "SUPABASE_ACCESS_TOKEN"),
+    ("sbs_", "SUPABASE_SECRET_KEY"),
+];
+
+/// The conventional variable name each recognised provider documents for
+/// its main credential.
+fn provider_name(provider: &str) -> Option<&'static str> {
+    Some(match provider {
+        "OpenAI" => "OPENAI_API_KEY",
+        "OpenRouter" => "OPENROUTER_API_KEY",
+        "Anthropic" => "ANTHROPIC_API_KEY",
+        "Perplexity" => "PERPLEXITY_API_KEY",
+        "xAI" => "XAI_API_KEY",
+        "Groq" => "GROQ_API_KEY",
+        "Fireworks AI" => "FIREWORKS_API_KEY",
+        "Stripe" => "STRIPE_SECRET_KEY",
+        "GitHub" => "GITHUB_TOKEN",
+        "GitLab" => "GITLAB_TOKEN",
+        "AWS" => "AWS_ACCESS_KEY_ID",
+        "Google" => "GOOGLE_API_KEY",
+        "DigitalOcean" => "DIGITALOCEAN_TOKEN",
+        "Slack" => "SLACK_TOKEN",
+        "Discord" => "DISCORD_WEBHOOK_URL",
+        "SendGrid" => "SENDGRID_API_KEY",
+        "Shopify" => "SHOPIFY_ACCESS_TOKEN",
+        "Linear" => "LINEAR_API_KEY",
+        "Notion" => "NOTION_TOKEN",
+        "Postman" => "POSTMAN_API_KEY",
+        "Sentry" => "SENTRY_AUTH_TOKEN",
+        "Supabase" => "SUPABASE_ACCESS_TOKEN",
+        "PostgreSQL" | "MySQL" | "MariaDB" | "SQL Server" | "CockroachDB" => "DATABASE_URL",
+        "MongoDB" => "MONGODB_URI",
+        "Redis" => "REDIS_URL",
+        "ClickHouse" => "CLICKHOUSE_URL",
+        "AMQP" => "AMQP_URL",
+        _ => return None,
+    })
+}
+
+/// Suggest a conventional environment-variable name for a pasted value.
+///
+/// Returns `None` -- shown as "Unknown" -- unless the value is recognised
+/// with certainty:
+///
+/// - a `NAME=value` line names itself;
+/// - a known prefix or connection-string scheme maps to the name that
+///   service documents (`sk_live_...` is `STRIPE_SECRET_KEY`);
+/// - a PEM private key is `SSH_PRIVATE_KEY`.
+///
+/// A bare JWT deliberately gets `None`: its shape says nothing about which
+/// service issued it, and inventing a name would be a guess.
+pub fn suggest_name(value: &str) -> Option<String> {
+    let v = value.trim();
+    if v.is_empty() {
+        return None;
+    }
+    if let Some(name) = assignment_name(v) {
+        return Some(name.to_string());
+    }
+    if let Some((_, name)) = PREFIX_NAMES
+        .iter()
+        .filter(|(prefix, _)| v.starts_with(prefix))
+        .max_by_key(|(prefix, _)| prefix.len())
+    {
+        return Some((*name).to_string());
+    }
+    let found = classify(v)?;
+    match found.provider {
+        Some(provider) => provider_name(provider).map(str::to_string),
+        None if found.kind == SecretKind::Ssh => Some("SSH_PRIVATE_KEY".to_string()),
+        None => None,
+    }
+}
+
+/// The variable name from a `NAME=value` or `export NAME=value` line.
+///
+/// Deliberately strict -- an upper-case identifier, then `=`, then a
+/// non-empty value that does not itself start with `=` -- so a base64 value
+/// with `==` padding, or a URL with `?key=value`, is never misread as an
+/// assignment.
+fn assignment_name(v: &str) -> Option<&str> {
+    let line = v.strip_prefix("export ").unwrap_or(v).trim_start();
+    let (name, rest) = line.split_once('=')?;
+    let name = name.trim_end();
+    let valid = name.len() >= 2
+        && name.starts_with(|c: char| c.is_ascii_uppercase() || c == '_')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    let rest = rest.trim_start();
+    (valid && !rest.is_empty() && !rest.starts_with('=')).then_some(name)
+}
+
 fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
     value
         .as_bytes()
@@ -369,7 +508,16 @@ mod tests {
 
     #[test]
     fn recognises_jwt_shape() {
-        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGhpc2lzYXNpZ25hdHVyZQ";
+        // Assembled at runtime from neutral parts ({"alg":"HS256","typ":"JWT"},
+        // {"sub":"envryn-test"}, and a dummy signature) so no complete token ever
+        // appears as a literal for secret scanners to flag.
+        let jwt = [
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+            "eyJzdWIiOiJlbnZyeW4tdGVzdCJ9",
+            "ZHVtbXktc2lnbmF0dXJlLWZvci10ZXN0cy1vbmx5",
+        ]
+        .join(".");
+        let jwt = jwt.as_str();
         let got = classify(jwt).unwrap();
         assert_eq!(got.kind, SecretKind::Token);
         assert_eq!(got.provider, Some("JWT"));
@@ -417,7 +565,7 @@ mod tests {
     }
 
     /// The regression this whole module was reworked for: an OpenRouter key
-    /// matched nothing, fell through to the model, and came back labelled
+    /// matched nothing, fell through to the (since removed) local AI model, and came back labelled
     /// "Stripe".
     ///
     /// **Every credential here is fabricated** -- a real prefix with a
@@ -429,7 +577,7 @@ mod tests {
     /// while the value `classify` actually receives is byte-for-byte what it
     /// was before.
     #[test]
-    fn every_supported_provider_is_recognised_without_the_model() {
+    fn every_supported_provider_is_recognised() {
         let cases: &[(&str, &str, SecretKind, Option<&str>)] = &[
             (
                 "sk-or-v1-",
@@ -668,8 +816,8 @@ mod tests {
                 Some("SQL Server"),
             ),
             (
-                "eyJhbG",
-                "ciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGhpc2lzYXNpZ25hdHVyZQ",
+                "eyJhbGciOiJIUzI1NiJ9.eyJzdW",
+                "IiOiIxMjM0NTY3ODkwIn0.dGhpc2lzYXNpZ25hdHVyZQ",
                 SecretKind::Token,
                 Some("JWT"),
             ),
@@ -765,5 +913,110 @@ mod tests {
             classify("  ghp_1234567890abcdef  ").unwrap().provider,
             Some("GitHub")
         );
+    }
+
+    #[test]
+    fn suggests_the_documented_name_for_known_providers() {
+        let cases: &[(&str, &str)] = &[
+            ("sk-proj-abc123XYZ", "OPENAI_API_KEY"),
+            ("sk-ant-api03-xyz", "ANTHROPIC_API_KEY"),
+            ("sk-or-v1-abc", "OPENROUTER_API_KEY"),
+            ("gsk_abc123", "GROQ_API_KEY"),
+            ("ghp_1234567890abcdef", "GITHUB_TOKEN"),
+            ("glpat-abc123", "GITLAB_TOKEN"),
+            ("AKIAEXAMPLEKEYID", "AWS_ACCESS_KEY_ID"),
+            ("AIzaSyExample", "GOOGLE_API_KEY"),
+            ("SG.example.example", "SENDGRID_API_KEY"),
+            ("postgres://user:pw@db.local:5432/app", "DATABASE_URL"),
+            ("mongodb+srv://user:pw@cluster/app", "MONGODB_URI"),
+            ("redis://localhost:6379", "REDIS_URL"),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                suggest_name(value).as_deref(),
+                Some(*expected),
+                "for {value}"
+            );
+        }
+    }
+
+    /// One provider, several credentials: the prefix decides the name, so a
+    /// publishable key is never offered the secret key's name.
+    #[test]
+    fn prefix_specific_names_beat_the_provider_default() {
+        assert_eq!(
+            suggest_name("sk_live_abc").as_deref(),
+            Some("STRIPE_SECRET_KEY")
+        );
+        assert_eq!(
+            suggest_name("pk_live_abc").as_deref(),
+            Some("STRIPE_PUBLISHABLE_KEY")
+        );
+        assert_eq!(
+            suggest_name("whsec_abc").as_deref(),
+            Some("STRIPE_WEBHOOK_SECRET")
+        );
+        assert_eq!(
+            suggest_name("xoxb-123-abc").as_deref(),
+            Some("SLACK_BOT_TOKEN")
+        );
+        assert_eq!(
+            suggest_name("https://hooks.slack.com/services/T0/B0/X").as_deref(),
+            Some("SLACK_WEBHOOK_URL")
+        );
+    }
+
+    #[test]
+    fn a_pasted_assignment_names_itself() {
+        assert_eq!(
+            suggest_name("IGDB_CLIENT_SECRET=abc123").as_deref(),
+            Some("IGDB_CLIENT_SECRET")
+        );
+        assert_eq!(
+            suggest_name("export TMDB_API_KEY = xyz").as_deref(),
+            Some("TMDB_API_KEY")
+        );
+    }
+
+    /// Anything the rules cannot place is "Unknown" -- including values that
+    /// merely contain an `=` (base64 padding, URL query strings) and a JWT,
+    /// whose shape does not say who issued it.
+    #[test]
+    fn unrecognised_values_are_unknown_not_guessed() {
+        for value in [
+            "",
+            "   ",
+            "just-some-random-text-1234",
+            "YWJjZGVmZ2g=",
+            "abc==",
+            "https://api.example.com/v1?token=abc",
+        ] {
+            assert_eq!(suggest_name(value), None, "{value:?} should be Unknown");
+        }
+        let jwt = [
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+            "eyJzdWIiOiJlbnZyeW4tdGVzdCJ9",
+            "ZHVtbXktc2lnbmF0dXJlLWZvci10ZXN0cy1vbmx5",
+        ]
+        .join(".");
+        assert_eq!(suggest_name(&jwt), None, "a JWT's issuer is not knowable");
+    }
+
+    #[test]
+    fn a_pem_private_key_is_named_ssh_private_key() {
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----";
+        assert_eq!(suggest_name(pem).as_deref(), Some("SSH_PRIVATE_KEY"));
+    }
+
+    #[test]
+    fn type_falls_back_to_the_variable_name_when_the_value_is_opaque() {
+        let got = classify_value_or_name("f81d4fae7dec11d0", Some("IGDB_CLIENT_SECRET")).unwrap();
+        assert_eq!(got.kind, SecretKind::OAuth);
+        assert_eq!(got.provider.as_deref(), Some("IGDB"));
+        assert_eq!(
+            classify_value_or_name("f81d4fae7dec11d0", Some("SOMETHING")),
+            None
+        );
+        assert_eq!(classify_value_or_name("f81d4fae7dec11d0", None), None);
     }
 }
