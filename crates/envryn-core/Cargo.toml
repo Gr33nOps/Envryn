@@ -50,7 +50,7 @@ rustls-pki-types = "1"
 # not a place to economise.
 x509-parser = "0.18"
 tokio = { version = "1", features = ["net", "rt", "io-util", "time", "sync"] }
-mdns-sd = "0.13"
+mdns-sd = "0.21"
 
 
 # packages/contract/: generated TypeScript bindings for every IPC-facing
