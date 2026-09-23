@@ -44,22 +44,30 @@ jobs:
 
       # Lists open security issues on main for the same project the scan
       # below publishes to (sonar.projectKey in sonar-project.properties --
-      # keep the two in sync; the pre-rename key silently reported 0).
-      # This reflects the previous analysis, not this run's. Print only
-      # actionable issue metadata (never the token) so a private SonarCloud
-      # project can still be diagnosed from its Actions run.
+      # keep the two in sync). This reflects the previous analysis, not this
+      # run's. issues/search returns total=0 for a project that doesn't
+      # exist rather than an error -- the pre-rename key silently reported 0
+      # that way -- so resolve the project first; components/show 404s (and
+      # fails the step) on an unknown key. Print only actionable issue
+      # metadata (never the token) so a private SonarCloud project can still
+      # be diagnosed from its Actions run.
       - name: Inspect repository-bound SonarCloud security issues
         shell: pwsh
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           $ErrorActionPreference = "Stop"
+          $projectKey = "Gr33nOps_Envryn"
           $credential = [Convert]::ToBase64String(
             [Text.Encoding]::ASCII.GetBytes("$($env:SONAR_TOKEN):")
           )
           $headers = @{ Authorization = "Basic $credential" }
+          $project = Invoke-RestMethod -Headers $headers -Uri (
+            "https://sonarcloud.io/api/components/show?component=$projectKey&branch=main"
+          )
+          Write-Output "Project $projectKey, last main analysis: $($project.component.analysisDate)"
           $params = @{
-            componentKeys = "Gr33nOps_Envryn"
+            componentKeys = $projectKey
             branch = "main"
             resolved = "false"
             impactSoftwareQualities = "SECURITY"
