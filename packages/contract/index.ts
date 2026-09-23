@@ -26,7 +26,6 @@ export type { TrustedDevice } from "./bindings/TrustedDevice";
 export type { Classification } from "./bindings/Classification";
 export type { SearchFilter } from "./bindings/SearchFilter";
 
-
 export type { ConflictSummary } from "./bindings/ConflictSummary";
 
 export type { VaultStatus } from "./bindings/VaultStatus";
