@@ -292,7 +292,7 @@ export function SecretList({
                 ))}
                 <div
                   className={cn(
-                    "secret-row-actions relative z-10 flex items-center justify-end gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
+                    "secret-row-actions relative z-10 flex items-center justify-end gap-0.5 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100",
                     active ? "opacity-100" : "opacity-0",
                   )}
                 >

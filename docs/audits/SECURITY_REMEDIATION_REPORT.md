@@ -1,6 +1,6 @@
 # Envryn - Final Pre-Release Security Remediation & Verification Pass
 
-> Historical remediation record. This document explains how earlier findings were handled. The current source code, [security testing guide](../SECURITY_TESTING.md), and CI workflows are authoritative when details have changed.
+> Historical remediation record. This document explains how earlier findings were handled. The current source code, [security testing guide](../SECURITY_TESTING.md), and CI workflows are authoritative when details have changed. Local AI (the `envryn-ai-worker` sidecar, model download, and every AI command) was removed in 0.2.0, so AI findings here are historical.
 
 **Date:** 2026-08-27
 **Scope:** Full repository at `main` (Rust workspace: `envryn-core`, `envryn-ai-worker`,

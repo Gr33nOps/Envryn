@@ -12,9 +12,9 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::OnceLock;
 
-use windows::core::{HSTRING, PCWSTR};
+use windows::core::HSTRING;
 use windows::Win32::Foundation::{
-    CloseHandle, LocalFree, HANDLE, HGLOBAL, HLOCAL, HWND, LPARAM, LRESULT, WPARAM,
+    LocalFree, HANDLE, HGLOBAL, HLOCAL, HWND, LPARAM, LRESULT, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
 use windows::Win32::Security::Cryptography::{
@@ -23,11 +23,6 @@ use windows::Win32::Security::Cryptography::{
 use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     RegisterClipboardFormatW, SetClipboardData,
-};
-use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::CF_UNICODETEXT;
@@ -371,98 +366,6 @@ pub fn set_window_border_color(hwnd: isize, rgb_hex: u32) -> Result<()> {
     }
 }
 
-/// A Windows Job Object configured to terminate every process still
-/// assigned to it the instant the *last* handle to the job closes --
-/// including when this process exits abnormally (a crash, a forceful kill,
-/// Task Manager's "End task") without running any `Drop` at all.
-///
-/// `crate::ai::worker_client::WorkerClient` assigns the spawned AI worker
-/// process to one of these for exactly the gap an ordinary `Child::kill()`
-/// called from a `Drop` impl cannot close: if this process's own `Drop`
-/// never runs, a worker process with a loaded model and whatever was in its
-/// inference buffers would otherwise be orphaned and keep running
-/// indefinitely (docs/AI_SECURITY.md section 3's "the only way to be
-/// genuinely confident... is killing the process" -- this is what makes
-/// that true even when the confident-killing code itself never executes).
-///
-/// **The handle's lifetime *is* the policy.** Keeping it alive keeps the
-/// assigned process(es) able to run normally; dropping it is what triggers
-/// termination -- this is not "fire and forget" configuration.
-pub struct KillOnCloseJob {
-    handle: HANDLE,
-}
-
-// SAFETY: `HANDLE` here wraps a Windows kernel job-object handle. The Win32
-// APIs this type calls (`AssignProcessToJobObject`, `CloseHandle`) are
-// documented as safe to call from any thread; nothing about this type's
-// single-field, `&self`-only API introduces a data race the Win32 layer
-// does not already handle.
-unsafe impl Send for KillOnCloseJob {}
-unsafe impl Sync for KillOnCloseJob {}
-
-impl KillOnCloseJob {
-    pub fn new() -> Result<Self> {
-        // SAFETY: `CreateJobObjectW` is called with no security attributes
-        // and an unnamed (anonymous) job, both explicitly permitted by the
-        // API; the returned handle is owned by this call and closed exactly
-        // once, in `Drop`. `SetInformationJobObject` is passed a pointer to
-        // `info` and its exact size, matching the Win32 contract for this
-        // information class -- `info` outlives the call (it is a local that
-        // is not dropped until after the call returns).
-        unsafe {
-            let handle = CreateJobObjectW(None, PCWSTR::null())
-                .map_err(|_| Error::Internal("could not create job object"))?;
-
-            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-
-            if SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                std::ptr::addr_of!(info).cast(),
-                u32::try_from(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
-                    .unwrap_or(0),
-            )
-            .is_err()
-            {
-                let _ = CloseHandle(handle);
-                return Err(Error::Internal("could not configure job object"));
-            }
-
-            Ok(Self { handle })
-        }
-    }
-
-    /// Assign a process (identified by its raw Win32 handle value, e.g.
-    /// `std::os::windows::io::AsRawHandle::as_raw_handle` on a
-    /// `std::process::Child`) to this job. Windows forbids assigning a
-    /// process that is already in another job unless that job permits
-    /// nesting, so this can fail on some systems -- callers should treat it
-    /// as a hardening layer, not the only thing keeping the process
-    /// supervised, and keep their own explicit kill logic regardless.
-    pub fn assign(&self, process_handle: isize) -> Result<()> {
-        // SAFETY: `process_handle` is expected to be a live process handle
-        // supplied by the caller (a just-spawned child it owns).
-        // `AssignProcessToJobObject` validates both handles before use and
-        // fails cleanly rather than causing memory unsafety if either is
-        // stale or invalid.
-        unsafe {
-            AssignProcessToJobObject(self.handle, HANDLE(process_handle as *mut _))
-                .map_err(|_| Error::Internal("could not assign process to job object"))
-        }
-    }
-}
-
-impl Drop for KillOnCloseJob {
-    fn drop(&mut self) {
-        // SAFETY: `self.handle` was created by `CreateJobObjectW` in `new`
-        // and this is the only place it is ever closed.
-        unsafe {
-            let _ = CloseHandle(self.handle);
-        }
-    }
-}
-
 /// Global state for the single main-window subclass this app installs. One
 /// process, one main window, for the process's whole lifetime -- the same
 /// assumption `capture_protection`'s single startup call already makes in
@@ -551,6 +454,7 @@ pub fn unwatch_session_lock(hwnd: isize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::core::PCWSTR;
 
     /// A real native window, real `SendMessageW` delivery, and the actual
     /// installed subclass procedure -- not a unit test calling
@@ -677,43 +581,5 @@ mod tests {
         clear_clipboard().expect("clear_clipboard");
         let after_clear = read_clipboard_text().expect("read_clipboard after clear");
         assert!(after_clear.is_none() || after_clear.as_deref() == Some(""));
-    }
-
-    /// A real spawned child, real job-object assignment, real termination --
-    /// this is the safety-net property `crate::ai::worker_client::WorkerClient`
-    /// depends on: dropping the job kills whatever is still assigned to it,
-    /// without that process's own cooperation. `ping` is used as the
-    /// long-running child rather than the AI worker fixture because this
-    /// module's tests run in the same lib unit-test binary as
-    /// `ai::worker_client`'s (where `CARGO_BIN_EXE_*` is unavailable either
-    /// way) and `ping.exe` is a standalone, always-present Windows binary
-    /// that runs fine with redirected stdio, unlike `cmd /C timeout`.
-    #[test]
-    fn dropping_the_job_kills_the_assigned_process() {
-        use std::os::windows::io::AsRawHandle;
-        use std::process::{Command, Stdio};
-
-        let mut child = Command::new("ping")
-            .args(["-n", "60", "127.0.0.1"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn ping");
-        assert!(
-            child.try_wait().expect("try_wait").is_none(),
-            "ping should still be running immediately after spawn"
-        );
-
-        let job = KillOnCloseJob::new().expect("create job");
-        job.assign(child.as_raw_handle() as isize)
-            .expect("assign process to job");
-
-        drop(job);
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        assert!(
-            child.try_wait().expect("try_wait after job drop").is_some(),
-            "ping should have been killed when the job handle closed"
-        );
     }
 }

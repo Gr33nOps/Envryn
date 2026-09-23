@@ -199,6 +199,10 @@ pub fn ids_to_request(local: &[ManifestEntry], remote: &[ManifestEntry]) -> Vec<
 pub struct SyncSessionResult {
     pub applied: usize,
     pub conflicts: usize,
+    /// Records this side sent because the peer asked for them. Reported so
+    /// the device that pushes changes can say so, instead of "0 updated"
+    /// just because it had nothing to receive.
+    pub sent: usize,
 }
 
 /// Run one sync exchange over an already-authenticated, already-open stream.
@@ -246,11 +250,15 @@ pub fn run_sync_session<S: Read + Write>(
             to_send.push(WireRecord::try_from(&record)?);
         }
     }
+    let sent = to_send.len();
     write_json(stream, &RecordsMessage { records: to_send })?;
 
     // 4. Receive what we asked for, and apply it.
     let incoming: RecordsMessage = read_json(stream)?;
-    let mut result = SyncSessionResult::default();
+    let mut result = SyncSessionResult {
+        sent,
+        ..SyncSessionResult::default()
+    };
     for wire in incoming.records {
         let record = StoredRecord::try_from(wire)?;
         match store.upsert_from_sync(&record)? {
@@ -544,6 +552,10 @@ mod tests {
         let (first_a, first_b) = sync_once(&id_a, &id_b, &path_a, &path_b);
         assert_eq!(first_a.applied, 0);
         assert_eq!(first_b.applied, 1);
+        // The pushing side must report what it sent, not just what it
+        // received -- otherwise it tells the user "0 updated" for a push.
+        assert_eq!(first_a.sent, 1);
+        assert_eq!(first_b.sent, 0);
         assert_eq!(first_a.conflicts, 0);
         assert_eq!(first_b.conflicts, 0);
 

@@ -1,6 +1,6 @@
 # Envryn - Security & Production-Readiness Audit
 
-> Historical review record. This report captures the project during the original internal audit. For current controls and commands, use the [documentation index](../README.md), [security testing guide](../SECURITY_TESTING.md), and live CI configuration.
+> Historical review record. This report captures the project during the original internal audit. For current controls and commands, use the [documentation index](../README.md), [security testing guide](../SECURITY_TESTING.md), and live CI configuration. Local AI (the `envryn-ai-worker` sidecar, model download, and every AI command) was removed in 0.2.0, so AI findings here are historical.
 
 **Date:** 2026-08-26
 **Scope:** Entire repository at commit `dc00ebc` (main), Rust workspace (`envryn-core`,

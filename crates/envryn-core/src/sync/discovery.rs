@@ -396,6 +396,129 @@ fn peer_from_service_info(info: &ServiceInfo) -> Option<DiscoveredPeer> {
     })
 }
 
+/// Order a discovered peer's advertised addresses so the one most likely to
+/// be reachable is tried first.
+///
+/// A Windows PC commonly advertises a dozen addresses: its real LAN address
+/// plus Hyper-V/WSL virtual switches (`172.16.0.0/12`), link-local
+/// (`169.254.0.0/16`) adapters, and VPNs. Trying those in advertised order,
+/// each with a TCP connect timeout, is what made phone-to-PC sync look dead
+/// while PC-to-phone (a phone advertises one address) worked. The ranking:
+///
+/// 1. same `/24` as this device's own LAN address -- almost always the right one;
+/// 2. other `10.0.0.0/8` / `192.168.0.0/16` private addresses;
+/// 3. other routable IPv4;
+/// 4. `172.16.0.0/12` (usually a virtual switch on Windows);
+/// 5. `100.64.0.0/10` (carrier-grade NAT / Tailscale);
+/// 6. IPv6, then link-local IPv4 and IPv6 last.
+///
+/// Loopback and unspecified addresses are dropped; duplicates are removed;
+/// ties keep their advertised order.
+pub fn order_peer_addresses(addresses: &[IpAddr], local: Option<IpAddr>) -> Vec<IpAddr> {
+    let local_v4 = match local {
+        Some(IpAddr::V4(v4)) => Some(v4),
+        _ => None,
+    };
+    let rank = |addr: &IpAddr| -> u8 {
+        match addr {
+            IpAddr::V4(v4) => {
+                let o = v4.octets();
+                if local_v4.is_some_and(|l| l.octets()[..3] == o[..3]) {
+                    0
+                } else if v4.is_link_local() {
+                    7
+                } else if o[0] == 10 || (o[0] == 192 && o[1] == 168) {
+                    1
+                } else if o[0] == 172 && (16..=31).contains(&o[1]) {
+                    3
+                } else if o[0] == 100 && (64..=127).contains(&o[1]) {
+                    4
+                } else {
+                    2
+                }
+            }
+            IpAddr::V6(v6) => {
+                if (v6.segments()[0] & 0xffc0) == 0xfe80 {
+                    8
+                } else {
+                    5
+                }
+            }
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut ordered: Vec<IpAddr> = addresses
+        .iter()
+        .copied()
+        .filter(|addr| !addr.is_loopback() && !addr.is_unspecified())
+        .filter(|addr| seen.insert(*addr))
+        .collect();
+    ordered.sort_by_key(|addr| rank(addr));
+    ordered
+}
+
+#[cfg(test)]
+mod address_order_tests {
+    use super::*;
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// The real address list a Windows PC with WSL, Hyper-V, and Tailscale
+    /// advertised: the LAN address must come first, virtual switches after.
+    #[test]
+    fn the_lan_address_beats_virtual_switches_and_link_local() {
+        let advertised = [
+            "172.19.208.1",
+            "172.28.208.1",
+            "169.254.6.113",
+            "192.168.1.8",
+            "172.23.144.1",
+            "100.98.136.91",
+            "fe80::1",
+        ]
+        .map(ip);
+        let ordered = order_peer_addresses(&advertised, Some(ip("192.168.1.42")));
+        assert_eq!(ordered.first(), Some(&ip("192.168.1.8")));
+        assert_eq!(ordered.last(), Some(&ip("fe80::1")));
+        let link_local = ordered
+            .iter()
+            .position(|a| *a == ip("169.254.6.113"))
+            .unwrap();
+        let virtual_switch = ordered
+            .iter()
+            .position(|a| *a == ip("172.19.208.1"))
+            .unwrap();
+        assert!(virtual_switch < link_local);
+    }
+
+    /// A LAN that genuinely uses 172.16/12 still wins when it is this
+    /// device's own subnet.
+    #[test]
+    fn a_same_subnet_172_address_is_preferred() {
+        let ordered = order_peer_addresses(
+            &[ip("192.168.50.2"), ip("172.20.1.9")],
+            Some(ip("172.20.1.4")),
+        );
+        assert_eq!(ordered, vec![ip("172.20.1.9"), ip("192.168.50.2")]);
+    }
+
+    #[test]
+    fn loopback_and_duplicates_are_dropped() {
+        let ordered = order_peer_addresses(
+            &[
+                ip("127.0.0.1"),
+                ip("10.0.0.5"),
+                ip("10.0.0.5"),
+                ip("0.0.0.0"),
+            ],
+            None,
+        );
+        assert_eq!(ordered, vec![ip("10.0.0.5")]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

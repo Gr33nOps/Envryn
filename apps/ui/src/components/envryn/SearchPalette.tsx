@@ -1,93 +1,16 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { Search, Sparkles, TriangleAlert } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 import { type Secret } from "@/lib/envryn-data";
 import { useSecretList } from "@/lib/use-vault";
-import { KIND_TO_TYPE, toUiEnvironment } from "@/lib/vault-repository";
+import { applySearchFilter, describeFilter, isEmptyFilter } from "@/lib/search-filter";
 import { cn } from "@/lib/utils";
 import * as ipc from "@/lib/ipc";
-import { IpcError } from "@/lib/ipc";
 import { searchSecrets } from "@/lib/secret-search";
 import { isAndroidClient } from "@/lib/platform";
 
-/**
- * Turn a parsed `SearchFilterOutput` into the same `Secret[]` shape plain
- * substring filtering already produces, so both paths render through one
- * result list. `text` (if the model extracted a residual free-text term)
- * still matches by substring -- only `project`/`environment`/`kind`/`tags`
- * are structured.
- */
-function applyAiFilter(secrets: Secret[], filter: ipc.SearchFilterOutput): Secret[] {
-  const text = filter.text?.trim().toLowerCase();
-  // Every field is defensively defaulted. The Rust type guarantees the
-  // shape, but this runs on whatever the IPC boundary actually handed back,
-  // and a `filter.tags.length` on an absent array is a TypeError that
-  // unmounts the dialog rather than showing "no results".
-  const tags = filter.tags ?? [];
-  return secrets.filter((s) => {
-    if (filter.project && s.project.toLowerCase() !== filter.project.toLowerCase()) return false;
-    if (filter.environment && s.environment !== toUiEnvironment(filter.environment)) return false;
-    // An unrecognised kind must not silently exclude everything -- if the
-    // map has no entry, treat the kind as "no constraint" rather than as a
-    // constraint nothing can satisfy.
-    if (filter.kind) {
-      const mapped = KIND_TO_TYPE[filter.kind];
-      if (mapped && s.type !== mapped) return false;
-    }
-    if (tags.length && !tags.some((t) => (s.tags ?? []).includes(t))) return false;
-    if (text) {
-      const haystack = [
-        s.name,
-        s.project,
-        s.environment,
-        s.type,
-        s.provider ?? "",
-        ...(s.tags ?? []),
-      ]
-        .join(" ")
-        .toLowerCase();
-      // Every whitespace-separated term must appear somewhere, so a
-      // residual like "stripe keys" still matches a "Stripe API Key"
-      // record whose words are not adjacent in that order.
-      if (!text.split(/\s+/).every((term) => haystack.includes(term))) return false;
-    }
-    return true;
-  });
-}
-
-function SearchStatusBanner({
-  aiSearching,
-  aiResults,
-  aiError,
-}: Readonly<{ aiSearching: boolean; aiResults: Secret[] | null; aiError: string | null }>) {
-  if (aiSearching) {
-    return (
-      <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
-        <Sparkles className="size-3 animate-pulse" />
-        Searching your vault...
-      </div>
-    );
-  }
-  // A failed search is a visible, recoverable state -- not a silently empty
-  // result list that looks identical to "you have nothing matching this".
-  if (aiError) {
-    return (
-      <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-warning">
-        <TriangleAlert className="size-3" />
-        {aiError} Showing plain name matches instead.
-      </div>
-    );
-  }
-  if (aiResults) {
-    return (
-      <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
-        <Sparkles className="size-3" />
-        Interpreted your search
-      </div>
-    );
-  }
-  return null;
-}
+/** How long typing must pause before a query is parsed into filters. */
+const FILTER_DEBOUNCE_MS = 150;
 
 export function SearchPalette({
   open,
@@ -102,74 +25,59 @@ export function SearchPalette({
   const isAndroid = isAndroidClient();
   const [q, setQ] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
-  const [aiResults, setAiResults] = React.useState<Secret[] | null>(null);
-  const [aiSearching, setAiSearching] = React.useState(false);
-  const [aiError, setAiError] = React.useState<string | null>(null);
-  // Which query the current `aiResults` belong to. Editing the box after a
-  // search must clear the stale result set without launching a new one.
-  const [searchedQuery, setSearchedQuery] = React.useState<string | null>(null);
-  // Guards against a second in-flight request: the worker answers one
-  // request at a time, so a double-click would queue rather than parallelise.
-  const runningRef = React.useRef(false);
+  // Structured results for one specific query. Tagged with the query they
+  // belong to, so a stale answer never shows under newer text.
+  const [filtered, setFiltered] = React.useState<{
+    query: string;
+    results: Secret[];
+    description: string;
+  } | null>(null);
 
   React.useEffect(() => {
     if (open) {
       setQ("");
       setCursor(0);
-      setAiResults(null);
-      setAiError(null);
-      setSearchedQuery(null);
+      setFiltered(null);
     }
   }, [open]);
 
   const substringResults = React.useMemo(() => searchSecrets(secrets, q), [q, secrets]);
-
   const trimmed = q.trim();
-  const canSearch = trimmed.length > 0 && !aiSearching;
 
   /**
-   * Run the assisted search. **Only ever called from the Search button or
-   * the Enter key** -- never from a `useEffect` watching the query.
-   *
-   * It used to run on a 500ms timer after every keystroke, which meant
-   * typing a sentence fired a burst of inference requests, each one
-   * competing for the same single-threaded worker, for a result the user
-   * had not asked for yet. Nothing here is triggered by typing now.
+   * Plain name matching is instant and usually enough. Only when it finds
+   * nothing is the query parsed into filters ("production database" ->
+   * environment + kind). That parse is rule-based in Rust and answers in
+   * well under a millisecond; the short debounce just avoids one call per
+   * keystroke. A failed parse quietly leaves the plain results in place.
    */
-  async function runSearch() {
-    const query = q.trim();
-    if (!query || runningRef.current) return;
+  React.useEffect(() => {
+    if (!trimmed || substringResults.length > 0) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      ipc
+        .searchParseQuery(trimmed)
+        .then((filter) => {
+          if (cancelled || isEmptyFilter(filter)) return;
+          setFiltered({
+            query: trimmed,
+            results: applySearchFilter(secrets, filter),
+            description: describeFilter(filter),
+          });
+          setCursor(0);
+        })
+        .catch(() => {
+          // Plain matching already answered; nothing else to show.
+        });
+    }, FILTER_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [trimmed, substringResults.length, secrets]);
 
-    runningRef.current = true;
-    setAiSearching(true);
-    setAiError(null);
-    try {
-      // `aiParseSearchIntent` deliberately never fails closed: with AI off
-      // or the worker down it still returns a deterministic parse, so this
-      // is a real search either way rather than a disabled feature.
-      const filter = await ipc.aiParseSearchIntent(query);
-      const matched = applyAiFilter(secrets, filter);
-      setAiResults(matched);
-      setSearchedQuery(query);
-      setCursor(0);
-    } catch (err) {
-      // A worker crash, timeout, or malformed response lands here and shows
-      // an inline, recoverable message. It must never propagate -- an
-      // unhandled rejection out of this handler would unmount the dialog.
-      setAiResults(null);
-      setSearchedQuery(query);
-      setAiError(
-        err instanceof IpcError ? err.message : "Search could not be completed. Try again.",
-      );
-    } finally {
-      runningRef.current = false;
-      setAiSearching(false);
-    }
-  }
-
-  // Typing invalidates a previous result set without starting a new search.
-  const resultsAreStale = searchedQuery !== null && searchedQuery !== trimmed;
-  const results = aiResults && !resultsAreStale ? aiResults : substringResults;
+  const usingFilter = substringResults.length === 0 && filtered?.query === trimmed;
+  const results = usingFilter && filtered ? filtered.results : substringResults;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -212,45 +120,29 @@ export function SearchPalette({
                 }
                 if (e.key !== "Enter") return;
                 e.preventDefault();
-                // Fast local search is the default. Only ask the intent
-                // parser when metadata search genuinely found nothing.
                 if (results[cursor]) {
                   onSelect(results[cursor]);
                   onOpenChange(false);
-                  return;
-                }
-                if (canSearch && (resultsAreStale || searchedQuery === null)) {
-                  void runSearch();
-                  return;
                 }
               }}
-              placeholder="Search your vault, then press Enter"
+              placeholder="Search by name, project, environment, or type"
               className="h-9 w-full bg-transparent text-[13px] placeholder:text-subtle-foreground focus:outline-none"
             />
-            <button
-              type="button"
-              onClick={() => void runSearch()}
-              disabled={!canSearch}
-              className="shrink-0 rounded-md border border-border bg-surface-2 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted-foreground"
-            >
-              {aiSearching ? "Interpreting..." : "Interpret"}
-            </button>
             <span className="kbd shrink-0">Esc</span>
           </div>
 
-          <SearchStatusBanner
-            aiSearching={aiSearching}
-            aiResults={resultsAreStale ? null : aiResults}
-            aiError={resultsAreStale ? null : aiError}
-          />
+          {usingFilter && filtered && (
+            <div className="flex items-center gap-1.5 border-b border-border/60 px-3 py-1.5 text-[10.5px] text-subtle-foreground">
+              <SlidersHorizontal className="size-3" />
+              Filtered by {filtered.description}
+            </div>
+          )}
 
           {results.length === 0 ? (
             <div className="px-4 py-8 text-center">
               <p className="text-[12.5px]">No results for "{q}"</p>
               <p className="mt-1 text-[11.5px] text-muted-foreground">
-                {resultsAreStale || searchedQuery === null
-                  ? "Press Enter or choose Interpret to search by meaning."
-                  : "Try another name, project, or tag."}
+                Try a name, project, tag, or words like "production database".
               </p>
             </div>
           ) : (

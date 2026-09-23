@@ -31,8 +31,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Four release builds of the candle/tauri dependency graph need more
-      # room than the default image leaves free.
+      # Four release builds of the Tauri dependency graph need more room than
+      # the default image leaves free.
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
@@ -62,13 +62,10 @@ jobs:
       - name: Generate the Android project
         run: cargo tauri android init --ci
 
-      # The AI worker is a Windows-only externalBin (tauri.windows.conf.json),
-      # so the Android build skips building it. Everything else in
-      # build:native-ui -- icons, Android hardening, the UI -- still runs.
+      # beforeBuildCommand (npm run build:native-ui) syncs the launcher icons,
+      # applies the Android hardening patch, and builds the UI.
       - name: Build the universal APK
-        run: >-
-          cargo tauri android build --apk --ci
-          --config '{"build":{"beforeBuildCommand":"npm run sync:android-icons && npm run patch:android-mdns && npm run build --workspace @envryn/ui"}}'
+        run: cargo tauri android build --apk --ci
 
       - name: Checksum
         run: |

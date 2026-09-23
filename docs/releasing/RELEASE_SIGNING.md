@@ -57,14 +57,12 @@ certificate purchase can't actually deliver.
 ## source this project actually builds against - not assumed from memory)
 
 `tauri-utils::config::WindowsConfig` (the schema behind `bundle.windows` in
-`tauri.conf.json`/`tauri.windows.conf.json`) already has every field this needs, today, with no
-schema changes required:
+`tauri.conf.json`) already has every field this needs, today, with no schema changes required:
 
 ```jsonc
-// src-tauri/tauri.windows.conf.json - additive only, nothing here today needs to change shape
+// src-tauri/tauri.windows.conf.json (new file) - additive only
 {
   "bundle": {
-    "externalBin": ["binaries/envryn-ai-worker"],
     "windows": {
       "digestAlgorithm": "sha256",          // required for signing; SHA-256 recommended
       "certificateThumbprint": "<SHA1 thumbprint of the cert, once imported>",

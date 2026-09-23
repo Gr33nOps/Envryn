@@ -23,17 +23,10 @@ export type { SecretSummary } from "./bindings/SecretSummary";
 export type { NewSecret } from "./bindings/NewSecret";
 export type { SecretUpdate } from "./bindings/SecretUpdate";
 export type { TrustedDevice } from "./bindings/TrustedDevice";
-
-export type { SearchFilterOutput } from "./bindings/SearchFilterOutput";
-export type { EnvNameEntry } from "./bindings/EnvNameEntry";
-export type { EnvNameClassificationOutput } from "./bindings/EnvNameClassificationOutput";
-export type { ClassificationOutput } from "./bindings/ClassificationOutput";
-export type { NameSuggestionOutput } from "./bindings/NameSuggestionOutput";
-export type { ExtractedField } from "./bindings/ExtractedField";
-export type { ExtractedFieldsOutput } from "./bindings/ExtractedFieldsOutput";
+export type { Classification } from "./bindings/Classification";
+export type { SearchFilter } from "./bindings/SearchFilter";
 
 export type { ConflictSummary } from "./bindings/ConflictSummary";
-export type { DeterministicMatch } from "./bindings/DeterministicMatch";
 
 export type { VaultStatus } from "./bindings/VaultStatus";
 export type { VaultProject } from "./bindings/VaultProject";
@@ -46,5 +39,3 @@ export type { PairingHostStarted } from "./bindings/PairingHostStarted";
 export type { PairingSasReady } from "./bindings/PairingSasReady";
 export type { PairingFailed } from "./bindings/PairingFailed";
 export type { PairingComplete } from "./bindings/PairingComplete";
-export type { AiStatus } from "./bindings/AiStatus";
-export type { AiDownloadProgress } from "./bindings/AiDownloadProgress";

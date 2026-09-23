@@ -28,9 +28,10 @@ Answer these in the pull request. If the answers are weak, write the code instea
 
 These are blocked in `deny.toml`, and adding one requires amending this document:
 
-- **Any HTTP client outside the model-download module.** `reqwest`, `ureq`, `hyper` as a client,
-  and anything similar. INV-010 says Envryn makes no outbound connection except model download
-  and LAN sync - that is enforced by the dependency graph, not by discipline.
+- **Any HTTP client.** `reqwest`, `ureq`, `hyper` as a client, and anything similar. INV-010 says
+  Envryn makes no outbound connection except LAN sync - that is enforced by the dependency graph,
+  not by discipline. (Before 0.2.0 one exception existed for the local-AI model download; the
+  feature and the exception were removed together.)
 - **Telemetry, analytics, and crash-reporting SDKs.** Any of them.
 - **Alternative cryptographic implementations.** One implementation per primitive, listed in
   `CRYPTOGRAPHY.md`.
@@ -43,8 +44,9 @@ These are blocked in `deny.toml`, and adding one requires amending this document
 - Anything in `crates/envryn-core` - it runs with key access.
 - Anything with native code or build scripts that download.
 - Anything that spawns processes or touches the filesystem outside the vault directory.
-- Anything in the inference runtime, tokenizer, model loader, or GPU acceleration path
-  (spec section 26 - large native surfaces processing untrusted input).
+- Any machine-learning runtime, tokenizer, or model loader. None ships since 0.2.0; adding one
+  back is an architecture change, not a dependency change (spec section 26 - large native
+  surfaces processing untrusted input).
 - Archive and decompression libraries, which have a long history of path-traversal and
   memory-safety bugs and are reached by *downloaded* data.
 
@@ -62,10 +64,6 @@ alter what the user sees before they approve something.
 Both lockfiles (`Cargo.lock`, and the JS lockfile) are committed, including for the library
 crates - reproducible builds matter more here than dependency-resolution flexibility.
 
-Model checksums and the inference runtime version are pinned in application code, not fetched
-at runtime. A checksum fetched over the network is not a checksum; it is a second thing to
-compromise.
-
 Security advisories are applied promptly. Routine updates are batched, reviewed, and land as
 their own commits so a regression bisects cleanly rather than hiding inside a feature change.
 
@@ -77,13 +75,8 @@ their own commits so a regression bisects cleanly rather than hiding inside a fe
 |---|---|
 | Known vulnerabilities | `cargo audit`, `npm audit` |
 | Licences, bans, duplicate versions, untrusted sources | `cargo deny check` |
-| No HTTP client outside `model_download` | Semgrep rule + `deny.toml` |
-| AI worker does not depend on the vault crate | `cargo metadata` assertion |
+| No HTTP client anywhere | Semgrep rule + `deny.toml` |
 | No telemetry endpoints in the bundle | Egress test + string scan |
-
-The `cargo metadata` assertion deserves emphasis: it is what makes AI-INV-001, 002, 004 and 005
-structural. The AI worker cannot receive a key because the types that represent keys are not in
-its dependency graph at all - and CI fails the moment someone changes that, before review.
 
 **Status as of Phase 4 (M22): every row above is a real, working, manually-run check - none of
 them run in CI, because no CI pipeline exists in this repo yet** (`ARCHITECTURE.md` section 9).
@@ -93,10 +86,7 @@ own advisories sub-check rather than a separate `cargo audit` invocation, since 
 same RUSTSEC database - `cargo audit` was also run standalone and confirms the same 18
 already-reviewed findings). The Semgrep rule is real and lives at
 `.semgrep/network-egress.yml`, verified to have zero findings against the current codebase and to
-correctly catch synthetic violations of both `ureq`- and `reqwest`-shaped network calls. The
-"AI worker does not depend on the vault crate" row is `cargo tree -p envryn-ai-worker -i
-envryn-core` returning no match, checked by hand, not a scripted assertion with its own exit
-code - a small gap from what this table implies, worth closing if a CI pipeline is ever added.
+correctly catch synthetic violations of both `ureq`- and `reqwest`-shaped network calls.
 "No telemetry endpoints in the bundle" has no dedicated check beyond `deny.toml`'s ban on
 `sentry`/`sentry-core` and the `npm`-side dependency review in section 4 - no separate egress
 test or string scan exists. `npm audit` was not run in this pass (no npm dependency changed in

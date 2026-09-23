@@ -12,15 +12,10 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  AiDownloadProgress,
-  AiStatus,
   AppSettings,
-  ClassificationOutput,
+  Classification,
   ConflictSummary,
   DiscoveredPeer,
-  EnvNameClassificationOutput,
-  ExtractedFieldsOutput,
-  NameSuggestionOutput,
   NewSecret,
   OwnIdentity,
   PairingComplete,
@@ -28,7 +23,7 @@ import type {
   PairingHostStarted,
   PairingSasReady,
   RestoreSummary,
-  SearchFilterOutput,
+  SearchFilter,
   SecretRecord,
   SecretSummary,
   SecretUpdate,
@@ -39,17 +34,10 @@ import type {
 } from "@envryn/contract";
 
 export type {
-  AiDownloadProgress,
-  AiStatus,
   AppSettings,
-  ClassificationOutput,
+  Classification,
   ConflictSummary,
   DiscoveredPeer,
-  EnvNameClassificationOutput,
-  EnvNameEntry,
-  ExtractedField,
-  ExtractedFieldsOutput,
-  NameSuggestionOutput,
   NewSecret,
   OwnIdentity,
   PairingComplete,
@@ -58,7 +46,7 @@ export type {
   PairingSasReady,
   RestoreSummary,
   RustEnvironment,
-  SearchFilterOutput,
+  SearchFilter,
   SecretKind,
   SecretPayload,
   SecretRecord,
@@ -82,11 +70,6 @@ export type IpcErrorCode =
   | "unsupported_version"
   | "decryption_failed"
   | "platform_unavailable"
-  | "ai_unavailable"
-  // The local model is already working on another request. The worker
-  // serves one request at a time, so a second concurrent call is refused
-  // rather than queued behind the first.
-  | "ai_busy"
   | "internal";
 
 export class IpcError extends Error {
@@ -156,6 +139,8 @@ export const projectList = () => call<VaultProject[]>("project_list");
 export const projectCreate = (name: string) => call<VaultProject>("project_create", { name });
 export const projectRename = (id: string, name: string) =>
   call<VaultProject>("project_rename", { id, name });
+/** Delete a project and every secret in it; resolves to how many secrets were deleted. */
+export const projectDelete = (name: string) => call<number>("project_delete", { name });
 
 /**
  * Copy a value to the OS clipboard.
@@ -171,14 +156,18 @@ export const settingsGet = () => call<AppSettings>("settings_get");
 export const settingsSet = (settings: AppSettings) =>
   call<AppSettings>("settings_set", { settings });
 
-export const backupCreate = (path: string, password: string) =>
-  call<void>("backup_create", { path, password });
-export const backupRestore = (path: string, backupPassword: string, newMasterPassword: string) =>
-  call<RestoreSummary>("backup_restore", {
-    path,
-    backupPassword,
-    newMasterPassword,
-  });
+/**
+ * Create an encrypted backup. Rust opens the platform's own Save dialog and
+ * writes the file; resolves to where it was saved, or `null` if cancelled.
+ */
+export const backupCreate = (password: string) =>
+  call<string | null>("backup_create", { password });
+/**
+ * Restore a backup chosen with the platform's Open dialog, replacing the
+ * current vault. Resolves to `null` if the dialog was cancelled.
+ */
+export const backupRestore = (backupPassword: string, newMasterPassword: string) =>
+  call<RestoreSummary | null>("backup_restore", { backupPassword, newMasterPassword });
 
 // --- Sync: identity, trusted devices, discovery, manual sync ----------------
 
@@ -192,8 +181,12 @@ export const trustedDeviceRevoke = (deviceId: string) =>
 
 export const discoveryBrowse = () => call<DiscoveredPeer[]>("discovery_browse");
 
-export const syncNow = (address: string, port: number) =>
-  call<SyncSummary>("sync_now", { address, port });
+/**
+ * Sync with a peer. Pass every address it advertised: Rust tries them in the
+ * order most likely to work (this device's own subnet first).
+ */
+export const syncPeer = (addresses: string[], port: number) =>
+  call<SyncSummary>("sync_peer", { addresses, port });
 export const syncListenStart = () => call<number>("sync_listen_start");
 export const syncListenStop = () => call<void>("sync_listen_stop");
 
@@ -211,52 +204,24 @@ export const conflictRecover = (conflictId: string) =>
 export const conflictDiscard = (conflictId: string) =>
   call<void>("conflict_discard", { conflictId });
 
-// --- AI -----------------------------------------------------------------------
+// --- Suggestions -------------------------------------------------------------
 //
-// Off by default (`AppSettings.ai_enabled`). Every command below fails with
-// `ai_unavailable` if the setting is off or the local worker isn't running --
-// see src-tauri/src/ai.rs. Nothing here is on the path of any vault
-// operation: unlock, create, edit, sync, and backup all work with AI
-// disabled or never started.
+// Rule-based and instant: known key prefixes, connection-string schemes, and
+// variable-name conventions, matched in Rust. Nothing leaves the device. A
+// `null` result means "not recognised" -- the UI shows "Unknown" rather than
+// guessing.
 
-// Not AI -- plain known-prefix/shape matching that works with no model
-// installed. See src-tauri/src/ai.rs's module doc for why this one command
-// is not gated by `ai_enabled`.
-export const classifyDeterministic = (value: string, name?: string) =>
-  call<ClassificationOutput | null>("classify_deterministic", { value, name: name || null });
+/** Recognise a value's type (and service), falling back to its variable name. */
+export const classifyValue = (value: string, name?: string) =>
+  call<Classification | null>("classify_value", { value, name: name || null });
 
-export const aiStatus = () => call<AiStatus>("ai_status");
-export const aiDownloadModel = () => call<void>("ai_download_model");
-export const aiStart = () => call<void>("ai_start");
-export const aiStop = () => call<void>("ai_stop");
+/** A conventional variable name for a pasted value, e.g. `STRIPE_SECRET_KEY`. */
+export const suggestSecretName = (value: string) =>
+  call<string | null>("suggest_secret_name", { value });
 
-/**
- * Subscribe to `"ai://download-progress"`, emitted repeatedly while
- * `ai_download_model` runs. Without this, the model download (~1 GB,
- * often several minutes on an ordinary connection) looks identical to a
- * hang -- there is nothing else to distinguish "still downloading" from
- * "stuck." Returns an unsubscribe function.
- */
-export async function listenAiDownloadProgress(
-  onProgress: (event: AiDownloadProgress) => void,
-): Promise<() => void> {
-  const { listen } = await import("@tauri-apps/api/event");
-  const unlisten = await listen<AiDownloadProgress>("ai://download-progress", (e) =>
-    onProgress(e.payload),
-  );
-  return unlisten;
-}
-
-export const aiClassifyPastedValue = (value: string) =>
-  call<ClassificationOutput>("ai_classify_pasted_value", { value });
-export const aiSuggestName = (value: string, provider: string | null) =>
-  call<NameSuggestionOutput>("ai_suggest_name", { value, provider });
-export const aiClassifyEnvNames = (names: string[]) =>
-  call<EnvNameClassificationOutput>("ai_classify_env_names", { names });
-export const aiExtractStructuredFields = (block: string) =>
-  call<ExtractedFieldsOutput>("ai_extract_structured_fields", { block });
-export const aiParseSearchIntent = (query: string) =>
-  call<SearchFilterOutput>("ai_parse_search_intent", { query });
+/** Split a typed search into environment, kind, and free-text filters. */
+export const searchParseQuery = (query: string) =>
+  call<SearchFilter>("search_parse_query", { query });
 
 // --- Pairing ------------------------------------------------------------------
 //

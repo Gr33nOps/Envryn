@@ -16,7 +16,7 @@
  * `src-tauri/gen/android/` is generated and `.gitignore`d, so fixing the
  * files there once does not survive a fresh clone or a re-init -- this
  * script is the fix that does, run before each Android build the same way
- * `.dev-tools/prepare-sidecar.mjs` and `.dev-tools/sign-apk.mjs` are.
+ * `.dev-tools/patch-android-mdns.mjs` and `.dev-tools/sign-apk.mjs` are.
  *
  * Usage:
  *   node .dev-tools/sync-android-icons.mjs

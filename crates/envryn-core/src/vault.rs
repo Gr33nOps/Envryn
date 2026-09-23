@@ -362,6 +362,42 @@ impl Vault {
         Ok(renamed)
     }
 
+    /// Delete a project and every secret filed under it. Returns how many
+    /// secrets were deleted.
+    ///
+    /// Matches the name case-insensitively, the same way the UI groups
+    /// projects, so a project inferred from older records (no metadata entry)
+    /// is deleted exactly as completely as a first-class one. Secrets are
+    /// soft-deleted through [`Vault::delete_secret`], so the deletions sync to
+    /// paired devices as tombstones rather than silently reappearing on the
+    /// next sync.
+    pub fn delete_project(&mut self, name: &str) -> Result<usize> {
+        let target = name.trim();
+        if target.is_empty() {
+            return Err(Error::InvalidInput("a project needs a name"));
+        }
+        let ids: Vec<SecretId> = self
+            .state()?
+            .index
+            .iter()
+            .filter(|record| record.project.trim().eq_ignore_ascii_case(target))
+            .map(|record| record.id)
+            .collect();
+        for id in &ids {
+            self.delete_secret(*id)?;
+        }
+
+        let mut projects = self.list_projects()?;
+        let before = projects.len();
+        projects.retain(|project| !project.name.eq_ignore_ascii_case(target));
+        if projects.len() != before {
+            self.save_projects(&projects)?;
+        } else if ids.is_empty() {
+            return Err(Error::NotFound);
+        }
+        Ok(ids.len())
+    }
+
     fn save_projects(&self, projects: &[VaultProject]) -> Result<()> {
         let plaintext = Zeroizing::new(serde_json::to_vec(projects)?);
         let sealed = aead::seal(&self.state()?.keys.record, &plaintext, projects_aad())?;
@@ -396,8 +432,7 @@ impl Vault {
 
     /// Live records sharing an exact value with `id`.
     ///
-    /// Deterministic, via keyed fingerprints. The AI is not involved
-    /// (docs/CRYPTOGRAPHY.md section 5).
+    /// Deterministic, via keyed fingerprints (docs/CRYPTOGRAPHY.md section 5).
     pub fn duplicates_of(&self, id: SecretId) -> Result<Vec<SecretId>> {
         let state = self.state()?;
         let record = state

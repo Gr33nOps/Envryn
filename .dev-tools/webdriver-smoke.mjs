@@ -269,12 +269,10 @@ async function main() {
       // assertion: WebDriver's `body` text-extraction algorithm undercounts
       // content in this app's layout for reasons not worth chasing further
       // (a scrollable panel, most likely) even though the rendered pixels
-      // (and a manual look at shot-04-settings.png) show the "Local AI"
-      // section -- enable toggle, model status, download button -- exactly
-      // as expected. Look at the PNG, not just this console output.
-      console.log(
-        "Settings screenshot saved -- inspect shot-04-settings.png for the Local AI section.",
-      );
+      // (and a manual look at shot-04-settings.png) show the Security,
+      // Devices and sync, and Backup sections exactly as expected. Look at
+      // the PNG, not just this console output.
+      console.log("Settings screenshot saved -- inspect shot-04-settings.png.");
     } else {
       console.log(
         "Could not find a direct link to /vault/settings -- screenshots still show real app state.",

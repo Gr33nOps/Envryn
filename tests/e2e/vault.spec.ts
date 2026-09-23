@@ -34,11 +34,11 @@ async function installTauriMock(page: Page) {
       auto_lock_minutes: 5,
       clipboard_clear_seconds: 30,
       theme: "system",
-      ai_enabled: false,
+      // Off in tests so a background sync pass cannot race the assertions.
+      auto_sync: false,
     };
     let platformProtectionEnabled = false;
-    let aiDownloaded = false;
-    let aiRunning = false;
+    let backupSaves = 0;
     const trustedDevices = [
       {
         device_id: "qa-laptop",
@@ -172,11 +172,13 @@ async function installTauriMock(page: Page) {
         }
         case "discovery_browse":
           return discoveredPeers;
-        case "sync_now":
-          if (String(args?.["address"] ?? "").endsWith(".99")) {
+        case "sync_peer": {
+          const addresses = (args?.["addresses"] as string[] | undefined) ?? [];
+          if (addresses.every((address) => address.endsWith(".99"))) {
             throw { code: "network", message: "The device could not be reached" };
           }
-          return { records_applied: 2, conflicts: conflicts.length };
+          return { records_applied: 2, records_sent: 1, conflicts: conflicts.length };
+        }
         case "pairing_host_start":
           return {
             address: "192.0.2.10",
@@ -284,6 +286,16 @@ async function installTauriMock(page: Page) {
           }
           return project;
         }
+        case "project_delete": {
+          const name = String(args?.["name"] ?? "").toLowerCase();
+          const before = secrets.length;
+          for (let index = secrets.length - 1; index >= 0; index -= 1) {
+            if (secrets[index]!.project.toLowerCase() === name) secrets.splice(index, 1);
+          }
+          const projectIndex = projects.findIndex((item) => item.name.toLowerCase() === name);
+          if (projectIndex >= 0) projects.splice(projectIndex, 1);
+          return before - secrets.length;
+        }
         case "conflict_count":
           return conflicts.length;
         case "sync_listen_start":
@@ -311,10 +323,15 @@ async function installTauriMock(page: Page) {
           masterPassword = String(args?.["newPassword"] ?? "");
           return null;
         case "backup_create":
-          if (String(args?.["path"] ?? "").includes("cannot-write")) {
-            throw { code: "io", message: "The backup location could not be written." };
+          if (args?.["password"] === "unwritable-password") {
+            throw {
+              code: "internal",
+              message: "Could not save the backup there. Choose another location.",
+            };
           }
-          return null;
+          // The first successful attempt simulates cancelling the Save dialog.
+          backupSaves += 1;
+          return backupSaves === 1 ? null : "C:\\QA\\envryn-backup.envrynbk";
         case "backup_restore":
           if (args?.["backupPassword"] === "wrong-password") {
             throw { code: "auth_failed", message: "Authentication failed" };
@@ -322,67 +339,29 @@ async function installTauriMock(page: Page) {
           return { restored: 3 };
         case "device_identity":
           return { device_id: "browser-e2e", fingerprint: "00".repeat(32) };
-        case "ai_status":
-          return {
-            enabled_in_settings: settings.ai_enabled,
-            model_downloaded: aiDownloaded,
-            model_name: "Local model",
-            engine_running: aiRunning,
-          };
-        case "ai_download_model":
-          aiDownloaded = true;
-          return null;
-        case "ai_start":
-          aiRunning = true;
-          return null;
-        case "ai_stop":
-          aiRunning = false;
-          return null;
-        case "classify_deterministic": {
+        case "classify_value": {
           const name = String(args?.["name"] ?? "").toUpperCase();
           const value = String(args?.["value"] ?? "");
           if (name.includes("DATABASE") || value.startsWith("postgres://")) {
-            return { kind: "Database", provider: "PostgreSQL", confidence: 0.99 };
+            return { kind: "Database", provider: "PostgreSQL" };
           }
           if (name.includes("SSH") || value.includes("PRIVATE KEY")) {
-            return { kind: "SshKey", provider: "OpenSSH", confidence: 0.99 };
+            return { kind: "Ssh", provider: null };
           }
-          if (name.includes("TOKEN")) {
-            return { kind: "Token", provider: null, confidence: 0.9 };
-          }
-          if (name.includes("KEY")) {
-            return { kind: "ApiKey", provider: null, confidence: 0.9 };
-          }
+          if (name.includes("TOKEN")) return { kind: "Token", provider: null };
+          if (name.includes("KEY")) return { kind: "ApiKey", provider: null };
           return null;
         }
-        case "ai_classify_pasted_value":
-          return { kind: "ApiKey", provider: "IGDB", confidence: 0.82 };
-        case "ai_suggest_name":
-          return { name: "IGDB API Key", confidence: 0.84 };
-        case "ai_classify_env_names": {
-          const names = (args?.["names"] as string[] | undefined) ?? [];
-          return {
-            names: names.map((name) => ({
-              name,
-              kind: name.includes("URL") ? "Webhook" : "Environment",
-            })),
-          };
+        case "suggest_secret_name": {
+          const value = String(args?.["value"] ?? "");
+          if (value.startsWith("postgres://")) return "DATABASE_URL";
+          if (value.startsWith("sk_live_")) return "STRIPE_SECRET_KEY";
+          return /^([A-Z_][A-Z0-9_]+)\s*=\s*\S/.exec(value)?.[1] ?? null;
         }
-        case "ai_extract_structured_fields":
-          return {
-            fields: [
-              { label: "Host", value: "db.example.test" },
-              { label: "Port", value: "5432" },
-              { label: "Username", value: "qa_user" },
-            ],
-          };
-        case "ai_parse_search_intent":
-          return {
-            text: String(args?.["query"] ?? ""),
-            kind: null,
-            project: null,
-            environment: null,
-          };
+        case "search_parse_query": {
+          const query = String(args?.["query"] ?? "");
+          return { text: query, kind: null, project: null, environment: null, tags: [] };
+        }
         case "plugin:window|is_maximized":
           return false;
         case "plugin:event|listen":
@@ -545,7 +524,13 @@ test("creates and opens a real project, with a mobile-sized dialog", async ({ pa
   await page.getByRole("button", { name: "Create project" }).click();
   await expect(page).toHaveURL(/\/vault\/projects\/00000000-0000-4000-8000-000000000001/);
   await expect(page.getByText("Mobile API", { exact: true })).toBeVisible();
-  await expect(page.getByText("No secrets in —")).toBeVisible();
+  await expect(page.getByText("No secrets yet")).toBeVisible();
+  // Touch screens have no hover, so the rename and delete controls must be
+  // visible without it -- a hover-only (opacity 0) control is unreachable.
+  if (mobile) {
+    await expect(page.getByRole("button", { name: "Rename project" })).toHaveCSS("opacity", "1");
+    await expect(page.getByRole("button", { name: "Delete project" })).toHaveCSS("opacity", "1");
+  }
 });
 
 test("onboarding and join screens have no serious accessibility violations", async ({ page }) => {
@@ -620,7 +605,7 @@ test("creates, reveals, edits, persists, searches, and deletes a structured desk
   await reopened.getByRole("button", { name: "Cancel" }).click();
 
   await page.keyboard.press("Control+k");
-  await page.getByPlaceholder("Search your vault, then press Enter").fill("PostgreSQL");
+  await page.getByPlaceholder("Search by name, project, environment, or type").fill("PostgreSQL");
   await expect(page.getByText("QA PostgreSQL", { exact: true }).first()).toBeVisible();
   await page.keyboard.press("Escape");
 
@@ -638,14 +623,14 @@ test("creates, reveals, edits, persists, searches, and deletes a structured desk
   await expect(page.getByText("No secrets yet")).toBeVisible();
 });
 
-test("persists desktop settings and exercises Windows unlock, local AI, and password changes", async ({
+test("persists desktop settings and exercises Windows unlock, auto-sync, and password changes", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chromium", "Windows desktop flow");
   await createDisposableVault(page);
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
-  await expect(page.getByText("Version 0.1.10")).toBeVisible();
+  await expect(page.getByText("Version 0.2.0")).toBeVisible();
 
   await page.getByLabel("Auto-lock the vault").selectOption("15");
   await page.getByLabel("Clear clipboard after copying").selectOption("60");
@@ -654,14 +639,16 @@ test("persists desktop settings and exercises Windows unlock, local AI, and pass
   await expect(page.getByLabel("Auto-lock the vault")).toHaveValue("15");
   await expect(page.getByLabel("Clear clipboard after copying")).toHaveValue("60");
 
-  await page.getByRole("button", { name: "Download", exact: true }).click();
-  await expect(page.getByText("Ready", { exact: true })).toBeVisible();
-  const aiSwitch = page.getByRole("switch", { name: "Enable local AI" });
-  await aiSwitch.click();
-  await expect(aiSwitch).toBeChecked();
-  await expect(page.getByText("Running", { exact: true })).toBeVisible();
-  await aiSwitch.click();
-  await expect(aiSwitch).not.toBeChecked();
+  // Local AI was removed: its settings must be gone, not merely hidden.
+  await expect(page.getByRole("switch", { name: "Enable local AI" })).toHaveCount(0);
+  const autoSync = page.getByRole("switch", { name: "Sync automatically" });
+  await expect(autoSync).not.toBeChecked();
+  await autoSync.click();
+  await expect(autoSync).toBeChecked();
+  await page.getByRole("link", { name: "Backup", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("switch", { name: "Sync automatically" })).toBeChecked();
+  await page.getByRole("switch", { name: "Sync automatically" }).click();
 
   const windowsSwitch = page.getByRole("switch", { name: "Unlock with this Windows account" });
   await windowsSwitch.click();
@@ -716,40 +703,48 @@ test("validates, creates, and restores encrypted backups through the desktop UI"
 
   await page.getByRole("button", { name: "Back up now" }).first().click();
   const createDialog = page.getByRole("dialog", { name: "Create encrypted backup" });
-  await createDialog.getByRole("button", { name: "Create backup" }).click();
-  await expect(createDialog.getByText("Choose where to save the backup file.")).toBeVisible();
-  await createDialog.getByLabel("Save to").fill("C:\\QA\\envryn-backup.envrynbk");
+  // The location comes from the system Save dialog now -- no path field.
+  await expect(createDialog.getByLabel("Save to")).toHaveCount(0);
   await createDialog.getByLabel("Backup password").fill("short");
   await createDialog.getByLabel("Confirm password").fill("short");
-  await createDialog.getByRole("button", { name: "Create backup" }).click();
+  await createDialog.getByRole("button", { name: "Choose location and save" }).click();
   await expect(
     createDialog.getByText("Your backup password must be at least 8 characters."),
   ).toBeVisible();
   await createDialog.getByLabel("Backup password").fill("backup-password-42!");
   await createDialog.getByLabel("Confirm password").fill("different-password");
-  await createDialog.getByRole("button", { name: "Create backup" }).click();
+  await createDialog.getByRole("button", { name: "Choose location and save" }).click();
   await expect(createDialog.getByText("Passwords do not match.")).toBeVisible();
+  await createDialog.getByLabel("Backup password").fill("unwritable-password");
+  await createDialog.getByLabel("Confirm password").fill("unwritable-password");
+  await createDialog.getByRole("button", { name: "Choose location and save" }).click();
+  await expect(
+    createDialog.getByText("Could not save the backup there. Choose another location."),
+  ).toBeVisible();
+  await createDialog.getByLabel("Backup password").fill("backup-password-42!");
   await createDialog.getByLabel("Confirm password").fill("backup-password-42!");
-  await createDialog.getByLabel("Save to").fill("C:\\cannot-write\\envryn-backup.envrynbk");
-  await createDialog.getByRole("button", { name: "Create backup" }).click();
-  await expect(createDialog.getByText("The backup location could not be written.")).toBeVisible();
-  await createDialog.getByLabel("Save to").fill("C:\\QA\\envryn-backup.envrynbk");
-  await createDialog.getByRole("button", { name: "Create backup" }).click();
+  // First attempt: the Save dialog is cancelled -- the modal stays, no error.
+  await createDialog.getByRole("button", { name: "Choose location and save" }).click();
+  await expect(createDialog).toBeVisible();
+  await expect(createDialog.getByText(/could not|did not/i)).toHaveCount(0);
+  await createDialog.getByRole("button", { name: "Choose location and save" }).click();
   await expect(createDialog).toHaveCount(0);
-  await expect(page.getByText("Backup created")).toBeVisible();
+  await expect(page.getByText("Backup saved")).toBeVisible();
 
   await page.getByRole("button", { name: "Restore", exact: true }).click();
   const restoreDialog = page.getByRole("dialog", { name: "Restore from backup" });
-  await restoreDialog.getByRole("button", { name: "Restore vault" }).click();
-  await expect(restoreDialog.getByText("Choose the backup file to restore.")).toBeVisible();
-  await restoreDialog.getByLabel("Backup file").fill("C:\\QA\\envryn-backup.envrynbk");
+  await expect(restoreDialog.getByLabel("Backup file")).toHaveCount(0);
+  await restoreDialog.getByRole("button", { name: "Choose backup file and restore" }).click();
+  await expect(
+    restoreDialog.getByText("Enter the password this backup was created with."),
+  ).toBeVisible();
   await restoreDialog.getByLabel("Backup password").fill("wrong-password");
   await restoreDialog.getByLabel("New master password").fill("restored-password-42!");
   await restoreDialog.getByLabel("Confirm new password").fill("restored-password-42!");
-  await restoreDialog.getByRole("button", { name: "Restore vault" }).click();
+  await restoreDialog.getByRole("button", { name: "Choose backup file and restore" }).click();
   await expect(restoreDialog.getByText("That backup password did not work.")).toBeVisible();
   await restoreDialog.getByLabel("Backup password").fill("backup-password-42!");
-  await restoreDialog.getByRole("button", { name: "Restore vault" }).click();
+  await restoreDialog.getByRole("button", { name: "Choose backup file and restore" }).click();
   await expect(page).toHaveURL(/\/vault\/?$/);
   await expect(page.getByText("Restored 3 secrets")).toBeVisible();
 });
@@ -895,44 +890,6 @@ test("imports reviewed env entries without adding an Imported tag", async ({ pag
   await expect(page.getByRole("button", { name: "Open IGDB_TOKEN details" })).toBeVisible();
 });
 
-test("extracts, reviews, edits, and saves structured fields with local AI", async ({
-  page,
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chromium", "Windows desktop flow");
-  await createDisposableVault(page);
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
-  await page.getByRole("switch", { name: "Enable local AI" }).click();
-  await expect(page.getByText("Running", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "All secrets", exact: true }).click();
-  await page.getByRole("button", { name: "Extract fields" }).click();
-  const dialog = page.getByRole("dialog", { name: "Extract fields from text" });
-  await dialog.getByRole("button", { name: "Extract fields" }).click();
-  await expect(dialog.getByText("Paste the text you want fields extracted from.")).toBeVisible();
-  await dialog
-    .getByLabel("Text to extract from")
-    .fill("Host: db.example.test\nPort: 5432\nUsername: qa_user");
-  await dialog.getByRole("button", { name: "Extract fields" }).click();
-  await expect(dialog.getByText("Review the extracted fields before saving.")).toBeVisible();
-  await dialog.getByLabel("Name").fill("Extracted Database Fields");
-  await dialog.getByLabel("Project").fill("AI QA");
-  await dialog.getByLabel("Environment").selectOption("Production");
-  await dialog.getByPlaceholder("Label").first().fill("Server");
-  await dialog.getByRole("button", { name: "Add field" }).click();
-  await dialog.getByPlaceholder("Label").last().fill("Region");
-  await dialog.getByPlaceholder("Value").last().fill("test-region-1");
-  await dialog.getByRole("button", { name: "Remove field" }).nth(1).click();
-  await dialog.getByRole("button", { name: "Save secret" }).click();
-  const row = page.getByRole("button", { name: "Open Extracted Database Fields details" });
-  await expect(row).toBeVisible();
-  await row.click();
-  const panel = page.locator(".secret-panel");
-  await expect(panel).toContainText("Custom");
-  await expect(panel).toContainText("Production");
-  await panel.getByRole("button", { name: "Reveal" }).click();
-  await expect(panel).toContainText("Server: db.example.test");
-  await expect(panel).toContainText("Region: test-region-1");
-});
-
 test("creates every supported desktop secret type and exposes every category", async ({
   page,
 }, testInfo) => {
@@ -1029,25 +986,50 @@ test("creates every supported desktop secret type and exposes every category", a
   }
 });
 
-test("uses local AI as a fallback for an uncommon provider name and type", async ({
+test("suggests a name and type from built-in rules, and says Unknown otherwise", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chromium", "Windows desktop flow");
   await createDisposableVault(page);
-  await page.getByRole("link", { name: "Settings", exact: true }).click();
-  await page.getByRole("switch", { name: "Enable local AI" }).click();
-  await expect(page.getByText("Running", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "All secrets", exact: true }).click();
   await page.getByRole("button", { name: "Add secret", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Add a secret" });
-  await dialog
-    .getByPlaceholder("Paste secret value")
-    .fill("rare-service-value-with-no-known-prefix");
-  await dialog.getByRole("button", { name: "Suggest type" }).click();
-  await expect(dialog.getByLabel("What kind is it?")).toHaveValue("API Key");
-  await expect(dialog.getByLabel("Provider")).toHaveValue("IGDB");
+  const nameField = dialog.getByPlaceholder("e.g. OPENAI_API_KEY");
+
+  await dialog.getByPlaceholder("Paste secret value").fill("postgres://qa:pw@db.example.test/app");
   await dialog.getByRole("button", { name: "Suggest name" }).click();
-  await expect(dialog.getByPlaceholder("e.g. OPENAI_API_KEY")).toHaveValue("IGDB API Key");
+  await expect(nameField).toHaveValue("DATABASE_URL");
+  await expect(page.getByText("Name: DATABASE_URL")).toBeVisible();
+  await dialog.getByRole("button", { name: "Suggest type" }).click();
+  await expect(dialog.getByLabel("What kind is it?")).toHaveValue("Database");
+
+  // An unrecognised value is reported as Unknown and changes nothing.
+  await dialog.getByPlaceholder("Paste secret value").fill("opaque-value-with-no-known-shape");
+  await dialog.getByRole("button", { name: "Suggest name" }).click();
+  await expect(page.getByText("Name: Unknown")).toBeVisible();
+  await expect(nameField).toHaveValue("DATABASE_URL");
+  // Type falls back to the variable name, so give it one the rules can't place.
+  await nameField.fill("MISC_VALUE");
+  await dialog.getByRole("button", { name: "Suggest type" }).click();
+  await expect(page.getByText("Type: Unknown")).toBeVisible();
+  await expect(dialog.getByLabel("What kind is it?")).toHaveValue("Database");
+});
+
+test("deletes a project and its secrets after confirming", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chromium", "Windows desktop flow");
+  await createDisposableVault(page);
+  await page.getByRole("link", { name: "Projects", exact: true }).click();
+  await page.getByRole("button", { name: "New project" }).click();
+  await page.getByPlaceholder("e.g. Rescripto").fill("Doomed Project");
+  await page.getByRole("button", { name: "Create project" }).click();
+  await expect(page.getByRole("button", { name: "Delete project" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Delete project" }).click();
+  const confirm = page.getByRole("dialog", { name: "Delete Doomed Project?" });
+  await expect(confirm.getByText(/This removes the empty project\./)).toBeVisible();
+  await confirm.getByRole("button", { name: "Delete project" }).click();
+  await expect(page).toHaveURL(/\/vault\/projects\/?$/);
+  await expect(page.getByText("Deleted Doomed Project")).toBeVisible();
+  await expect(page.getByText("Doomed Project", { exact: true })).toHaveCount(0);
 });
 
 test("renames a project and keeps its secrets attached to the stable project", async ({
@@ -1095,7 +1077,7 @@ test("supports desktop keyboard add, search, lock, failed unlock, and successful
   await add.getByRole("button", { name: "Save secret" }).click();
 
   await page.keyboard.press("Control+k");
-  const search = page.getByPlaceholder("Search your vault, then press Enter");
+  const search = page.getByPlaceholder("Search by name, project, environment, or type");
   await search.fill("keyboard qa");
   await expect(page.getByText("Keyboard Secret", { exact: true }).first()).toBeVisible();
   await page.keyboard.press("Enter");
@@ -1168,7 +1150,7 @@ test("keeps 1,000 desktop records and 50 projects searchable and usable", async 
   await expect(page.getByRole("button", { name: /^Open PERF_SECRET_/ })).toHaveCount(1_000);
 
   await page.keyboard.press("Control+k");
-  const search = page.getByPlaceholder("Search your vault, then press Enter");
+  const search = page.getByPlaceholder("Search by name, project, environment, or type");
   await page.evaluate(() => {
     const started = performance.now();
     const dialog = document.querySelector('[role="dialog"]');

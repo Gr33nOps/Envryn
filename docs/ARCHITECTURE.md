@@ -5,7 +5,7 @@
 ## 1. Shape
 
 Envryn is a **Tauri v2** application: a React UI in a system WebView, with all security-relevant
-logic in a Rust core, plus a separate AI worker process. One codebase targets Windows and Android.
+logic in a Rust core. One codebase targets Windows and Android.
 
 ```
 +---------------------------------------------------------------+
@@ -23,14 +23,8 @@ logic in a Rust core, plus a separate AI worker process. One codebase targets Wi
 |   auth/      password, Windows Hello, biometric, auto-lock    |
 |   platform/  DPAPI | Keystore | FLAG_SECURE | clipboard       |
 |   sync/      identity, pairing, discovery, transport, protocol|
-|   ai/        gateway, engine trait, prompts, schemas          |
+|   classify/  rule-based type and name suggestions, search     |
 |   ipc/       Tauri commands - the only surface the UI reaches |
-+-------------------------------+-------------------------------+
-                                |  loopback + per-session token
-+-------------------------------v-------------------------------+
-|  crates/envryn-ai-worker      SEPARATE PROCESS                |
-|    has:      model path, socket, token                        |
-|    does NOT: link the vault crate, hold a key, see the DB     |
 +---------------------------------------------------------------+
 ```
 
@@ -40,8 +34,12 @@ sides drift.
 
 **`sync/` is implemented** (identity, pairing, discovery, mutual-TLS transport, and the
 manifest-exchange protocol) - see `CRYPTOGRAPHY.md` sections 6-8 for the cryptographic detail
-and `THREAT_MODEL.md` section 7 for what has and has not been verified. `ai/` and
-`crates/envryn-ai-worker` remain not started (Phase 3).
+and `THREAT_MODEL.md` section 7 for what has and has not been verified.
+
+**Local AI was removed in 0.2.0.** Earlier releases shipped an optional on-device model in a
+separate worker process. It was slow to start, needed a ~1 GB download, and only ever helped
+where the rule engine (section 6) already answered better. Removing it took a separate process,
+an HTTP client, and the whole ML dependency tree out of the attack surface.
 
 ---
 
@@ -51,16 +49,15 @@ The product specification's roadmap named Flutter. This is a deliberate, recorde
 
 **For Tauri:** it preserves the existing React UI; the Rust ecosystem has the strongest available
 libraries for every security-critical component here (RustCrypto, `rustls`, `rusqlite`, `spake2`,
-`ed25519-dalek`); Tauri sidecars make the process isolation the specification asks for (section 45)
-a first-class feature rather than a build-system project; and Tauri v2 has been independently
-audited.
+`ed25519-dalek`); Tauri sidecars make process isolation (section 45) a first-class feature
+should a future component need it; and Tauri v2 has been independently audited.
 
 **Against:** Android runs in a WebView rather than natively, so screenshot protection needs a
 small custom Kotlin plugin; and the Android toolchain is less mature than Flutter's.
 
-**The deciding factor:** a Dart implementation would need FFI to Rust or C for crypto and local
-inference regardless, so the Flutter route ends up maintaining two languages *and* discarding
-the existing UI.
+**The deciding factor:** a Dart implementation would need FFI to Rust or C for crypto
+regardless, so the Flutter route ends up maintaining two languages *and* discarding the
+existing UI.
 
 ---
 
@@ -70,8 +67,8 @@ the existing UI.
    sends intents. A compromised WebView must not be a compromised vault.
 2. **The UI reaches Rust only through `ipc/`.** Every command validates its input; no command
    takes a key, a path outside the vault directory, or raw SQL.
-3. **`ai/` cannot reach `storage/` directly.** It goes through `vault/` like everything else,
-   and only via the gateway.
+3. **`classify/` and `search/` are pure functions.** They see a value or a query string, never
+   storage, keys, or the network.
 4. **`sync/` never handles plaintext.** It moves sealed payloads.
 5. **`platform/` isolates every OS-specific call**, so the rest of the core is portable and
    testable without a device.
@@ -166,7 +163,7 @@ Unlock (password): derive KEK -> unwrap VMK (password slot) -> derive subkeys
                     -> build in-memory index
 Unlock (platform):  DPAPI-recover platform key -> unwrap VMK (platform slot)
                     -> derive subkeys -> build in-memory index
-Lock:               zeroize VMK, subkeys, index -> checkpoint WAL -> kill AI worker
+Lock:               zeroize VMK, subkeys, index -> checkpoint WAL
 Triggers:           idle timeout (implemented) | Windows session lock (implemented --
                     see section 7) | Android background (not yet) | Ctrl+L | crash
 ```
@@ -178,55 +175,34 @@ independent trigger for the identical lock sequence -- see section 7 for both.
 
 ---
 
-## 6. AI subsystem
+## 6. Rule-based suggestions
 
-**Implemented** (`crates/envryn-core/src/ai/`, `crates/envryn-ai-worker/`,
-`src-tauri/src/ai.rs`). Full detail, including one remaining recorded deviation from the design
-below (candle instead of llama.cpp) and where grammar-constrained decode now stands (real for
-one schema, not yet the others), is in `AI_SECURITY.md`. Structurally, as built:
+**Implemented** (`crates/envryn-core/src/classify.rs`, `crates/envryn-core/src/search.rs`,
+`src-tauri/src/detect.rs`). Everything that suggests or interprets is ordinary, deterministic
+Rust: instant, offline, and it never sends a value anywhere.
 
 ```
-User intent (a plain value from a form, or a SecretId)
-   -> ai::gateway          resolves ids, applies level policy, redacts, budgets
-   -> SanitizedPrompt      constructible only inside the gateway module
-   -> LocalAiEngine        trait; envryn-ai-worker (candle, not llama.cpp -- see below) is the
-                           one implementation; envryn-core also owns spawning it
-                           (worker_client.rs), not src-tauri, so it stays testable as a
-                           plain library the same way sync/'s TCP/TLS code already is
-   -> grammar-constrained decode (ClassificationOutput only -- envryn-ai-worker::constrained)
-      or strict deserialisation (every other schema -- deny_unknown_fields)
-                                -- see AI_SECURITY.md section 5 for which is which and why
-   -> UI shows a suggestion  (wired for classification only today -- AI_DATA_ACCESS.md)
-   -> user confirms
-   -> vault applies the change
+Suggest type   value -> known prefix / connection-string scheme / shape (PEM, JWT)
+                     -> else the variable name's convention (IGDB_CLIENT_SECRET -> OAuth)
+                     -> else None, shown as "Unknown"
+Suggest name   NAME=value line -> NAME
+                     -> prefix-specific name (pk_live_ -> STRIPE_PUBLISHABLE_KEY)
+                     -> provider's documented name (ghp_ -> GITHUB_TOKEN, postgres:// -> DATABASE_URL)
+                     -> else None, shown as "Unknown"
+Search         plain name matching first; if that finds nothing, parse the query into
+               environment / kind / free-text filters ("production database")
 ```
 
-Like `sync`, `ai` lives inside `envryn-core` rather than directly in `src-tauri` as the box
-diagram in section 1 originally sketched -- the same reasoning applies: it can be tested as a
-plain library, with no windowing system and (via a lightweight test fixture standing in for the
-real worker's wire protocol) no multi-hundred-megabyte model file required for most of its
-tests to run. `src-tauri/src/ai.rs` stays thin: resolving the worker binary's path, resolving
-the models directory, and reading the `ai_enabled` setting are its entire job.
+Prefix rules use **longest match**, so a specific rule always beats a general one sharing its
+start (`sk-or-v1-` beats `sk-`) regardless of table order. A `None` is a real answer: the UI
+says "Unknown" and leaves the field alone rather than presenting a guess with the same
+authority as a match. `.env` parsing uses a real parser, and exact duplicate detection uses
+keyed HMAC (`CRYPTOGRAPHY.md` section 5).
 
-**Why candle instead of llama.cpp.** The original design named llama.cpp specifically. This
-build uses `candle`/`candle-transformers` (a pure-Rust ML framework) instead, discovered as the
-better fit for this development environment: llama.cpp's C++ build requires a C++ toolchain
-(cmake plus MSVC or an ABI-compatible compiler) that was not reliably available, while candle's
-CPU backend compiles as pure Rust with no C/C++ dependency at all. This also means the
-`LocalAiEngine` trait's real implementation gains nothing by being Tauri-specific, which is why
-it lives in `envryn-core` per the paragraph above. The cost was llama.cpp's GBNF
-grammar-constrained decoding having no candle equivalent; `crates/envryn-ai-worker/src/constrained.rs`
-now implements a real one, purpose-built for `ClassificationOutput` (the one schema actually
-wired to the UI) rather than a general grammar engine -- `AI_SECURITY.md` section 5 has the
-mechanism and what still relies on deserialisation alone.
-
-The `LocalAiEngine` trait exists so the model and runtime can change without touching feature
-code (spec section 7). Raw model calls appear in exactly one place.
-
-**Deterministic before probabilistic.** Classification runs a rules engine over known credential
-prefixes and shapes first; the model is the fallback for unrecognised values. `.env` parsing uses
-a real parser. Exact duplicate detection uses keyed HMAC. Most of what looks like an AI feature
-is ordinary code, which is faster, more private, and works with no model installed.
+Earlier releases (before 0.2.0) layered an optional local model on top of these rules for
+values they did not recognise. In practice the rules answered the cases that mattered, the
+model's answers for the rest were often wrong with confidence, and it cost a ~1 GB download,
+a separate worker process, and an HTTP client. It was removed.
 
 ---
 
@@ -238,7 +214,6 @@ is ordinary code, which is faster, more private, and works with no model install
 | Screen capture | **Implemented:** `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, applied unconditionally at startup | Not yet. `FLAG_SECURE` via a custom Kotlin plugin, planned |
 | Clipboard | **Implemented:** native write + `ExcludeClipboardContentFromMonitorProcessing` tag + Rust-side timed clear, configurable in Settings | Not yet. `ClipDescription.EXTRA_IS_SENSITIVE`, planned |
 | Lock trigger | **Implemented:** system-wide idle poll (`GetLastInputInfo`, every 5s) plus a direct `WTS_SESSION_LOCK` hook (window-procedure subclass via `WTSRegisterSessionNotification` -- see below), both converging on the same lock sequence | Not yet. Lifecycle background trigger, planned |
-| Local AI | **Implemented:** bundled `candle`-based sidecar (`envryn-ai-worker`), spawned via `std::process::Command`. As of M22, additionally assigned to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job object (`platform::windows_impl::KillOnCloseJob`) so the OS guarantees the worker dies even if this process itself crashes or is force-killed, not only on a normal `Drop`. **Not implemented:** packaging the sidecar via Tauri's `bundle.externalBin` so a released installer includes it -- development builds resolve the binary as a sibling of the running executable | **Not in v1** (spec section 52) |
 | Min version | Windows 10 1809+ | API 26+ (StrongBox 28+) |
 
 **The direct `WTS_SESSION_LOCK` hook, implemented.** `platform::windows_impl::watch_session_lock`
@@ -255,9 +230,9 @@ Installed alongside the idle poll (`src-tauri/src/lib.rs`'s `.setup()`), not ins
 window-message hook can still fail to register (no main window yet, a non-Windows target, the OS
 call itself failing), in which case the idle poll remains the only trigger -- the same coverage
 this app shipped with before. This closes the item that stayed open through the Phase 4
-(M22-M28) hardening pass, which had focused on the AI attack surface, the network-privacy proof,
-and supply-chain policy enforcement instead (see `AI_SECURITY.md` section 10 and
-`DEPENDENCY_POLICY.md` section 6) rather than platform-trigger coverage.
+(M22-M28) hardening pass, which had focused on the (since removed) local-AI attack surface, the
+network-privacy proof, and supply-chain policy enforcement instead (see `DEPENDENCY_POLICY.md`
+section 6) rather than platform-trigger coverage.
 
 **What "Unlock with this Windows account" actually is, and what the optional Hello gate adds.**
 The unlock itself is still DPAPI (`CryptProtectData`), tied to the current Windows user account --
@@ -274,9 +249,6 @@ Hello. See `docs/CRYPTOGRAPHY.md` section 2 for how the platform slot's key hier
 independent of this distinction (DPAPI protects a random platform key, never the VMK directly),
 and `platform::hello`'s own module doc for the full reasoning.
 
-Android receives AI-generated metadata through sync once confirmed on Windows (spec section 53),
-so shipping without on-device inference costs organisation, not correctness.
-
 ---
 
 ## 8. Repository layout
@@ -288,11 +260,10 @@ src-tauri/            Tauri shell: window creation, vault IPC (ipc.rs), sync/
                        app settings (settings.rs), idle auto-lock (autolock.rs),
                        capture protection (capture_protection.rs)
 crates/
-  envryn-core/        crypto, model, storage, vault, backup, platform, sync, ai --
-                       no Tauri dependency
-  envryn-ai-worker/   local inference sidecar (candle-based). Does not depend on
-                       envryn-core -- verified with `cargo tree -p envryn-ai-worker
-                       -i envryn-core` (no match), per AI-INV-001/002/004/005
+  envryn-core/        crypto, model, storage, vault, backup, platform, sync,
+                       classify (rule-based suggestions), search -- no Tauri dependency
+  envryn-android-clipboard/
+                       Android sensitive-clipboard Tauri plugin
 packages/contract/    generated TS types (ts-rs, `cargo test --workspace
                        export_bindings`) -- packages/contract/bindings/*.ts are
                        generated and committed; index.ts is the one
@@ -308,11 +279,7 @@ docs/                 this directory
 
 `envryn-core` is free of Tauri so the security-critical code can be tested as a plain library,
 without a windowing system -- including `platform::windows_impl`, whose tests exercise real
-DPAPI and the real OS clipboard, not mocks. That distinction is now meaningful for AI too: the
-entire `ai` module is additive (`AI_SECURITY.md` section 1), so `cargo test -p envryn-core`
-already *is* the "AI disabled" run in the sense that matters -- every other module's tests pass
-with `ai/` deleted, they just aren't run that way today since there is no Cargo feature flag
-gating `ai/` in or out of the build, and (per below) no CI to run two configurations anyway.
+DPAPI and the real OS clipboard, not mocks.
 
 `envryn-core::platform` is the one place in the vault core permitted to contain `unsafe` (the
 crate-level lint is `deny`, not `forbid`, specifically so this one module can carry a scoped
@@ -328,14 +295,14 @@ exact manual commands this repo's commit history already verified by hand for ev
 than inventing a separate CI-only check -- `cargo fmt --check`, `cargo clippy --workspace
 --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny check`
 (`EmbarkStudios/cargo-deny-action`), and `cargo audit` on `windows-latest` (deliberately not
-`ubuntu-latest`: most of the sync/AI/hardening work lives behind `#[cfg(windows)]`, and building
+`ubuntu-latest`: most of the sync/hardening work lives behind `#[cfg(windows)]`, and building
 on Linux would silently compile the `stub` fallbacks and test none of it); Semgrep and the
 frontend job (`eslint`, `tsc --noEmit`, `vite build`) run on `ubuntu-latest` instead, since
-neither is platform-specific and both are faster there. `cargo test --no-default-features` and a
-live deny-all-egress firewall test remain not run in CI -- no feature flag currently separates
-"AI compiled in" from "AI compiled out" (see the paragraph above), and a real firewall rule was
-judged too disruptive to configure against a real development machine (see `AI_SECURITY.md`
-section 10 for what stands in for it instead). The workflow triggers on push/PR to `main`; it has
+neither is platform-specific and both are faster there. A live deny-all-egress firewall test
+remains not run in CI -- a real firewall rule was judged too disruptive to configure against a
+real development machine. What stands in for it: the build contains no HTTP client at all
+(`cargo deny` bans `ureq`/`reqwest`/`hyper`/`curl`, and `.semgrep/network-egress.yml` flags any
+HTTP call in source), so LAN sync is the only code path that opens a socket. The workflow triggers on push/PR to `main`; it has
 not yet been extended to gate merges (no branch protection rule requiring it to pass configured).
 
 **Native GUI verification, real as of this pass.** `.dev-tools/webdriver-smoke.mjs` drives the
@@ -355,9 +322,5 @@ window. This is a manual script, not wired into CI (WebView2/Edge automation nee
 Windows desktop session, which GitHub-hosted `windows-latest` runners do provide but this pass
 did not attempt to wire up) -- run it by hand per its own header comment.
 
-Once CI is a merge gate: same list, plus `cargo test --no-default-features` (the AI-disabled
-run).
-
-Release additionally requires: signed Windows and Android binaries, no development AI endpoints,
-no remote inference configuration, no debug unlock path, no test secrets in the bundle, and a
-passing egress test.
+Release additionally requires: signed Windows and Android binaries, no debug unlock path, no
+test secrets in the bundle, and a passing egress test.

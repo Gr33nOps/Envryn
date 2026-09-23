@@ -25,6 +25,8 @@ export interface VaultRepository {
   listProjects(): Promise<Project[]>;
   createProject(name: string): Promise<Project>;
   renameProject(id: string, name: string): Promise<Project>;
+  /** Delete a project and every secret in it; resolves to how many secrets were removed. */
+  deleteProject(name: string): Promise<number>;
   renameDevice(deviceId: string, name: string): Promise<Device>;
   revokeDevice(deviceId: string): Promise<void>;
   createSecret(input: CreateSecretInput): Promise<Secret>;
@@ -84,10 +86,9 @@ const toRustEnvironment = (env: Environment): ipc.RustEnvironment =>
  *
  * `Custom` is genuinely multi-field (`SecretPayload`'s `fields: {label,
  * value}[]`) -- `customFields` carries that when the caller already has
- * labeled pairs (`StructuredExtractModal.tsx`). The plain create/edit form
- * only ever collects one value, so without `customFields` a Custom secret
- * becomes one field named "Value" -- a real fix, not a new gap: `TYPE_TO_KIND`
- * Every supported UI type maps to its native structured Rust payload.
+ * labeled pairs (the Custom type's field editor in `SecretForm.tsx`); without
+ * it a Custom secret becomes one field named "Value". Every supported UI type
+ * maps to its native structured Rust payload.
  */
 export function buildSecretPayload(
   type: SecretType,
@@ -400,6 +401,11 @@ export const tauriVaultRepository: VaultRepository = {
   async renameProject(id, name) {
     requireTauri();
     return toProject(await ipc.projectRename(id, name));
+  },
+
+  async deleteProject(name) {
+    requireTauri();
+    return ipc.projectDelete(name);
   },
 
   async renameDevice(deviceId, name) {

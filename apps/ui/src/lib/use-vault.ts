@@ -123,6 +123,18 @@ export function useRenameProject() {
   });
 }
 
+/** Delete a project and its secrets, then refresh both lists. */
+export function useDeleteProject() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => tauriVaultRepository.deleteProject(name),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: SECRETS_KEY });
+      void client.invalidateQueries({ queryKey: PROJECTS_KEY });
+    },
+  });
+}
+
 export function useCreateSecret() {
   const client = useQueryClient();
   return useMutation({

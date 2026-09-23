@@ -119,16 +119,9 @@ async function installDemoRuntime(page: Page) {
           case "vault_lock":
             return null;
           case "settings_get":
-            return { auto_lock_minutes: 5, clipboard_clear_seconds: 30, ai_enabled: false };
+            return { auto_lock_minutes: 5, clipboard_clear_seconds: 30, auto_sync: true };
           case "device_identity":
             return { device_id: "windows-demo", fingerprint: "b2".repeat(32) };
-          case "ai_status":
-            return {
-              enabled_in_settings: false,
-              model_downloaded: false,
-              model_name: "Local model",
-              engine_running: false,
-            };
           case "plugin:window|is_maximized":
             return false;
           case "plugin:event|listen":

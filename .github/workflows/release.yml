@@ -20,8 +20,7 @@ jobs:
   build:
     name: Build MSI + NSIS installers
     runs-on: windows-latest
-    # The real AI-worker sidecar adds a heavy candle/tokenizers build, so keep peak memory use
-    # predictable even on the hosted runner.
+    # Keep peak memory use predictable on the hosted runner for the LTO release build.
     env:
       CARGO_BUILD_JOBS: "2"
     steps:
@@ -35,10 +34,6 @@ jobs:
       - run: npm ci --ignore-scripts
 
       - run: npm run build --workspace @envryn/ui
-
-      # Builds the real AI-worker sidecar -- not the placeholder ci.yml uses, since this
-      # workflow's whole point is producing real, distributable artifacts.
-      - run: npm run prepare:sidecar
 
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
 

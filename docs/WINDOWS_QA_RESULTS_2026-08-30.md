@@ -1,5 +1,7 @@
 # Envryn Windows QA Results
 
+> Historical QA record for 0.1.9. Local AI (the `envryn-ai-worker` sidecar, model download, and every AI command) was removed in 0.2.0, so AI findings here are historical.
+
 Date: 2026-08-30  
 Version: 0.1.9  
 Workspace: current uncommitted working tree  

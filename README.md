@@ -44,18 +44,20 @@ The gallery uses fabricated metadata created by the repeatable screenshot test. 
 - **Sync is direct.** Approved devices sync over your local network without a relay server.
 - **There is no account.** Envryn does not need an email address, subscription, or hosted control plane.
 - **Security decisions live in Rust.** The interface never gets to bypass vault policy.
-- **Optional AI stays local.** The Windows app can run a small on-device model, and the vault works fully without it.
+- **Nothing phones home.** Envryn makes no HTTP requests at all. Its only network traffic is sync with devices you paired yourself.
 - **The limits are documented.** Envryn is beta software and has not received an independent third-party audit.
 
 ## What it can do
 
 - Store API keys, tokens, environment variables, database credentials, SSH keys, OAuth secrets, webhooks, and notes
 - Organize secrets by project and Development, Staging, or Production environment
-- Detect many common credential formats without a network request
-- Import `.env` content and extract structured fields
+- Suggest a secret's type and name from built-in rules for 70+ key formats (`sk_live_...` becomes a Stripe API key named `STRIPE_SECRET_KEY`), and say "Unknown" instead of guessing
+- Drag a `.env` file onto the app, or import it straight into a project
+- Set expiration dates and see which secrets are expiring or expired
+- Delete a project together with its secrets
 - Pair Windows and Android devices with a human-verified code
-- Sync encrypted records directly over the local network
-- Create encrypted, password-protected backups
+- Sync encrypted records directly over the local network, automatically while both apps are open
+- Create encrypted, password-protected backups, saved wherever you pick in the system file dialog
 - Lock on idle or when the Android app moves to the background
 - Clear copied secrets after a configurable delay
 - Unlock with Windows Hello when platform protection is enabled
@@ -92,7 +94,7 @@ Both install the same application. Windows packages are not code-signed yet, so 
 
 Install `Envryn_<version>_android-universal.apk` on Android 10 or newer. Android will ask you to allow installation from an unknown source because Envryn is distributed directly through GitHub.
 
-The Android APK is signed with the same Envryn release identity across updates. Android does not include the optional local AI worker.
+The Android APK is signed with the same Envryn release identity across updates.
 
 ### Verify a download
 
@@ -154,14 +156,12 @@ The repository includes pre-commit and pre-push hooks under `.githooks/`. See [C
 
 ```text
 apps/ui/             React and TanStack Router interface
-crates/envryn-core/  Vault, cryptography, storage, sync, and platform policy
-crates/envryn-ai-worker/
-                     Optional local inference process with no vault dependency
+crates/envryn-core/  Vault, cryptography, storage, sync, classification, and platform policy
 src-tauri/            Tauri commands and native application shell
 packages/contract/   TypeScript bindings generated from Rust IPC types
 ```
 
-The UI is treated as untrusted. Sensitive operations cross a typed Tauri boundary and are enforced by the Rust core. The local AI worker runs as a separate process and receives only the minimum sanitized input for a requested operation.
+The UI is treated as untrusted. Sensitive operations cross a typed Tauri boundary and are enforced by the Rust core.
 
 Read [the architecture guide](docs/ARCHITECTURE.md) for data flows and design decisions.
 
@@ -175,8 +175,6 @@ Read [the architecture guide](docs/ARCHITECTURE.md) for data flows and design de
 - [Security and privacy testing](docs/SECURITY_TESTING.md)
 - [Quality testing](docs/QUALITY_TESTING.md)
 - [Dependency policy](docs/DEPENDENCY_POLICY.md)
-- [AI security](docs/AI_SECURITY.md)
-- [AI data access](docs/AI_DATA_ACCESS.md)
 - [Release process](docs/RELEASE_PROCESS.md)
 
 ## Project status
@@ -185,7 +183,6 @@ Envryn is in beta. The core vault, backup, sync protocol, Windows app, and Andro
 
 - Windows installers do not have a trusted publisher signature yet.
 - Android has less physical-device coverage than Windows.
-- The local AI feature is optional and intentionally uses a small model.
 - There is no automatic updater.
 - The project has completed an internal security review, not an independent audit.
 

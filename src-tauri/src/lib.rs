@@ -4,7 +4,7 @@
 //! surface; every security decision lives in `envryn-core`, which has no
 //! dependency on Tauri and can therefore be tested without a windowing system.
 
-// `ai`/`ipc`/`settings`/`sync` are `pub` (rather than the private `mod` an
+// `detect`/`ipc`/`settings`/`sync` are `pub` (rather than the private `mod` an
 // application-only crate would otherwise use) solely so `tests/ipc_mock.rs`
 // -- a real Cargo integration test target -- can reach their `#[tauri::command]`
 // functions and state types to dispatch them through `tauri::test`'s real IPC
@@ -12,17 +12,33 @@
 // wider surface carries no real cost; nothing about the command boundary
 // itself changes; see `tests/ipc_mock.rs`'s module doc for why the tests live
 // there instead of an internal `#[cfg(test)] mod tests`.
-pub mod ai;
 mod autolock;
 mod capture_protection;
+pub mod detect;
 pub mod ipc;
 pub mod settings;
 pub mod sync;
 mod window_chrome;
 
-use ai::AiState;
 use ipc::VaultState;
 use sync::{PairingState, SyncListenState};
+
+/// Delete the local AI model folder left by releases before 0.2.0, which
+/// downloaded a ~1 GB model into `<app data>/models`. Local AI has been
+/// removed, so the folder is dead weight. Best-effort, on a background thread
+/// so it never delays the window; the folder only ever held the public model
+/// files, never vault data (the vault lives in `envryn.db`).
+fn remove_legacy_ai_models(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Ok(dir) = app.path().app_data_dir() {
+        let models = dir.join("models");
+        if models.is_dir() {
+            std::thread::spawn(move || {
+                let _ = std::fs::remove_dir_all(models);
+            });
+        }
+    }
+}
 
 /// Start the application.
 ///
@@ -33,7 +49,12 @@ use sync::{PairingState, SyncListenState};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::expect_used)]
 pub fn run() {
-    let builder = tauri::Builder::default();
+    // Dialog + fs power the native backup Save/Open pickers, called only from
+    // Rust commands (ipc::backup_create/backup_restore). No dialog or fs
+    // permission is granted to the webview in capabilities/default.json.
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init());
     #[cfg(target_os = "android")]
     let builder = builder.plugin(envryn_android_clipboard::init());
 
@@ -41,16 +62,12 @@ pub fn run() {
         .manage(VaultState::default())
         .manage(PairingState::default())
         .manage(SyncListenState::default())
-        .manage(AiState::default())
         .setup(|app| {
             let handle = app.handle().clone();
             capture_protection::apply(&handle);
             window_chrome::apply(&handle);
             autolock::watch_session_lock(handle.clone());
-            // If local AI is already enabled in Settings, start its worker now
-            // so it is running when the app opens. Best-effort and silent --
-            // see `ai::autostart`; never blocks the window from appearing.
-            ai::autostart(handle.clone());
+            remove_legacy_ai_models(&handle);
             autolock::spawn(handle);
             Ok(())
         })
@@ -70,6 +87,7 @@ pub fn run() {
             ipc::project_list,
             ipc::project_create,
             ipc::project_rename,
+            ipc::project_delete,
             ipc::secret_reveal,
             ipc::secret_create,
             ipc::secret_update,
@@ -90,23 +108,16 @@ pub fn run() {
             sync::trusted_device_rename,
             sync::trusted_device_revoke,
             sync::discovery_browse,
-            sync::sync_now,
+            sync::sync_peer,
             sync::sync_listen_start,
             sync::sync_listen_stop,
             sync::pairing_host_start,
             sync::pairing_join_start,
             sync::pairing_confirm,
             sync::pairing_cancel,
-            ai::classify_deterministic,
-            ai::ai_status,
-            ai::ai_download_model,
-            ai::ai_start,
-            ai::ai_stop,
-            ai::ai_classify_pasted_value,
-            ai::ai_suggest_name,
-            ai::ai_classify_env_names,
-            ai::ai_extract_structured_fields,
-            ai::ai_parse_search_intent,
+            detect::classify_value,
+            detect::suggest_secret_name,
+            detect::search_parse_query,
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Envryn");

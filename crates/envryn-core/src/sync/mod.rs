@@ -13,8 +13,6 @@
 //! protocol    HLC-ordered manifest exchange; last-writer-wins, losing side kept
 //! discovery   mDNS advertise/browse -- discovery grants no trust
 //! ```
-//!
-//! AI has no involvement anywhere in this module (specification section 40).
 
 pub mod discovery;
 pub mod handshake;

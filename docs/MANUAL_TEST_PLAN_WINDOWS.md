@@ -15,17 +15,17 @@ For every failure, save the test ID, exact steps, expected result, actual result
 
 ## Build and tester record
 
-| Field                          | Value |
-| ------------------------------ | ----- |
-| App version                    | 0.1.9 |
-| Commit or release tag          | `af5f591` plus the documented working-tree fixes |
-| Installer filename             | `Envryn_0.1.9_x64_en-US.msi` and `Envryn_0.1.9_x64-setup.exe` |
+| Field                          | Value                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| App version                    | 0.1.9                                                                    |
+| Commit or release tag          | `af5f591` plus the documented working-tree fixes                         |
+| Installer filename             | `Envryn_0.1.9_x64_en-US.msi` and `Envryn_0.1.9_x64-setup.exe`            |
 | Windows edition and build      | Windows 10 Enterprise 10.0.19041 Sandbox; Windows 10 Pro 10.0.19045 host |
-| Windows account type           | Disposable Sandbox account for installer tests |
-| Display resolution and scaling | 1366 by 768 plus effective 125, 150, and 200 percent browser layouts |
-| WebView2 version               | Offline runtime embedded; exact runtime version not recorded |
-| Test date                      | 2026-08-30 |
-| Tester                         | Automated QA harness with native and Sandbox verification |
+| Windows account type           | Disposable Sandbox account for installer tests                           |
+| Display resolution and scaling | 1366 by 768 plus effective 125, 150, and 200 percent browser layouts     |
+| WebView2 version               | Offline runtime embedded; exact runtime version not recorded             |
+| Test date                      | 2026-08-30                                                               |
+| Tester                         | Automated QA harness with native and Sandbox verification                |
 
 ## Priorities
 
@@ -39,7 +39,6 @@ For every failure, save the test ID, exact steps, expected result, actual result
 - Use a disposable Windows account, VM, or test PC for restore, corruption, upgrade, and interrupted-write tests.
 - Back up any existing Envryn data before starting destructive tests.
 - Prepare two Windows PCs or VMs on the same private LAN for pairing and sync tests. No phone is required.
-- Test with Local AI disabled first. Run the Local AI section again after the model is downloaded and running.
 - Keep Windows Task Manager, Snipping Tool, Clipboard History, and File Explorer available.
 - For network tests, know how to temporarily disable Wi-Fi or Ethernet and how to change the Windows Firewall rule for Envryn.
 
@@ -62,15 +61,15 @@ Use clearly fake values such as these:
 
 At minimum, run the P0 and P1 tests in the first row. Run the remaining rows before a public release when the environment is available.
 
-| Environment                                       | Scope                                  | Result |
-| ------------------------------------------------- | -------------------------------------- | ------ |
-| Windows 11, current supported build, 100% scaling | Full suite                             | BLOCKED |
-| Windows 11, 125% or 150% scaling                  | Visual, window, modal, accessibility   | BLOCKED; equivalent layouts pass |
-| Windows 11, 200% scaling                          | Visual, keyboard, modal, accessibility | BLOCKED; equivalent layout passes |
-| Windows 10, latest supported build                | P0, P1, installer, Windows integration | PASS for clean Sandbox scope |
-| Standard Windows user                             | Install, launch, vault, backup, sync   | BLOCKED |
-| Offline PC                                        | Vault, search, Local AI, privacy       | PASS for installer, core, and Local AI scope |
-| Two Windows PCs or VMs on one LAN                 | Pairing and sync                       | BLOCKED; protocol tests pass |
+| Environment                                       | Scope                                  | Result                                                |
+| ------------------------------------------------- | -------------------------------------- | ----------------------------------------------------- |
+| Windows 11, current supported build, 100% scaling | Full suite                             | BLOCKED                                               |
+| Windows 11, 125% or 150% scaling                  | Visual, window, modal, accessibility   | BLOCKED; equivalent layouts pass                      |
+| Windows 11, 200% scaling                          | Visual, keyboard, modal, accessibility | BLOCKED; equivalent layout passes                     |
+| Windows 10, latest supported build                | P0, P1, installer, Windows integration | PASS for clean Sandbox scope                          |
+| Standard Windows user                             | Install, launch, vault, backup, sync   | BLOCKED                                               |
+| Offline PC                                        | Vault, search, suggestions, privacy    | PASS for installer and core scope (last run on 0.1.9) |
+| Two Windows PCs or VMs on one LAN                 | Pairing and sync                       | BLOCKED; protocol tests pass                          |
 
 ## Release smoke test
 
@@ -254,26 +253,28 @@ For each row, create the secret, reveal or view all sensitive fields, edit every
 |        | PRJ-011 | P1       | Remove a secret from a project if unassigned projects are supported. | The secret remains in All Secrets but leaves the project.                             |
 |        | PRJ-012 | P1       | Open a legacy project inferred from existing secret metadata.        | It appears once and contains the expected records.                                    |
 |        | PRJ-013 | P1       | Use long, Unicode, and punctuation-heavy project names.              | Supported names persist and routes still open correctly.                              |
-|        | PRJ-014 | P1       | Lock the vault while a project is open, then unlock.                 | The app returns safely with correct project data or to a predictable default page.    |
+|        | PRJ-014 | P1       | Lock the vault while a project is open, then unlock.                 | The app returns safely with correct project data or to a predictable default page.    |     |     | PRJ-015 | P0  | Delete a project that contains secrets, from its project page. | A confirmation states how many secrets go with it; afterwards the project and its secrets are gone. |
+|        | PRJ-016 | P1       | Delete a project, then sync a paired device.                         | The project's secrets disappear on the other device too.                              |
+|        | PRJ-017 | P1       | On a touch screen, open a project.                                   | The rename and delete controls are visible without hovering.                          |
 
 ## 10. Search and command palette
 
-| Result | ID       | Priority | Test                                                                                  | Expected result                                                                                                |
-| ------ | -------- | -------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-|        | SRCH-001 | P0       | Search an exact secret name.                                                          | The correct record is the top result without invoking AI.                                                      |
-|        | SRCH-002 | P1       | Search a partial name and a minor typo.                                               | Useful fuzzy matches appear quickly.                                                                           |
-|        | SRCH-003 | P1       | Search by provider, project, environment, type, tag, and non-sensitive notes text.    | Relevant records appear for every supported metadata field.                                                    |
-|        | SRCH-004 | P0       | Search for the actual secret value.                                                   | Sensitive values are not exposed in result previews. Search behavior follows the documented privacy model.     |
-|        | SRCH-005 | P1       | Enter a query with different capitalization and spacing.                              | Matching is consistent and not needlessly case-sensitive.                                                      |
-|        | SRCH-006 | P1       | Navigate results using arrow keys, Enter, mouse, and Escape.                          | Selection and dismissal are correct.                                                                           |
-|        | SRCH-007 | P1       | Search with Local AI disabled.                                                        | Normal search remains fast and fully usable.                                                                   |
-|        | SRCH-008 | P1       | Search with Local AI enabled but the model stopped or unavailable.                    | Normal search still works and assisted errors do not break the palette.                                        |
-|        | SRCH-009 | P1       | Use an intent query such as `production database for Website`, then choose Interpret. | Assisted search returns relevant constrained results or an honest no-match response.                           |
-|        | SRCH-010 | P1       | Search for uncommon services: IGDB, TMDB, and Vercel CLI.                             | Results use available metadata and do not substitute an unrelated popular provider.                            |
-|        | SRCH-011 | P1       | Enter a nonsense or ambiguous query.                                                  | The app avoids a confident incorrect answer and allows normal search recovery.                                 |
-|        | SRCH-012 | P1       | Measure exact-name search with 1,000 test records.                                    | Visible results begin within 300 ms on the reference PC. Record actual time.                                   |
-|        | SRCH-013 | P2       | Measure assisted search after model warm-up.                                          | The UI remains responsive, shows progress, and completes within the agreed release budget. Record actual time. |
-|        | SRCH-014 | P1       | Delete or edit a search result, close search, then search again.                      | The index reflects the latest saved state with no stale result.                                                |
+| Result | ID       | Priority | Test                                                                                  | Expected result                                                                                            |
+| ------ | -------- | -------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+|        | SRCH-001 | P0       | Search an exact secret name.                                                          | The correct record is the top result immediately.                                                          |
+|        | SRCH-002 | P1       | Search a partial name and a minor typo.                                               | Useful fuzzy matches appear quickly.                                                                       |
+|        | SRCH-003 | P1       | Search by provider, project, environment, type, tag, and non-sensitive notes text.    | Relevant records appear for every supported metadata field.                                                |
+|        | SRCH-004 | P0       | Search for the actual secret value.                                                   | Sensitive values are not exposed in result previews. Search behavior follows the documented privacy model. |
+|        | SRCH-005 | P1       | Enter a query with different capitalization and spacing.                              | Matching is consistent and not needlessly case-sensitive.                                                  |
+|        | SRCH-006 | P1       | Navigate results using arrow keys, Enter, mouse, and Escape.                          | Selection and dismissal are correct.                                                                       |
+|        | SRCH-007 | P1       | Type a phrase such as `production database` that matches no secret name.              | Results filter to that environment and type, and a `Filtered by` line shows what was matched.              |
+|        | SRCH-008 | P1       | Search with the network disconnected.                                                 | Search, including phrase filtering, works exactly the same.                                                |
+|        | SRCH-009 | P1       | Use an intent query such as `production database for Website`, then choose Interpret. | Assisted search returns relevant constrained results or an honest no-match response.                       |
+|        | SRCH-010 | P1       | Search for uncommon services: IGDB, TMDB, and Vercel CLI.                             | Results use available metadata and do not substitute an unrelated popular provider.                        |
+|        | SRCH-011 | P1       | Enter a nonsense or ambiguous query.                                                  | The app avoids a confident incorrect answer and allows normal search recovery.                             |
+|        | SRCH-012 | P1       | Measure exact-name search with 1,000 test records.                                    | Visible results begin within 300 ms on the reference PC. Record actual time.                               |
+|        | SRCH-013 | P2       | Measure phrase filtering on a vault with 1,000 records.                               | Filtered results appear without a visible delay while typing.                                              |
+|        | SRCH-014 | P1       | Delete or edit a search result, close search, then search again.                      | The index reflects the latest saved state with no stale result.                                            |
 
 ## 11. `.env` import
 
@@ -288,34 +289,26 @@ For each row, create the secret, reveal or view all sensitive fields, edit every
 |        | IMP-007 | P1       | Change detected secret types before import.                                                                  | Manual selections are preserved in created records.                                                       |
 |        | IMP-008 | P1       | Choose project and environment, then import.                                                                 | Every created record has the selected project and environment.                                            |
 |        | IMP-009 | P0       | Inspect the tags of imported records.                                                                        | The app does not add an `IMPORTED` tag unless the user explicitly chose it.                               |
-|        | IMP-010 | P1       | Import with Local AI disabled.                                                                               | Deterministic classification still works and import completes offline.                                    |
-|        | IMP-011 | P1       | Import with Local AI enabled and running.                                                                    | Uncommon names improve where the model is confident, while values remain local.                           |
+|        | IMP-010 | P1       | Drag a `.env` file onto the import dialog, then use Choose .env file.                                        | Contents load both ways and types are detected from values and variable names.                            |
+|        | IMP-011 | P1       | Open Import .env from inside a project.                                                                      | The project and current environment are prefilled.                                                        |
 |        | IMP-012 | P1       | Attempt import with no rows selected.                                                                        | No records are created and the UI asks for at least one selection.                                        |
 |        | IMP-013 | P1       | Import 100 fake variables.                                                                                   | The review list remains usable, each selected item is imported once, and success count is accurate.       |
 |        | IMP-014 | P2       | Force one record to fail during a disposable import if a safe test hook exists.                              | The app reports partial success and identifies failed variable names without duplicating successful rows. |
 
-## 12. Local AI, suggestions, and structured extraction
+## 12. Type and name suggestions
 
-| Result | ID     | Priority | Test                                                                                   | Expected result                                                                                |
-| ------ | ------ | -------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-|        | AI-001 | P1       | Open Settings on a fresh installation.                                                 | Local AI is opt-in and its state is explained clearly.                                         |
-|        | AI-002 | P1       | Enable Local AI without a model present.                                               | The app offers or begins the model setup flow with clear size and status information.          |
-|        | AI-003 | P1       | Interrupt model download by disconnecting the network.                                 | The UI reports failure safely and can retry without corrupting the app.                        |
-|        | AI-004 | P1       | Complete the model download and start Local AI.                                        | Status reaches a ready or running state without requiring a cloud account.                     |
-|        | AI-005 | P1       | Restart Envryn after Local AI setup.                                                   | The enabled state and model availability are handled predictably.                              |
-|        | AI-006 | P1       | Disable Local AI.                                                                      | AI actions stop using the model while normal vault workflows keep working.                     |
-|        | AI-007 | P1       | Use Suggest Name and Suggest Type with `IGDB_CLIENT_ID`.                               | Suggestions reflect IGDB and Client ID or present a cautious fallback.                         |
-|        | AI-008 | P1       | Repeat with `TMDB_API_KEY` and `VERCEL_CLI_TOKEN`.                                     | Suggestions recognize the terminology and avoid unrelated providers.                           |
-|        | AI-009 | P1       | Use a completely unknown variable name and fake value.                                 | The app uses a generic, editable suggestion instead of false certainty.                        |
-|        | AI-010 | P1       | Provide conflicting name, provider, and metadata clues.                                | The suggestion is cautious and does not overwrite entered fields automatically.                |
-|        | AI-011 | P1       | Confirm that accepting a suggestion changes only the intended field.                   | Other form values remain untouched and final Save is still required.                           |
-|        | AI-012 | P1       | Open Extract fields with Local AI disabled.                                            | The app explains that Local AI must be enabled and does not lose the pasted text unexpectedly. |
-|        | AI-013 | P1       | Extract a fake connection string or labeled configuration block.                       | Useful labeled fields appear in review and can be edited before saving.                        |
-|        | AI-014 | P1       | Extract empty, unlabeled, and nonsensical text.                                        | Clear validation or no-fields feedback appears without inventing sensitive data.               |
-|        | AI-015 | P1       | Add, rename, and remove extracted fields, select a project and environment, then save. | A Custom secret is created exactly as reviewed.                                                |
-|        | AI-016 | P0       | Run Local AI actions while the internet is disconnected.                               | Once the model is installed, inference works locally and no sign-in is requested.              |
-|        | AI-017 | P1       | Monitor Task Manager during idle, first inference, repeated inference, and disable.    | CPU and memory use are explainable, the UI stays responsive, and resources settle after work.  |
-|        | AI-018 | P2       | Repeat the same suggestion five times.                                                 | Results are reasonably stable and never damage manually entered data.                          |
+Suggestions come from built-in rules for known key formats and variable-name conventions. They never guess: anything unrecognized is reported as Unknown.
+
+| Result | ID      | Priority | Test                                                                             | Expected result                                                                         |
+| ------ | ------- | -------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+|        | SUG-001 | P0       | Paste `sk_live_` plus fake characters, then Suggest name and Suggest type.       | Name `STRIPE_SECRET_KEY`, type API Key, provider Stripe.                                |
+|        | SUG-002 | P1       | Repeat with fake `ghp_`, `postgres://`, and `pk_live_` values.                   | `GITHUB_TOKEN`/Token, `DATABASE_URL`/Database, `STRIPE_PUBLISHABLE_KEY`/API Key.        |
+|        | SUG-003 | P0       | Paste a value with no known shape and use Suggest name.                          | A `Name: Unknown` notice appears and the name field is left unchanged.                  |
+|        | SUG-004 | P1       | With an opaque value, name the secret `IGDB_CLIENT_SECRET` and use Suggest type. | The type falls back to the name convention (OAuth, provider IGDB).                      |
+|        | SUG-005 | P1       | Use Suggest type on an opaque value with a neutral name.                         | A `Type: Unknown` notice appears and the type is left unchanged.                        |
+|        | SUG-006 | P1       | Paste a full `NAME=value` line and use Suggest name.                             | The name becomes `NAME`.                                                                |
+|        | SUG-007 | P0       | Use every suggestion with the network disconnected.                              | Results are identical and instant; nothing needs the network.                           |
+|        | SUG-008 | P1       | Upgrade from a pre-0.2.0 install that downloaded the local AI model.             | Settings shows no Local AI section, and the old `models` folder in app data is removed. |
 
 ## 13. Backup and restore
 
@@ -326,7 +319,7 @@ Run this section only with a disposable test vault or after making a separate ve
 |        | BAK-001 | P1       | Open Backup from the sidebar and from Settings.                                                      | Both routes open the same working backup page.                                                                     |
 |        | BAK-002 | P1       | Start backup and cancel the file chooser.                                                            | No backup is created and the vault remains unchanged.                                                              |
 |        | BAK-003 | P1       | Try an empty, weak, or mismatched backup password.                                                   | Backup is blocked with clear validation.                                                                           |
-|        | BAK-004 | P0       | Create a backup with a valid path and password.                                                      | A non-empty backup file is created and success is reported.                                                        |
+|        | BAK-004 | P0       | Create a backup, choosing the location in the system Save dialog.                                    | A non-empty backup file is created and success is reported.                                                        |
 |        | BAK-005 | P0       | Search the backup file with a text or hex viewer for fake secret names and values.                   | Plaintext names, values, and notes are not readable.                                                               |
 |        | BAK-006 | P1       | Create backups to a path containing spaces and Unicode characters.                                   | Backup succeeds or gives a clear supported-path error.                                                             |
 |        | BAK-007 | P1       | Attempt to overwrite an existing backup file.                                                        | The app confirms or handles overwrite predictably and never silently damages the only backup.                      |
@@ -338,7 +331,8 @@ Run this section only with a disposable test vault or after making a separate ve
 |        | BAK-013 | P0       | Verify every project, environment, secret type, custom field, tag, note, and provider after restore. | Restored content matches the source backup exactly.                                                                |
 |        | BAK-014 | P0       | Restart Envryn and unlock with the restore password, then try the pre-restore password.              | The new password works, the old one fails, and restored data persists.                                             |
 |        | BAK-015 | P1       | Inspect the app data directory after restore on the disposable PC.                                   | The old vault is preserved or replaced according to the documented recovery design, with no ambiguous active copy. |
-|        | BAK-016 | P1       | Attempt backup to an unwritable or full destination on a disposable environment.                     | The app reports the write failure and leaves existing files and vault data intact.                                 |
+|        | BAK-016 | P1       | Attempt backup to an unwritable or full destination on a disposable environment.                     | The app reports the write failure and leaves existing files and vault data intact.                                 |     |     | BAK-017 | P0  | Restore while the current vault is unlocked. | Restore succeeds; the previous vault file is kept aside with a timestamp. |
+|        | BAK-018 | P1       | On Android, back up to Downloads or a cloud drive, then restore from it.                             | The system file picker is used both ways and the restore succeeds.                                                 |
 
 ## 14. Trusted devices and PC-to-PC pairing
 
@@ -394,7 +388,9 @@ Complete the pairing section first. Label unique test records with `PC-A` and `P
 |        | SYN-021 | P1       | Sync 1,000 fake records and record duration, CPU, and memory.                         | Progress remains visible, the app stays responsive, and final counts match.                            |
 |        | SYN-022 | P0       | Compare a sample from every secret type field by field after the large sync.          | There is no truncation, encoding change, plaintext exposure, or metadata loss.                         |
 |        | SYN-023 | P0       | Revoke PC B during or immediately before a sync attempt.                              | The revoked device cannot complete a new authenticated sync.                                           |
-|        | SYN-024 | P1       | Change the vault password on one device and follow the supported sync flow.           | The app clearly handles re-authentication or key update without corrupting either vault.               |
+|        | SYN-024 | P1       | Change the vault password on one device and follow the supported sync flow.           | The app clearly handles re-authentication or key update without corrupting either vault.               |     |     | SYN-025 | P0  | Leave both apps open and unlocked with Sync automatically on, then edit on one device. | The other device shows the change within about 30 seconds without pressing Sync. |
+|        | SYN-026 | P0       | Sync from the phone to a PC that has WSL, Hyper-V, or VPN adapters.                   | The phone connects within seconds using the PC's LAN address.                                          |
+|        | SYN-027 | P1       | Sync after changing records on only the device that starts the sync.                  | The notification reports what was sent and received, never a misleading 0.                             |
 
 ## 16. Settings and persistence
 
@@ -429,7 +425,7 @@ These checks validate visible behavior. They do not replace code review, automat
 |        | PRV-008 | P0       | Inspect recent files, Windows Search, notification text, and taskbar hover previews after normal use.                                 | Secret names and values are not unnecessarily exposed.                                                                              |
 |        | PRV-009 | P0       | Use Envryn fully offline while monitoring active network connections with Windows Resource Monitor.                                   | Core operations do not require remote services. Local pairing traffic stays on the local network.                                   |
 |        | PRV-010 | P0       | Search the app data directory for the exact fake secret value while the vault is locked.                                              | The value is not stored as readable plaintext.                                                                                      |
-|        | PRV-011 | P0       | Trigger wrong-password, corrupt-backup, pairing, AI, and sync errors.                                                                 | Errors do not print secret values, master passwords, encryption keys, or full sensitive payloads.                                   |
+|        | PRV-011 | P0       | Trigger wrong-password, corrupt-backup, pairing, and sync errors.                                                                     | Messages are clear and never include secret values.                                                                                 |
 |        | PRV-012 | P1       | Copy a device fingerprint and wait past the secret clipboard timeout.                                                                 | Non-secret copy behavior is predictable and does not weaken secret clipboard handling.                                              |
 
 ## 18. Accessibility, display, and usability
@@ -468,7 +464,7 @@ Use disposable data for tests that interrupt the app or alter files.
 |        | REL-011 | P1       | Disconnect and reconnect monitors while Envryn is open.                           | The window remains reachable and content redraws correctly.                                         |
 |        | REL-012 | P1       | Remove or rename a backup file after choosing it but before restore confirmation. | Restore fails safely with no change to the current vault.                                           |
 |        | REL-013 | P1       | Leave the vault locked overnight, then unlock.                                    | Unlock works and there is no stale loading or expired UI state.                                     |
-|        | REL-014 | P2       | Run Envryn under a standard user with a non-ASCII Windows username.               | App data, backup, Local AI, and launch paths work or fail with a clear message.                     |
+|        | REL-014 | P2       | Run Envryn under a standard user with a non-ASCII Windows username.               | App data, backup, and launch paths work or fail with a clear message.                               |
 
 ## 20. Release package and documentation acceptance
 
@@ -489,17 +485,17 @@ Use disposable data for tests that interrupt the app or alter files.
 
 Record the reference PC specifications and use the same vault for comparisons between releases.
 
-| Measurement                               |                                 Target | Actual | Result |
-| ----------------------------------------- | -------------------------------------: | -----: | ------ |
-| Cold launch to unlock screen              |      3 seconds or less on reference PC |        |        |
-| Unlock with 1,000 records                 |      3 seconds or less on reference PC | 1,463.7 ms | PASS |
-| Exact or fuzzy local search first results |                         300 ms or less | 169.9 ms | PASS |
-| Open a normal secret panel                |                         200 ms or less |        |        |
-| Save a normal secret                      |                       1 second or less |        |        |
-| Apply list filter or sort                 |                         300 ms or less |        |        |
-| Open a 1,000-record project               |                       1 second or less | 103 ms | PASS |
-| Idle memory after 10 minutes              |                   No continuous growth |        |        |
-| Local AI repeated query                   |                   Record after warm-up |        |        |
+| Measurement                               |                                 Target |                                        Actual | Result                  |
+| ----------------------------------------- | -------------------------------------: | --------------------------------------------: | ----------------------- |
+| Cold launch to unlock screen              |      3 seconds or less on reference PC |                                               |                         |
+| Unlock with 1,000 records                 |      3 seconds or less on reference PC |                                    1,463.7 ms | PASS                    |
+| Exact or fuzzy local search first results |                         300 ms or less |                                      169.9 ms | PASS                    |
+| Open a normal secret panel                |                         200 ms or less |                                               |                         |
+| Save a normal secret                      |                       1 second or less |                                               |                         |
+| Apply list filter or sort                 |                         300 ms or less |                                               |                         |
+| Open a 1,000-record project               |                       1 second or less |                                        103 ms | PASS                    |
+| Idle memory after 10 minutes              |                   No continuous growth |                                               |                         |
+| Phrase-filtered search, 1,000 records     |                    Record while typing |                                               |                         |
 | LAN sync of 1,000 records                 | Record and compare to previous release | 13.37 seconds over real mutual TLS in-process | PASS for protocol scope |
 
 These are release targets for the reference environment, not universal hardware guarantees. A consistent regression of 20 percent or more should be investigated.
@@ -516,7 +512,7 @@ A Windows release candidate is ready only when:
 - Create Project and edit all secret fields pass in the final build.
 - Windows lock, sleep or resume, clipboard timeout, clipboard replacement protection, and capture protection are verified.
 - The full secret type matrix passes after restart.
-- Normal search remains useful with Local AI disabled.
+- Search and type and name suggestions work with the network disconnected.
 - The final GitHub release asset passes the smoke test on a clean PC.
 - All failures have an owner, severity, reproduction steps, and release decision.
 
@@ -531,7 +527,7 @@ Windows edition and build:
 Display scaling:
 Fresh install or upgraded install:
 Vault state: New / Existing / Paired / Restored
-Local AI state: Disabled / Downloading / Running / Error
+Sync automatically: On / Off
 Network state: Online / Offline / Same-LAN peer
 
 Preconditions:
@@ -563,6 +559,6 @@ Keep automated unit, integration, and end-to-end tests running, but do not rely 
 - Clipboard History, cloud clipboard exclusion, timing, and preservation of newer clipboard content.
 - Screen-capture behavior across Windows capture and conferencing tools.
 - Real LAN discovery, firewall profiles, IP changes, pairing verification, revocation, and two-PC convergence.
-- Real Local AI model download, startup, resource use, latency, offline inference, and suggestion quality.
+- Real two-device automatic sync through a home router, including a PC with WSL or Hyper-V virtual network adapters.
 - Actual file chooser, path permissions, disk-full behavior, encrypted backup inspection, and restore recovery.
 - Keyboard, Narrator, high contrast, DPI scaling, multi-monitor behavior, and visual quality.
