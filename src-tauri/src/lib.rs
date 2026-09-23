@@ -47,6 +47,10 @@ pub fn run() {
             capture_protection::apply(&handle);
             window_chrome::apply(&handle);
             autolock::watch_session_lock(handle.clone());
+            // If local AI is already enabled in Settings, start its worker now
+            // so it is running when the app opens. Best-effort and silent --
+            // see `ai::autostart`; never blocks the window from appearing.
+            ai::autostart(handle.clone());
             autolock::spawn(handle);
             Ok(())
         })

@@ -45,6 +45,12 @@ export interface Secret {
   value: string;
   /** Set when a record could not be decrypted, so the row can be flagged rather than silently omitted. */
   damaged?: boolean;
+  /**
+   * When this credential expires, as Unix milliseconds, or `null`/absent when
+   * it does not. Populated from the summary, so it is present on listed rows
+   * (unlike `value`) -- an expiry is metadata a list is meant to surface.
+   */
+  expiresMs?: number | null;
 }
 
 export interface Project {

@@ -6,4 +6,9 @@ import type { SecretPayload } from "./SecretPayload";
  * What a caller supplies to create a record. Timestamps and id are assigned
  * by the vault, never by the caller.
  */
-export type NewSecret = { name: string, project: string, environment: RustEnvironment, payload: SecretPayload, notes?: string | null, tags: Array<string>, provider?: string | null, };
+export type NewSecret = { name: string, project: string, environment: RustEnvironment, payload: SecretPayload, notes?: string | null, tags: Array<string>, provider?: string | null, 
+/**
+ * Optional expiry (Unix milliseconds); see [`SecretRecord::expires_ms`].
+ * Omitted or `null` means the credential does not expire.
+ */
+expires_ms?: number | null, };

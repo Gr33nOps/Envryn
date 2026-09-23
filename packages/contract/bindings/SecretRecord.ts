@@ -16,4 +16,13 @@ created_ms: number, updated_ms: number,
 /**
  * Last rotation, for the review suggestions in specification section 26.
  */
-rotated_ms: number | null, };
+rotated_ms: number | null, 
+/**
+ * When this credential stops being valid, as Unix milliseconds. `None`
+ * means "does not expire". Set by the user for credentials that are known
+ * to lapse -- an API token that is only good for a fixed window (e.g. an
+ * IGDB app token, valid ~60 days), a password with a rotation deadline.
+ * `#[serde(default)]` keeps records written by older builds -- which have
+ * no such key in their sealed JSON -- readable as "does not expire".
+ */
+expires_ms: number | null, };

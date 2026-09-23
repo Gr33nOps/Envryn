@@ -266,6 +266,31 @@ impl Vault {
         Ok(self.state()?.index.len())
     }
 
+    /// Re-read the in-memory index from the store, replacing the cached copy.
+    ///
+    /// The index is loaded once at unlock and then served from memory (that is
+    /// what `list`/`reveal`/`search` read), so a write that reaches the
+    /// database through *another* connection is invisible until this refreshes
+    /// it. A sync session is exactly that case: `src-tauri/src/sync.rs` opens
+    /// its own `Store` handle and applies reconciled rows there, never through
+    /// this `Vault`. Without a reload afterwards, a device that just received
+    /// new or updated secrets over sync keeps showing its pre-sync list until
+    /// it is relocked or the app restarts -- the rows are in the database, but
+    /// this cached index still predates them. The store is WAL-mode, so this
+    /// connection sees the other connection's committed rows on the next read.
+    /// Requires the vault to be unlocked.
+    pub fn reload_index(&mut self) -> Result<()> {
+        self.state()?;
+        let index = {
+            let state = self.state.as_ref().ok_or(Error::Locked)?;
+            load_index(&self.store, &state.keys.record)?
+        };
+        if let Some(state) = self.state.as_mut() {
+            state.index = index;
+        }
+        Ok(())
+    }
+
     /// List explicitly created projects. Projects inferred from existing
     /// secret records are merged by the UI so older vaults need no migration.
     pub fn list_projects(&self) -> Result<Vec<VaultProject>> {
@@ -457,6 +482,7 @@ impl Vault {
             notes: record.notes,
             tags: record.tags,
             provider: record.provider,
+            expires_ms: record.expires_ms,
         })
     }
 
@@ -486,6 +512,7 @@ impl Vault {
             created_ms: now,
             updated_ms: now,
             rotated_ms: None,
+            expires_ms: input.expires_ms,
         };
 
         let hlc = self.tick_hlc()?;
@@ -567,6 +594,9 @@ impl Vault {
         }
         if let Some(provider) = update.provider {
             record.provider = provider;
+        }
+        if let Some(expires) = update.expires_ms {
+            record.expires_ms = expires;
         }
 
         let now = now_ms();
@@ -1065,5 +1095,6 @@ pub fn api_key(name: &str, project: &str, environment: Environment, value: &str)
         notes: None,
         tags: Vec::new(),
         provider: None,
+        expires_ms: None,
     }
 }

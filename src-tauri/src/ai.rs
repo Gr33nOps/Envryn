@@ -291,7 +291,17 @@ pub async fn ai_download_model(app: AppHandle) -> IpcResult<()> {
 /// "fetch something over the network" and "run the local model" as two
 /// separate, separately-confirmed actions.
 #[tauri::command]
-pub async fn ai_start(app: AppHandle, state: State<'_, AiState>) -> IpcResult<()> {
+pub async fn ai_start(app: AppHandle) -> IpcResult<()> {
+    spawn_engine(app).await
+}
+
+/// The shared worker-startup path behind both [`ai_start`] (the explicit
+/// Settings toggle) and [`autostart`] (launch time). Fetches `AiState` from
+/// the handle rather than taking a `State<'_, _>` so it is callable from a
+/// `'static` background task as well as an IPC command. Idempotent: a second
+/// call while a gateway already exists returns `Ok(())` without spawning a
+/// second worker.
+async fn spawn_engine(app: AppHandle) -> IpcResult<()> {
     require_enabled(&app)?;
     let dir = models_dir(&app)?;
     let files = model_download::already_verified(&QWEN2_5_1_5B_INSTRUCT, &dir)
@@ -299,6 +309,7 @@ pub async fn ai_start(app: AppHandle, state: State<'_, AiState>) -> IpcResult<()
     let worker_binary = worker_binary_path(&app)?;
 
     {
+        let state = app.state::<AiState>();
         let guard = state
             .gateway
             .lock()
@@ -324,12 +335,34 @@ pub async fn ai_start(app: AppHandle, state: State<'_, AiState>) -> IpcResult<()
     .map_err(|_| internal("AI worker startup task failed"))?
     .map_err(|_| internal("Could not start the local AI model."))?;
 
+    let state = app.state::<AiState>();
     let mut guard = state
         .gateway
         .lock()
         .map_err(|_| internal("AI state unavailable"))?;
     *guard = Some(Arc::new(gateway));
     Ok(())
+}
+
+/// Start the worker at app launch when the user has already turned local AI on
+/// in Settings, so it is running when the app opens instead of needing the
+/// toggle pressed again each session.
+///
+/// **Best-effort and silent by construction.** AI is optional and off the path
+/// of every vault operation (AI-INV-009), so a launch-time start that cannot
+/// proceed -- AI disabled, the model not downloaded yet, the worker binary not
+/// packaged with this build, or a spawn failure -- must never surface an error,
+/// block, or delay the window appearing. It returns immediately, doing the work
+/// on a background task; the Settings screen stays the place to see status and
+/// start it by hand. On Android [`require_enabled`] is always an error, so this
+/// is a no-op there.
+pub fn autostart(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        if require_enabled(&app).is_err() {
+            return;
+        }
+        let _ = spawn_engine(app).await;
+    });
 }
 
 /// Stop the worker, if running. Infallible from the caller's point of view,

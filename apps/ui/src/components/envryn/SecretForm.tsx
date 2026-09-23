@@ -7,7 +7,9 @@ import { secretTypes, typeFields, type Environment, type Secret } from "@/lib/en
 import { useCreateSecret, useProjects, useUpdateSecret } from "@/lib/use-vault";
 import {
   buildSecretPayload,
+  dateInputToMs,
   KIND_TO_TYPE,
+  msToDateInput,
   payloadEditableFields,
   payloadPrimaryValue,
   tauriVaultRepository,
@@ -102,6 +104,7 @@ export function SecretFormModal({
   const [value, setValue] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [tags, setTags] = React.useState("");
+  const [expiresDate, setExpiresDate] = React.useState("");
   const [provider, setProvider] = React.useState("");
   const [fields, setFields] = React.useState<Record<string, string>>({});
   const [customFields, setCustomFields] = React.useState<{ label: string; value: string }[]>([]);
@@ -132,6 +135,13 @@ export function SecretFormModal({
     setNotes(secret?.notes ?? "");
     setTags((secret?.tags ?? []).join(", "));
     setProvider(secret?.provider ?? "");
+    setExpiresDate(
+      secret?.expiresMs != null
+        ? msToDateInput(secret.expiresMs)
+        : preset?.expiresMs != null
+          ? msToDateInput(preset.expiresMs)
+          : "",
+    );
     setFields({});
     setCustomFields(
       secret?.type === "Custom" || preset?.type === "Custom" ? [{ label: "", value: "" }] : [],
@@ -155,6 +165,7 @@ export function SecretFormModal({
         setNotes(record.notes ?? "");
         setTags(record.tags.filter((tag) => tag.toLowerCase() !== "imported").join(", "));
         setProvider(record.provider ?? "");
+        setExpiresDate(record.expires_ms != null ? msToDateInput(record.expires_ms) : "");
         setFields(payloadEditableFields(record.payload));
         setCustomFields(record.payload.kind === "Custom" ? record.payload.fields : []);
         setExistingPayload(record.payload);
@@ -269,6 +280,10 @@ export function SecretFormModal({
       .map((t) => t.trim())
       .filter(Boolean);
 
+    // Empty field -> null, which clears any existing expiry on edit and stores
+    // "does not expire" on create.
+    const expiresMs = expiresDate ? dateInputToMs(expiresDate) : null;
+
     setSaving(true);
     try {
       const storedValue = value || (existingPayload ? payloadPrimaryValue(existingPayload) : "");
@@ -295,6 +310,7 @@ export function SecretFormModal({
             tags: parsedTags,
             provider,
             payload,
+            expiresMs,
             // Only send a value when the user actually typed one, so leaving
             // the field blank means "keep the existing secret" rather than
             // silently overwriting it with an empty string.
@@ -312,6 +328,7 @@ export function SecretFormModal({
           tags: parsedTags,
           provider,
           payload,
+          expiresMs,
         });
       }
       // Drop the plaintext from component state as soon as it is stored.
@@ -568,6 +585,29 @@ export function SecretFormModal({
             />
           </Field>
         </div>
+
+        <Field
+          label="Expires"
+          hint="Optional. For keys that lapse -- an IGDB token (~60 days), a rotated password. We'll flag it as the date nears."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="date"
+              value={expiresDate}
+              onChange={(event) => setExpiresDate(event.target.value)}
+              className="max-w-[190px]"
+            />
+            {expiresDate && (
+              <button
+                type="button"
+                onClick={() => setExpiresDate("")}
+                className="text-[11px] text-primary hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </Field>
       </div>
     </Modal>
   );

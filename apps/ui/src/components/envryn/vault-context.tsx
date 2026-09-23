@@ -1,5 +1,11 @@
 import * as React from "react";
-import type { Secret } from "@/lib/envryn-data";
+import type { Environment, Secret } from "@/lib/envryn-data";
+
+/** Prefill for the .env import modal when opened from a project context. */
+export interface ImportPreset {
+  project?: string;
+  environment?: Environment;
+}
 
 interface VaultUI {
   selected: Secret | null;
@@ -7,7 +13,7 @@ interface VaultUI {
   openAdd: (preset?: Partial<Secret>) => void;
   openEdit: (s: Secret) => void;
   openSearch: () => void;
-  openImport: () => void;
+  openImport: (preset?: ImportPreset) => void;
   openExtract: () => void;
 }
 

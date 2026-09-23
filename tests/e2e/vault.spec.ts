@@ -645,7 +645,7 @@ test("persists desktop settings and exercises Windows unlock, local AI, and pass
   await createDisposableVault(page);
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
-  await expect(page.getByText("Version 0.1.9")).toBeVisible();
+  await expect(page.getByText("Version 0.1.10")).toBeVisible();
 
   await page.getByLabel("Auto-lock the vault").selectOption("15");
   await page.getByLabel("Clear clipboard after copying").selectOption("60");
@@ -1120,6 +1120,16 @@ test("keeps 1,000 desktop records and 50 projects searchable and usable", async 
   test.skip(testInfo.project.name !== "desktop-chromium", "Windows desktop flow");
   test.setTimeout(60_000);
   const isolatedPerformanceRun = testInfo.config.workers === 1;
+  // GitHub-hosted runners render this 1,000-row list about 3x slower than a
+  // developer workstation (measured ~1.45 s locally vs 4.1-5+ s on CI, on main
+  // and on unrelated Dependabot PRs alike), so the fixed 4 s budget failed CI
+  // regardless of the change under test. Local runs keep the strict budgets;
+  // CI gets proportional headroom and still catches order-of-magnitude
+  // regressions such as an accidental O(n^2) render.
+  const onCi = Boolean(process.env["CI"]);
+  const listBudgetMs = isolatedPerformanceRun ? 3_000 : onCi ? 10_000 : 4_000;
+  const searchBudgetMs = isolatedPerformanceRun ? 300 : onCi ? 1_500 : 500;
+  const projectBudgetMs = onCi ? 3_000 : 1_000;
   await page.goto("/");
   await page.evaluate(() => {
     const state = (
@@ -1146,13 +1156,15 @@ test("keeps 1,000 desktop records and 50 projects searchable and usable", async 
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   });
   await page.getByRole("button", { name: "Create vault" }).click();
-  await expect(page.getByRole("button", { name: "Open PERF_SECRET_0999 details" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open PERF_SECRET_0999 details" })).toBeVisible({
+    timeout: listBudgetMs + 5_000,
+  });
   const listReadyMs = await page.evaluate(
     () =>
       (window as unknown as { __ENVRYN_LIST_READY_MS__: number | null }).__ENVRYN_LIST_READY_MS__ ??
       Number.POSITIVE_INFINITY,
   );
-  expect(listReadyMs).toBeLessThan(isolatedPerformanceRun ? 3_000 : 4_000);
+  expect(listReadyMs).toBeLessThan(listBudgetMs);
   await expect(page.getByRole("button", { name: /^Open PERF_SECRET_/ })).toHaveCount(1_000);
 
   await page.keyboard.press("Control+k");
@@ -1182,16 +1194,18 @@ test("keeps 1,000 desktop records and 50 projects searchable and usable", async 
       (window as unknown as { __ENVRYN_SEARCH_READY_MS__: number | null })
         .__ENVRYN_SEARCH_READY_MS__ ?? Number.POSITIVE_INFINITY,
   );
-  expect(searchReadyMs).toBeLessThan(isolatedPerformanceRun ? 300 : 500);
+  expect(searchReadyMs).toBeLessThan(searchBudgetMs);
   await page.keyboard.press("Escape");
 
   await page.getByRole("link", { name: /^Projects/ }).click();
   await expect(page.getByText("Project 27", { exact: true })).toBeVisible();
   const projectStarted = Date.now();
   await page.getByText("Project 27", { exact: true }).click();
-  await expect(page.getByRole("button", { name: "Open PERF_SECRET_0777 details" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open PERF_SECRET_0777 details" })).toBeVisible({
+    timeout: projectBudgetMs + 5_000,
+  });
   const projectReadyMs = Date.now() - projectStarted;
-  expect(projectReadyMs).toBeLessThan(1_000);
+  expect(projectReadyMs).toBeLessThan(projectBudgetMs);
   testInfo.annotations.push({
     type: "performance",
     description: JSON.stringify({ listReadyMs, searchReadyMs, projectReadyMs }),

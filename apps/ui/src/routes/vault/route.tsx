@@ -1,5 +1,6 @@
 import * as React from "react";
 import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
@@ -11,7 +12,7 @@ import { EnvImportModal } from "@/components/envryn/EnvImportModal";
 import { StructuredExtractModal } from "@/components/envryn/StructuredExtractModal";
 import { MobileNavigation } from "@/components/envryn/MobileNavigation";
 import { Wordmark } from "@/components/envryn/Logo";
-import { VaultUIContext } from "@/components/envryn/vault-context";
+import { VaultUIContext, type ImportPreset } from "@/components/envryn/vault-context";
 import { type Secret } from "@/lib/envryn-data";
 import { useClearVaultCache, useRevealSecret, useSecretList } from "@/lib/use-vault";
 import { copyValue, forgetClipboardTimer } from "@/lib/vault-actions";
@@ -50,6 +51,7 @@ function VaultLayout() {
   const [preset, setPreset] = React.useState<Partial<Secret> | undefined>();
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [importOpen, setImportOpen] = React.useState(false);
+  const [importPreset, setImportPreset] = React.useState<ImportPreset | undefined>();
   const [extractOpen, setExtractOpen] = React.useState(false);
 
   // Mutations refresh the list with new objects. Keep an already-open details
@@ -64,6 +66,25 @@ function VaultLayout() {
 
   const clearVaultCache = useClearVaultCache();
   const revealSecret = useRevealSecret();
+  const queryClient = useQueryClient();
+
+  // A sync (either a manual "Sync now" or an inbound push from a paired
+  // device) applies records to the database underneath the cached lists. The
+  // backend emits this once records actually changed; refetch so the new or
+  // updated secrets appear immediately instead of after a relock/restart --
+  // this is the other half of the fix for "sync says done but the list is
+  // still old" (see src-tauri/src/sync.rs and Vault::reload_index).
+  React.useEffect(() => {
+    const unlisten = listen("vault://records-changed", () => {
+      void queryClient.invalidateQueries({ queryKey: ["secrets"] });
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+      void queryClient.invalidateQueries({ queryKey: ["devices"] });
+      toast("Vault updated from another device");
+    }).catch(() => undefined);
+    return () => {
+      void unlisten.then((fn) => fn?.());
+    };
+  }, [queryClient]);
 
   // Stay reachable for the whole unlocked vault session. Previously the
   // listener and mDNS advertisement existed only while the Sync page was
@@ -174,7 +195,10 @@ function VaultLayout() {
         setFormOpen(true);
       },
       openSearch: () => setSearchOpen(true),
-      openImport: () => setImportOpen(true),
+      openImport: (preset?: ImportPreset) => {
+        setImportPreset(preset);
+        setImportOpen(true);
+      },
       openExtract: () => setExtractOpen(true),
     }),
     [selected],
@@ -238,7 +262,7 @@ function VaultLayout() {
         preset={preset}
       />
       <SearchPalette open={searchOpen} onOpenChange={setSearchOpen} onSelect={setSelected} />
-      <EnvImportModal open={importOpen} onOpenChange={setImportOpen} />
+      <EnvImportModal open={importOpen} onOpenChange={setImportOpen} preset={importPreset} />
       <StructuredExtractModal open={extractOpen} onOpenChange={setExtractOpen} />
     </VaultUIContext.Provider>
   );

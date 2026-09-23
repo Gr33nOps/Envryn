@@ -1,0 +1,87 @@
+name: Android release build
+
+# Builds the universal Android APK (all four ABIs) on a GitHub-hosted Linux
+# runner and uploads it UNSIGNED as a workflow artifact. Signing stays on the
+# maintainer's machine (`.dev-tools/sign-apk.mjs`), so the irreplaceable
+# release keystore never leaves it -- the same split release.yml keeps for
+# Windows, where publishing a GitHub Release is a separate, deliberate step.
+#
+# Why a hosted Linux runner: `cargo tauri android build` symlinks the compiled
+# native libraries into jniLibs/, which on Windows needs Developer Mode or an
+# elevated shell. Linux has no such restriction.
+#
+# `src-tauri/gen/android/` is generated and gitignored. `tauri android init`
+# recreates it here, and the build's own scripts (sync-android-icons.mjs,
+# patch-android-mdns.mjs) apply the same launcher icons, multicast lock,
+# FLAG_SECURE, backup opt-out, and API 29 minimum every local build gets.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: ["release/android-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build universal Android APK (unsigned)
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Four release builds of the candle/tauri dependency graph need more
+      # room than the default image leaves free.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Use the runner's JDK 17 and Android NDK
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+
+      - name: Install pinned Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
+      - name: Generate the Android project
+        run: cargo tauri android init --ci
+
+      # The AI worker is a Windows-only externalBin (tauri.windows.conf.json),
+      # so the Android build skips building it. Everything else in
+      # build:native-ui -- icons, Android hardening, the UI -- still runs.
+      - name: Build the universal APK
+        run: >-
+          cargo tauri android build --apk --ci
+          --config '{"build":{"beforeBuildCommand":"npm run sync:android-icons && npm run patch:android-mdns && npm run build --workspace @envryn/ui"}}'
+
+      - name: Checksum
+        run: |
+          apk=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          ls -l "$apk"
+          sha256sum "$apk" | tee apk-unsigned.sha256
+
+      - name: Upload the unsigned APK as a workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: envryn-android-apk-unsigned
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+            apk-unsigned.sha256
+          retention-days: 14
+          if-no-files-found: error

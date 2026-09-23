@@ -231,6 +231,7 @@ fn nothing_readable_is_written_to_disk() {
                 notes: Some("DISTINCTIVE_NOTE_BODY".into()),
                 tags: vec!["DISTINCTIVE_TAG".into()],
                 provider: Some("OpenAI".into()),
+                expires_ms: None,
             })
             .unwrap();
         vault.lock();
@@ -435,6 +436,7 @@ fn search_matches_metadata_but_never_values() {
             notes: None,
             tags: vec!["deployment".into()],
             provider: Some("GitHub".into()),
+            expires_ms: None,
         })
         .unwrap();
 
@@ -468,6 +470,7 @@ fn multi_field_payloads_round_trip() {
             notes: None,
             tags: vec![],
             provider: None,
+            expires_ms: None,
         })
         .unwrap()
         .id;
@@ -750,6 +753,7 @@ fn a_canary_secret_never_appears_in_plaintext_in_a_backup_file() {
             notes: Some(canary.clone()),
             tags: vec![canary.clone()],
             provider: None,
+            expires_ms: None,
         })
         .unwrap();
 
@@ -825,6 +829,39 @@ fn successive_writes_advance_the_clock() {
         (wall_b, counter_b) > (wall_a, counter_a),
         "second write's HLC must be strictly newer than the first"
     );
+}
+
+// --- Reload after another connection writes (the sync-refresh path) ---------
+
+/// A sync session applies reconciled rows through a *separate* `Store`
+/// connection to the same database file, not through the unlocked `Vault`.
+/// The vault serves `list` from an in-memory index loaded at unlock, so those
+/// rows stay invisible until `reload_index` re-reads the store -- which is
+/// what `src-tauri/src/sync.rs` now calls after a sync applies anything. This
+/// reproduces the bug (list unchanged after another connection writes) and
+/// confirms the reload fixes it. Two `Vault` handles on one file stand in for
+/// the two connections a real sync uses.
+#[test]
+fn reload_index_surfaces_writes_from_another_connection() {
+    let t = temp();
+    let mut a = Vault::create(&t.path, &pw("master-password"), FAST).unwrap();
+    a.create_secret(api_key("FIRST", "P", Environment::Development, "v1"))
+        .unwrap();
+
+    let mut b = Vault::open(&t.path).unwrap();
+    b.unlock(&pw("master-password")).unwrap();
+    b.create_secret(api_key("SECOND", "P", Environment::Development, "v2"))
+        .unwrap();
+
+    // Before reloading, A still serves its pre-existing cached index -- this
+    // is exactly the stale-list symptom a synced device showed.
+    assert_eq!(a.list().unwrap().len(), 1, "A should not see B's write yet");
+
+    a.reload_index().unwrap();
+
+    let names: Vec<String> = a.list().unwrap().into_iter().map(|s| s.name).collect();
+    assert_eq!(a.list().unwrap().len(), 2, "reload must surface B's write");
+    assert!(names.contains(&"SECOND".to_string()));
 }
 
 // --- Projects ---------------------------------------------------------------

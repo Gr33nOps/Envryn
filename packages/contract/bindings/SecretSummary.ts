@@ -10,4 +10,9 @@ import type { SecretKind } from "./SecretKind";
  * it. `has_notes` is a flag rather than the note text for the same reason --
  * a note can contain a credential (specification section 32).
  */
-export type SecretSummary = { id: SecretId, name: string, kind: SecretKind, project: string, environment: RustEnvironment, provider: string | null, tags: Array<string>, has_notes: boolean, created_ms: number, updated_ms: number, rotated_ms: number | null, };
+export type SecretSummary = { id: SecretId, name: string, kind: SecretKind, project: string, environment: RustEnvironment, provider: string | null, tags: Array<string>, has_notes: boolean, created_ms: number, updated_ms: number, rotated_ms: number | null, 
+/**
+ * See [`SecretRecord::expires_ms`]. Carried on the summary so a list can
+ * flag expiring or expired credentials without revealing their values.
+ */
+expires_ms: number | null, };

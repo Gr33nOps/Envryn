@@ -91,8 +91,15 @@ function Sync() {
     }
   }, []);
 
+  // Keep the "Online / Offline" indicator live: re-browse the LAN on a short
+  // interval while this page is open, so a paired device that comes online (or
+  // drops off) is reflected without the user having to press Sync first. The
+  // browse itself is bounded (DISCOVERY_BROWSE_TIMEOUT on the Rust side), so
+  // the interval is spaced to not overlap its own previous run.
   React.useEffect(() => {
     void refreshPeers();
+    const id = window.setInterval(() => void refreshPeers(), 6000);
+    return () => window.clearInterval(id);
   }, [refreshPeers]);
 
   function peerFor(deviceId: string) {

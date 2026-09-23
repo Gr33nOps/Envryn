@@ -264,7 +264,56 @@ function toSecret(summary: ipc.SecretSummary): Secret {
     tags: summary.tags.filter((tag) => tag.toLowerCase() !== "imported"),
     ...(summary.provider ? { provider: summary.provider } : {}),
     value: "",
+    expiresMs: summary.expires_ms,
   };
+}
+
+// --- Expiry helpers ---------------------------------------------------------
+// Expiry is stored as Unix milliseconds. The UI collects a calendar day and
+// treats the credential as valid through the end of that local day, so a
+// secret marked to expire "today" is not already flagged expired at midnight.
+
+/** `YYYY-MM-DD` (local) -> end-of-day Unix ms, or `null` for an empty input. */
+export function dateInputToMs(value: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const ms = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** Unix ms -> `YYYY-MM-DD` (local), for populating a date input. */
+export function msToDateInput(ms: number): string {
+  const date = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+export type ExpiryTone = "expired" | "soon" | "ok";
+
+export interface ExpiryInfo {
+  /** Short human label, e.g. "Expired", "Expires today", "Expires in 5 days". */
+  label: string;
+  /** Full calendar date, e.g. "March 3, 2026". */
+  date: string;
+  tone: ExpiryTone;
+  /** Whole days until expiry; negative once past. */
+  days: number;
+}
+
+/** Describe an expiry timestamp for display, or `null` when there is none. */
+export function expiryInfo(ms: number | null | undefined): ExpiryInfo | null {
+  if (ms == null) return null;
+  const date = ABSOLUTE.format(new Date(ms));
+  const days = Math.ceil((ms - Date.now()) / 86_400_000);
+  if (days < 0) return { label: "Expired", date, tone: "expired", days };
+  if (days === 0) return { label: "Expires today", date, tone: "soon", days };
+  if (days <= 14) {
+    return { label: `Expires in ${days} day${days === 1 ? "" : "s"}`, date, tone: "soon", days };
+  }
+  return { label: `Expires ${date}`, date, tone: "ok", days };
 }
 
 /**
@@ -375,6 +424,7 @@ export const tauriVaultRepository: VaultRepository = {
       notes: input.notes ?? null,
       tags: input.tags ?? [],
       provider: input.provider?.trim() || null,
+      expires_ms: input.expiresMs ?? null,
     });
     return toSecret(summary);
   },
@@ -400,6 +450,9 @@ export const tauriVaultRepository: VaultRepository = {
     if (input.notes !== undefined) update.notes = input.notes;
     if (input.tags !== undefined) update.tags = input.tags;
     if (input.provider !== undefined) update.provider = input.provider.trim() || null;
+    // `null` clears the expiry, a number sets it, `undefined` leaves it alone --
+    // matching SecretUpdate.expires_ms's Some(None)/Some(Some)/None semantics.
+    if (input.expiresMs !== undefined) update.expires_ms = input.expiresMs;
 
     return toSecret(await ipc.secretUpdate(id, update));
   },
