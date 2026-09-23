@@ -42,9 +42,12 @@ jobs:
           # checkout cannot provide.
           fetch-depth: 0
 
-      # The GitHub App decorates commits from the repository-bound project.
-      # Print only actionable issue metadata (never the token) so a private
-      # SonarCloud project can still be diagnosed from its Actions run.
+      # Lists open security issues on main for the same project the scan
+      # below publishes to (sonar.projectKey in sonar-project.properties --
+      # keep the two in sync; the pre-rename key silently reported 0).
+      # This reflects the previous analysis, not this run's. Print only
+      # actionable issue metadata (never the token) so a private SonarCloud
+      # project can still be diagnosed from its Actions run.
       - name: Inspect repository-bound SonarCloud security issues
         shell: pwsh
         env:
@@ -56,7 +59,7 @@ jobs:
           )
           $headers = @{ Authorization = "Basic $credential" }
           $params = @{
-            componentKeys = "Gr33nOps_local-vault-for-devs"
+            componentKeys = "Gr33nOps_Envryn"
             branch = "main"
             resolved = "false"
             impactSoftwareQualities = "SECURITY"
