@@ -23,10 +23,9 @@ export const AUTO_SYNC_INTERVAL_MS = 30_000;
 export function syncResultMessage(sent: number, received: number): string {
   const plural = (n: number) => `${n} secret${n === 1 ? "" : "s"}`;
   if (sent === 0 && received === 0) return "Everything is already up to date";
-  if (sent > 0 && received > 0)
-    return `Synced — sent ${plural(sent)}, received ${plural(received)}`;
-  if (sent > 0) return `Synced — sent ${plural(sent)}`;
-  return `Synced — received ${plural(received)}`;
+  if (sent > 0 && received > 0) return `Sent ${plural(sent)}, received ${plural(received)}`;
+  if (sent > 0) return `Sent ${plural(sent)}`;
+  return `Received ${plural(received)}`;
 }
 
 /**
