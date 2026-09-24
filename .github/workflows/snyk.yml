@@ -43,10 +43,25 @@ jobs:
         with:
           snyk-version: v1.1307.0
 
+      # A token copied from the Snyk website can carry an invisible character
+      # (a zero-width space or a trailing carriage return). Go's HTTP client
+      # then rejects the Authorization header ("invalid header field value"),
+      # which the CLI reports as a misleading network error. Each step that
+      # talks to Snyk therefore keeps only the characters a Snyk token can
+      # contain before using it. The cleaned value never leaves the step.
       - name: Verify Snyk authentication
         env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk whoami
+          SNYK_TOKEN_RAW: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          export SNYK_TOKEN="$(printf '%s' "$SNYK_TOKEN_RAW" | LC_ALL=C tr -cd 'A-Za-z0-9._-')"
+          if [[ -z "$SNYK_TOKEN" ]]; then
+            echo "::error::The SNYK_TOKEN repository secret is empty."
+            exit 1
+          fi
+          if [[ "$SNYK_TOKEN" != "$SNYK_TOKEN_RAW" ]]; then
+            echo "::warning::SNYK_TOKEN contains characters a Snyk token cannot have; they are ignored. Re-save the secret to clear this warning."
+          fi
+          snyk whoami
 
       - name: Prepare SARIF output
         run: mkdir -p snyk-results
@@ -55,8 +70,9 @@ jobs:
         id: open_source
         continue-on-error: true
         env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_TOKEN_RAW: ${{ secrets.SNYK_TOKEN }}
         run: |
+          export SNYK_TOKEN="$(printf '%s' "$SNYK_TOKEN_RAW" | LC_ALL=C tr -cd 'A-Za-z0-9._-')"
           for attempt in 1 2 3; do
             snyk test \
               --file=package-lock.json \
@@ -74,8 +90,9 @@ jobs:
         id: code
         continue-on-error: true
         env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_TOKEN_RAW: ${{ secrets.SNYK_TOKEN }}
         run: |
+          export SNYK_TOKEN="$(printf '%s' "$SNYK_TOKEN_RAW" | LC_ALL=C tr -cd 'A-Za-z0-9._-')"
           for attempt in 1 2 3; do
             snyk code test \
               --severity-threshold=high \
