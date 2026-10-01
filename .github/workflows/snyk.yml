@@ -39,7 +39,7 @@ jobs:
       - run: npm ci --ignore-scripts
 
       - name: Install pinned Snyk CLI
-        uses: snyk/actions/setup@12140f4059e244892ae643824a95459a102120dd # master, 2026-08-03
+        uses: snyk/actions/setup@b075801f26076be9bb50521154cafab73f44da0c # master, 2026-08-03
         with:
           snyk-version: v1.1307.0
 
